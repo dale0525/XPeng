@@ -373,9 +373,11 @@ base64 解码后 1075 B：
 
 **已排除 `ID_NOT_MATCHED`**：全量搜 App 数据目录，`captchaId=` 只出现过 `f6c14777879d4a75b683b29be6709db6` 一个值，与本地页面用的相同。
 
-#### 决定性实测：`validate` 根本没被读取
+#### 根因：票据发错了端点（2026-10-31 已解决）
 
-在 `apps.xiaopeng.com` 上，只要 `mobile` + `smsType` 齐全，`validate` 取任何值结果都一样：
+长期卡在 `12040106` 的真正原因不是票据无效，也不是字段名写错，而是**票据被发给了不读它的端点**。
+
+在 `apps.xiaopeng.com` 的 `sms/code` 上，只要 `mobile` + `smsType` 齐全，`validate` 取任何值结果都一样：
 
 | `validate` 取值 | 长度 | 返回 |
 | --- | --- | --- |
@@ -384,18 +386,52 @@ base64 解码后 1075 B：
 | 真人拖出的真票据 | 531 | `12040106` |
 | 5000 字符垃圾 | 5000 | `12040106` |
 
-而 body 本身是被解析的——乱码 body 报 `12051101 smsType不能为空`，只带 `validate` 报 `12051101 mobile不能为空`。**所以服务端读 body，但不读 `validate`**。
+body 本身是被解析的——乱码 body 报 `12051101 smsType不能为空`，只带 `validate` 报 `12051101 mobile不能为空`。所以服务端读 body，**但 `sms/code` 这个端点根本不看 `validate` 字段**。
 
-同一现象在 `drag/validate` 上复现：真票据与垃圾票据都是 `12051100 操作失败`。
+#### App 的真实报文（堆快照取证）
 
-**已排除的其他可能**：补 `Xp-SDK`/`Xp-DEPENDENCE`/`Xp-Ptoken`/`Xp-PtokenType` 四个缺失头无效；xid 放 Cookie 而非请求头会退回 `12040101`（请求头才是正确方式）；同一会话内连续三次请求状态不推进；`smsType` 1~199 扫描发现 58 个走滑块分支、141 个返回 `12051401 短信发送失败`（连 `abc`/`1` 这种非法号码同样报错，说明是未知场景兜底，无发送逻辑）。
+用 `am dumpheap` 抓 App 拖完滑块后的堆，直接读到它构造的两个 body：
+
+```
+POST https://apps-uc.xiaopeng.com/verification/app/v3/drag/validate
+{"sceneType":"SMS","mobile":"…","captchaId":"f6c14777…","validate":"CN31_…"}
+
+POST https://apps-uc.xiaopeng.com/verification/app/v5/sms/code
+{"mobile":"…","smsType":"11"}
+```
+
+三处关键差异，全是此前没猜到的：
+
+1. **票据走 `drag/validate`，不走 `sms/code`**。后者 body 里没有 `validate` 字段。
+2. **滑块场景的字段是 `sceneType:"SMS"`**（字符串枚举），不是 `smsType:"11"`。`smsType` 只属于发码接口。
+3. **必须带 `captchaId`**，服务端靠它定位是哪个验证码实例。值 `f6c14777…` 来自 App 运行时内存里的 `NetEaseCaptchaId`，与 H5 页面用的是同一个。
+
+`drag/validate` 成功返回 `{"code":200,"data":{"valid":true}}`；票据无效时是同一个 code 但 `valid:false`——**200 只代表请求成功，判定看 `data.valid`**。这一点曾误导过一次：`code:200` 被当成"通过"。
+
+#### 正确链路（已实现于 `scripts/login.py:send_code`）
+
+1. 建会话：不带票据调 `sms/code`，预期 `12040101`，响应下发 `XP-Xid` cookie。
+2. 校验滑块：`drag/validate` 带票据，`data.valid` 为 true 才继续。
+3. 发码：同一会话（`Xp-Xid` 请求头）再调 `sms/code`，返回 `200`。
+
+实测：新票据 → `valid:true` → `sms/code` 返回 `200`，短信真实下发。
+
+**票据一次性**：`drag/validate` 成功即消费，重复提交返回 `valid:false`。所以调试时每张票据只能测一次，这也解释了为什么"同一张票据反复试"永远失败。
+
+#### 此前误判的排查记录（供参考）
+
+- 补 `Xp-SDK`/`Xp-DEPENDENCE`/`Xp-Ptoken`/`Xp-PtokenType` 四个头无效。
+- xid 放 Cookie 而非请求头会退回 `12040101`（请求头才是正确方式）。
+- `smsType` 1~199 扫描：58 个走滑块分支、141 个返回 `12051401 短信发送失败`（连 `abc` 这种非法号码同样报错，是未知场景兜底）。
+- `apps-uc` 必须 mTLS（`work/certs/client-cert-0.pem`），且需要完整 `Xp-Authorization` 信封，只用 `probe.signed()` 的外层签名会得到 `12110002`。
+- `ID_NOT_MATCHED` 已排除：全量搜 App 数据目录，`captchaId=` 只出现 `f6c14777…` 一个值。
 
 #### 社区与同类项目
 
-- 易盾二次校验必须用 `secretId`+`signature` 走服务端签名，**客户端无法自验票据真伪**，这也是本地无法判断票据是否有效的原因。
-- XPENG 海外版（`com.xiaopeng.globalcarinfo`）的 Homey 插件用户遇到同样报错「Please verify the slider verification code」，**其解法是用 Google 登录绕开短信滑块**——国内版没有 Google 登录，但「换登录方式绕开滑块」这条思路与我们的 `v5/login` 发现一致。
+- 易盾二次校验必须用 `secretId`+`signature` 走服务端签名，**客户端无法自验票据真伪**。所以本地判断票据是否有效只能靠小鹏的 `drag/validate`。
+- XPENG 海外版（`com.xiaopeng.globalcarinfo`）的 Homey 插件用户遇到同样报错「Please verify the slider verification code」，其解法是改用 Google 登录绕开短信滑块。国内版没有这个入口，但绕开滑块的思路与 `v5/login` 的发现方向一致。
 
-**当前可行的取 token 方式**：让官方 App 发码登录，再从模拟器取 token（`scripts/unseal-token.py --save`，内置 deviceId 同步）。自研侧独立发码尚未打通。
+**取 token 的现状**：自研侧已可独立发码（滑块由人在本地页面拖一次），后续 `sms/validate` → `smsLogin` 换 token 全程自动。
 
 ### 4.3 为什么 MITM 抓不到 `apps*.xiaopeng.com`
 

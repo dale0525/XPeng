@@ -174,11 +174,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({'ok': False, 'error': '没有拿到 validate'})
                 open('/tmp/last_validate.txt', 'w').write(v)
                 print(f'  收到票据 len={len(v)} 前缀={v[:20]}')
-                try:
-                    STATE['xid'] = lgn.send_code(STATE['mobile'], v)
-                except RuntimeError as e:
-                    return self._json({'ok': False, 'error': str(e)})
-                print(f'  发码成功  xid={STATE["xid"]}')
+                # 只保存票据，不在这里发码：票据要先交给 drag/validate 校验，
+                # 而 validate 只能用一次，发错端点就白白消费掉了。
                 return self._json({'ok': True})
 
             if self.path == '/api/code':

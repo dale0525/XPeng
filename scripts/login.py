@@ -47,6 +47,10 @@ UC = 'apps-uc.xiaopeng.com'
 
 SMS_TYPE = '11'  # 登录场景；服务端对 1/2/11/21/31 不校验取值，只要求非空
 
+# 易盾验证码 ID，来自 App 运行时内存里的 NetEaseCaptchaId（2026-10-31 取证）。
+# drag/validate 必须带上它，否则服务端无法定位是哪个验证码实例。
+CAPTCHA_ID = 'f6c14777879d4a75b683b29be6709db6'
+
 
 def _call(path, body, xid=None):
     """带双层签名的 POST，返回 (json, set_cookie 列表)。"""
@@ -85,16 +89,25 @@ def _xid_of(cookies):
 
 
 def send_code(mobile, validate=None):
-    """发短信，返回会话 xid。validate 为易盾票据时一并提交。
+    """发短信，返回会话 xid。validate 为易盾票据时先过滑块校验。
 
-    带票据时必须两步走：服务端只在**已有会话**的请求里才校验票据。首个请求
-    没有 ``XP-Xid``，无论票据真假一律 ``12040101 拖动滑块验证码``；先用一次
-    无票据请求拿到 xid（该响应照样下发 cookie），再带 xid + 票据重试。
+    三步走（2026-10-31 从 App 堆快照取证）：
+
+    1. 建会话：不带票据调 ``sms/code``，预期 ``12040101``，但响应会下发
+       ``XP-Xid`` cookie。
+    2. 校验滑块：``drag/validate``，body 是
+       ``{sceneType:"SMS", mobile, captchaId, validate}``。票据放这里，**不是**
+       放 ``sms/code``——后者根本不读 ``validate``，这正是长期卡在
+       ``12040106`` 的原因。返回 ``data.valid`` 为 true 才继续。
+    3. 发码：同一会话再调 ``sms/code``（body 只有 mobile + smsType）。
+
+    票据是一次性的：``drag/validate`` 成功即消费，重复提交必返回 false。
     """
     base = {'mobile': mobile, 'smsType': SMS_TYPE}
+    base_json = json.dumps(base)
 
     if not validate:
-        r, cookies = _call('/verification/app/v5/sms/code', json.dumps(base))
+        r, cookies = _call('/verification/app/v5/sms/code', base_json)
         if r.get('code') != 200:
             raise RuntimeError(f"发码失败: {r.get('code')} {r.get('desc') or r.get('msg')}")
         xid = _xid_of(cookies)
@@ -102,15 +115,30 @@ def send_code(mobile, validate=None):
             raise RuntimeError('发码成功但响应里没有 XP-Xid，无法继续')
         return xid
 
-    # 第一步：拿会话。预期 12040101（还没票据），但 cookie 会下发。
-    _, cookies = _call('/verification/app/v5/sms/code', json.dumps(base))
+    # 1. 建会话。预期 12040101（还没过滑块），但 cookie 会下发。
+    _, cookies = _call('/verification/app/v5/sms/code', base_json)
     xid = _xid_of(cookies)
     if not xid:
         raise RuntimeError('发码接口没有下发 XP-Xid，无法建立会话')
 
-    # 第二步：带票据 + 会话，服务端这才真正校验票据。
-    body = dict(base, validate=validate)
-    r, cookies2 = _call('/verification/app/v5/sms/code', json.dumps(body), xid=xid)
+    # 2. 校验滑块票据。票据只能成功一次，失败即无法重试。
+    drag_body = json.dumps({
+        'sceneType': 'SMS',
+        'mobile': mobile,
+        'captchaId': CAPTCHA_ID,
+        'validate': validate,
+    }, separators=(',', ':'))
+    r, _ = _call('/verification/app/v3/drag/validate', drag_body, xid=xid)
+    if r.get('code') != 200:
+        raise RuntimeError(
+            f"滑块校验请求失败: {r.get('code')} {r.get('desc') or r.get('msg')}")
+    if not (r.get('data') or {}).get('valid'):
+        raise RuntimeError(
+            '滑块票据未通过（validate 只能用一次：可能已被消费或已过期），'
+            '请重新拖一次滑块')
+
+    # 3. 同一会话发码。
+    r, cookies2 = _call('/verification/app/v5/sms/code', base_json, xid=xid)
     if r.get('code') != 200:
         raise RuntimeError(f"发码失败: {r.get('code')} {r.get('desc') or r.get('msg')}")
     return _xid_of(cookies2) or xid

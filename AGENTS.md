@@ -1,6 +1,6 @@
 # XPeng
 
-小鹏汽车 App 逆向取证与自研客户端。请求签名、mTLS、令牌续期、MQTT 车控均已闭环；登录链路已确认三步结构（发码 → `sms/validate` → `smsLogin`），发码那一步的易盾滑块需人工。
+小鹏汽车 App 逆向取证与自研客户端。请求签名、mTLS、令牌续期、MQTT 车控均已闭环；登录链路全自动（发码 → `sms/validate` → `smsLogin`），只有易盾滑块需人在本地页面拖一次（`scripts/login-ui.py`），票据由 `scripts/login.py:send_code` 提交给 `drag/validate`。
 
 ## 硬门禁
 
@@ -16,7 +16,8 @@
 ## 目录
 
 ```
-scripts/    可执行工具（probe.py 签名、selfclient.py 自研客户端、renew.py 续期、unseal-token.py 解封）
+scripts/    可执行工具（probe.py 签名、selfclient.py 自研客户端、renew.py 续期、unseal-token.py 解封、
+            login.py 登录链路、login-ui.py 滑块页面、check-ticket.py 验票、grab-ticket.py 从堆快照取票）
 docs/       研究与计划
 work/       APK、dump、live token（gitignore）
 ```
