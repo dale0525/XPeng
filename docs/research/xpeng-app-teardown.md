@@ -259,7 +259,9 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 | `XA` + 本地 Key7 | 垃圾串 | `12110005` | XA 路径会校验内层签名 |
 | `WEEB` + 本地 Key7 | 任意 | `12110009` | 与内层内容无关，解信封阶段失败 |
 
-实验 A 是关键：服务端用同一把密钥解开了我加密的数据，**证明 `XmartV1LocalKey7` 与服务端完全一致**，也证明 `XA` 是客户端→服务端的正确标记。
+实验 A 是关键：服务端用同一把密钥解开了我加密的数据，证明 `XA` 是客户端→服务端的正确标记。
+
+**注意这里的「本地 Key7」指的是当次从 `teeIndiv4App` 取回的池的第 7 槽，不是 `tee` 文件里的 `XmartV1LocalKey7`**（2026-11-01 澄清）。两者不是一回事：同一时刻对比可见 10 个槽全部不同，用 `tee` 文件里的密钥签名恒 `12110009`。上表三行的结论（XA 标记正确、内层签名会被校验、信封解不开是 `12110009`）不受影响。
 
 ### 3.2 WEEB 信封（服务端 → 客户端）
 
@@ -542,6 +544,10 @@ XA | ver | keyIndex@3 | … | iv@47..59 | ct@59..
 ```
 
 内层 JSON 的字段集合与 5.19.0 `token/refresh` 的返回一致，`accessToken` 再解一次才是 968 B JWT。
+
+**`token/refresh` 的返回同样只能用同次请求的池解开**（2026-11-01 实测）：refresh 返回的 `accessToken`（idx=7）与 `refreshToken`（idx=5）用**本次请求**的池能解出 968 B JWT，事后重新取一套池则 `InvalidTag`。所以 `renew.py` 必须把「请求所用的池」和响应一起带出来，不能事后再取。这与 `sData` 的规则是同一条。
+
+**`mqttAccount` 为空不影响 MQTT**（2026-11-01 实测）：它只是登录响应里附带的参考值，真正的 MQTT 凭据由独立接口 `POST /biz/v5/mqtt/createMqttAccount/app` 签发（§5.2），与 `sData` 里这个字段无关。用自研登录拿到的 token + `Xp-Uid` 调该接口返回 `200`，`clientId` 为 `xmart:app:10000000:00000000…`、`serverSsl` 为 `iot-app.xiaopeng.com:8883`。所以自研登录链路对 MQTT 车控同样可用，不需要额外补 `mqttAccount`。
 
 **解 `sData` 的密钥必须来自服务端当次下发的密钥池，不是本地 tee**（2026-11-01 实测，两次 `InvalidTag` 的根因）：
 
