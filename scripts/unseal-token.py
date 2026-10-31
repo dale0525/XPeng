@@ -16,6 +16,7 @@
 """
 import base64
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -40,6 +41,34 @@ def pull_tee():
     adb('pull', f'/data/data/{PKG}/files/mmkv/tee', TEE)
     if not os.path.exists(TEE):
         raise RuntimeError('拉取 tee 失败：检查 adb root 是否已获取')
+
+
+def sync_device_id():
+    """把 work/local.env 的 XP_DI 对齐到模拟器里 App 当前的 deviceId。
+
+    deviceId 存在 shared_prefs/device_id.xml.xml，App 每重装一次就换一个。
+    token 与该 deviceId 绑定：用旧 DI 签名，真 token 也会被拒（实测
+    `12010104 登录状态已过期`，而空 token 是 `12010103`——两者不同就说明
+    信封解开了、token 读到了，纯粹是身份对不上）。
+    """
+    out = adb('shell', f'cat /data/data/{PKG}/shared_prefs/device_id.xml.xml')
+    m = re.search(rb'name="device_id">([0-9a-f]{32})<', out.stdout)
+    if not m:
+        print('未找到 App 的 deviceId，跳过同步')
+        return None
+    di = m.group(1).decode()
+    env = os.path.join(ROOT, 'work/local.env')
+    if not os.path.exists(env):
+        print(f'没有 {env}，跳过同步')
+        return di
+    lines = open(env).read().splitlines()
+    old = next((l.split('=', 1)[1] for l in lines if l.startswith('XP_DI=')), None)
+    if old == di:
+        return di
+    lines = [f'XP_DI={di}' if l.startswith('XP_DI=') else l for l in lines]
+    open(env, 'w').write('\n'.join(lines) + '\n')
+    print(f'XP_DI 已更新: {old} → {di}')
+    return di
 
 
 def pull_keystore():
@@ -145,6 +174,7 @@ def main():
     save = '--save' in sys.argv
     pull_tee()
     pull_keystore()
+    sync_device_id()
 
     buf = open(TEE, 'rb').read()
     iv_b64 = mmkv_read(buf, b'XTeeSecurityIv')
