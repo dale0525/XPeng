@@ -29,10 +29,23 @@ import probe
 # 自研客户端的设备标识；持久化后服务端才会把它当固定设备
 DEVICE_SEED = 'xpeng-selfclient'
 
+# 强制指定 deviceId（None = 用 probe.DI，再退到 DEVICE_SEED 派生）。
+# 默认取 probe.DI 是为了让登录与业务请求用同一个身份：登录得到的 token 与
+# deviceId 绑定，两边身份不一致时业务侧会拒绝。
+DEVICE_ID_OVERRIDE = None
 
-def device_id(seed=DEVICE_SEED):
-    """稳定的 deviceId（32 hex）。换 seed 等于换一台设备。"""
-    return hashlib.md5(seed.encode()).hexdigest()
+
+def device_id(seed=None):
+    """当前使用的 deviceId（32 hex）。
+
+    优先级：``DEVICE_ID_OVERRIDE`` > ``probe.DI``（work/local.env 的 XP_DI，
+    即 App 真实设备）> ``seed``/``DEVICE_SEED`` 派生。
+    """
+    if DEVICE_ID_OVERRIDE:
+        return DEVICE_ID_OVERRIDE
+    if probe.DI:
+        return probe.DI
+    return hashlib.md5((seed or DEVICE_SEED).encode()).hexdigest()
 
 
 def _signed_post(path, di, body='{}'):
@@ -59,16 +72,23 @@ def keys(di=None):
     return pool
 
 
-def call(path, di=None, body='{}', token=None, idx=3):
+def call(path, di=None, body='{}', token=None, idx=3, uid=None):
     """用自研身份打一个业务接口。
 
     token 为 None 时只验签名（预期返回 12010103）。
+
+    ``uid`` 必须与 token 所属账号一致，否则带 token 也恒 ``12010101``
+    （2026-11-01 实测：同一 AT，``Xp-Uid`` 不设 → ``12010101``，
+    设成 ``10000000`` → ``200`` 并列出车辆）。``Xp-Uid`` 参与内层签名，
+    所以要在算 ``xpSign`` **之前**设好。
     """
     di = di or device_id()
     pool = keys(di)
     ts = int(time.time() * 1000)
     xp = probe.base_headers(ts)
     xp['Xp-Client'] = xp['Xp-Client'].replace(probe.DI, di)
+    if uid:
+        xp['Xp-Uid'] = str(uid)
     inner = hmac.new(
         probe.SECRET.encode(), probe.canon('POST', body, xp).encode(),
         hashlib.sha256).hexdigest()
