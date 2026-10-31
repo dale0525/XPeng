@@ -1,6 +1,6 @@
 # XPeng
 
-小鹏汽车 App 逆向取证与自研客户端。请求签名、mTLS、令牌续期、MQTT 车控均已闭环；登录链路中**发码已全自动**（易盾滑块由人在 `scripts/login-ui.py` 拖一次，票据提交给 `drag/validate`），`sms/validate` 可自动完成，但 **`smsLogin` 前还有第二道滑块未攻克**（详见研究文档 §4.2 末节）。第二道滑块未通时，取 token 走官方 App 登录后 `scripts/unseal-token.py`。
+小鹏汽车 App 逆向取证与自研客户端。请求签名、mTLS、令牌续期、MQTT 车控均已闭环；**登录链路 2026-11-01 端到端打通**（发码 → 验证码 → 第二道滑块 `drag/validate{sceneType:"LGN"}` → `smsLogin` 200 → 解开 `sData` 拿到 AT/RT），见研究文档 §4.2。三个必要条件：第二道滑块场景是 `LGN`（不是发码用的 `SMS`）、换 token 打 `v5/smsLogin`、解 `sData` 必须用**同一次请求的服务端密钥池**（该池每次请求都变，用本地 tee 或事后重取一律 `InvalidTag`）。换到的 token 打业务接口时**必须带 `Xp-Uid` = `sData.uid`**（在算 `xpSign` 之前设好），否则恒 `12010101`；设好即 `200` 并列出车辆。
 
 ## 硬门禁
 

@@ -24,7 +24,7 @@
 | 客户端证书 | ✅ 可提取，国内主机不要求 |
 | 钥匙物料链（tenant → 密钥池 → 本地密钥） | ✅ 闭环 |
 | `Xp-Authorization` 信封 | ✅ 闭环（分版本，见 §3.3） |
-| 登录 | ✅ 打通，但滑块需复用官方 |
+| 登录 | ✅ 端到端闭环：发码 → 验证码 → 第二道滑块(`LGN`) → `smsLogin` 200 → 解 `sData` 拿 AT/RT → 带 `Xp-Uid=<uid>` 打业务接口 **200**（§4.2） |
 | 令牌续期 | ✅ 闭环 |
 | MQTT 连接与凭据 | ✅ 闭环 |
 | 车控指令 | 🟡 13/15（解锁/锁车/闪灯/遮阳帘/空调开关/设温度/全车车窗/极速降温/极速升温/高温抑菌/鸣笛/哨兵开关/哨兵灵敏度） |
@@ -39,6 +39,26 @@
 
 - 加固商：网易易盾。5.19.0 壳版本 `7.6.0_744`，4.2.0 为 `7.4.7.15`（`com.netease.nis.wrapper.MyApplication.VER`）。
 - 5.19.0 的 `classes.dex`（120,255,620 B）头部声明 1547 个字符串、30 个类，全部是 `com.netease.nis.wrapper.*`；`file_size` 与整文件长度一致、adler32 校验和正确，即 **dex 头本身未被破坏**，但字节码被整体加密。
+- 5.19.0 额外带 `libNetHTProtect.so`（3771960 B）与 `libijiami_H5SDK.so`；**4.2.0 没有这两个库**，只有易盾的 `libnesec.so`/`assets/libnesec64`。两者加固层级不同，但 dex 都被加密到只剩 30 个壳类（4.2.0 的 dex 为 40,395,592 B，反编译同样只出 30 类）。
+
+### 1.1.1 4.2.0 与 5.19.0 的协议差异（2026-10-31 静态对比）
+
+两个版本的 dex 都能搜到 `LoginSmsPresenter`/`RiskService`/`LoginVerifyActivity`，但**协议层已经换代**：
+
+| 项 | 4.2.0（versionCode 8916） | 5.19.0（versionCode 10639） |
+| --- | --- | --- |
+| 登录端点 | 仅 `v3`：`/sso/app/v3/smsLogin`、`/verification/app/v3/sms/code`、`v3/sms/validate`、`v3/drag/validate` | `v5`：`/sso/app/v5/smsLogin`、`/verification/app/v5/sms/code` |
+| 主机 | 只有 `apps.xiaopeng.com` | 增加 `apps-uc.xiaopeng.com` |
+| 请求头前缀 | 大写 `XP-*`（`XP-Authorization`/`XP-Signature`/`XP-Ptoken`/`XP-Xid`…） | 混合 `Xp-*` |
+| `XP-PtokenType` | **不存在** | 存在 |
+| `sPtoken` 字符串 | **存在**（`PTokenManager` 内 `onResult code = %d, msg = %s, sPtoken = %s`） | **不存在** |
+| `1204xxxx` 错误码 | dex 里搜不到任何一条 | 搜不到（同样在加密区） |
+
+**关键差异**：4.2.0 的 Ptoken 获取逻辑是**明文 Java**（`com.xiaopeng.common.api.manager.PTokenManager`，带 `PTokenCallBack` 与 `sPtoken` 日志），而 5.19.0 把这段挪走了（只剩类名，没有 `sPtoken` 字符串）。**这是 4.2.0 真正的价值：Ptoken 的生成/获取路径可以直接读，不必脱壳。**
+
+4.2.0 里还有三个 5.19.0 从未出现的端点：`/sso/app/v3/authToken/code`、`/sso/app/v3/getWidgetToken`、`/sso/app/v3/token/conver`。实测 `authToken/code` 需登录态（`12010103`），登录前不可用。
+
+**v3 端点仍然在线**（2026-10-31 实测）：`v3/sms/code` 对假号返回 `12040101`（与 v5 一致），`v3/drag/validate` 返回 `200`。所以 4.2.0 的链路今天仍能打通到服务端——但 v3 与 v5 行为一致，**不能指望 v3 天然没有第二道滑块**。
 
 ### 1.2 静态分析为何不可行
 
@@ -285,7 +305,16 @@ base64 解码后 1075 B：
 
 正确路径是 `POST /sso/app/v5/smsLogin`（主机 `apps-uc.xiaopeng.com`），不是 `getSmsCode`。
 
-**存在第二条登录入口 `/sso/app/v5/login`**（2026-10-31 定位）：接受 `{mobile, password, smsCode}`，**不需要滑块票据**——带 `XP-Xid` 会话后填假码返回 `12040107 短信验证码错误`，全程不出现 `12040101`/`12040106`。但它同样绕不开发码：`v5/login` 只校验、不下发，必须先有一次成功的 `sms/code`。
+**存在第二条登录入口 `/sso/app/v5/login`**（2026-10-31 定位）：接受 `{mobile, password, smsCode}`。**该端点是否需要滑块取决于手机号**（2026-10-31 修正，原记录「不需要滑块票据」只对当时用的编造号码成立）：
+
+| 手机号 | `v5/login` 返回 |
+| --- | --- |
+| 真实在网号 | `12040102 输入短信验证码`（不要求滑块） |
+| 编造号码（7 个样本全部） | `12040101 拖动滑块验证码` |
+
+即原记录「全程不出现 `12040101`」是**编造号码下的观测，不可外推**；换真实号后该端点在**未发码阶段**确实不再要滑块。但它同样绕不开发码：`v5/login` 只校验、不下发，必须先有一次成功的 `sms/code`。
+
+**但真实号验证码通过后，`v5/login` 同样返回 `12040101`**（2026-10-31 真号实测，与该会话的 `smsLogin` 一致）——即 `v5/login` **不是绕开第二道滑块的旁路**，它和 `smsLogin` 共用同一道滑块闸门。
 
 `v5/login` 的三个实测特性：
 
@@ -333,13 +362,15 @@ base64 解码后 1075 B：
 
 实现见 `scripts/login.py`。
 
-### 4.2 滑块：卡在发码这一步
+### 4.2 滑块：两道，一道卡发码、一道卡换 token
 
-滑块只在**发码**时强制。`smsLogin` 与 `sms/validate` 本身都不校验滑块。
+**滑块有两道**，此前「滑块只在发码时强制」的结论**已被真号实测推翻**（2026-10-31，见本节末）：第一道卡发码，第二道卡 `smsLogin`。
 
 **发码必须两步**，这是最容易踩的坑：服务端只在**已有会话**的请求里才校验票据。首个请求没有 `XP-Xid`，无论票据真假一律 `12040101 拖动滑块验证码`；但该响应照样下发 cookie，所以要先发一次无票据请求拿到 xid，再带 xid + 票据重试。`scripts/login.py` 的 `send_code()` 已按此实现。
 
-**`12040106` 与票据内容无关**（2026-10-31 实测）：拿到 xid 后带票据重试，返回 `12040106 滑块验证码校验不通过`。但把这个码与票据内容做交叉验证，发现**换任何值结果都一样**——垃圾值 `zzz`、空串、已用过的票据、刚由真人在浏览器里拖出的 531 B 票据，全部 `12040106`；`captchaId` 传对的、传空的、传 `0000` 也一样；票据放进 `ptoken`/`ticket`/`token` 字段仍一样。**说明服务端没有真正比对票据内容**，而是因为缺少某个前置条件直接判失败。
+**`12040106` 与票据内容无关**（2026-10-31 实测，**但适用条件有限，见下方警告**）：拿到 xid 后带票据重试，返回 `12040106 滑块验证码校验不通过`。但把这个码与票据内容做交叉验证，发现**换任何值结果都一样**——垃圾值 `zzz`、空串、已用过的票据、刚由真人在浏览器里拖出的 531 B 票据，全部 `12040106`；`captchaId` 传对的、传空的、传 `0000` 也一样；票据放进 `ptoken`/`ticket`/`token` 字段仍一样。
+
+> ⚠️ **警告：上述全部实验都是在「验证码未通过」的会话上做的**（真号实测 2026-10-31 揭示）。这种会话里 `smsLogin` 恒为 `12001402`，服务端**在字段校验之前就返回**，所以任何 body 字段/票据的差异都被掩盖了——「换什么值都一样」是这种掩盖的产物，**不是「服务端不比对票据」的证据**。同理，本节下方「`12040106` 与票据内容无关」的结论**只适用于发码阶段**，不能外推到第二道滑块。
 
 **真人拖的票据同样被拒**（2026-10-31）：`scripts/login-ui.py` 起一个本地页面加载易盾官方 H5 SDK（`cstaticdun.126.net/load.min.js`，`captchaId=f6c14777879d4a75b683b29be6709db6`），由用户在浏览器里亲手拖动，客户端回调 `result=true`、拿到 531 B `CN31_…` 票据，服务端仍判 `12040106`。所以问题不是轨迹风控——**真人轨迹也过不了**。
 
@@ -433,7 +464,24 @@ POST https://apps-uc.xiaopeng.com/verification/app/v5/sms/code
 
 **取 token 的现状**：自研侧已可独立发码（滑块由人在本地页面拖一次），后续 `sms/validate` → `smsLogin` 换 token 全程自动。
 
-#### 第二道滑块：`smsLogin` 另有独立闸门（2026-10-31 未攻克）
+#### `drag/validate` 的 `sceneType` 白名单与错误码衰减（2026-10-31 静态+探测）
+
+`drag/validate` 对 `sceneType` 做**白名单校验**，且这个校验可以用垃圾票据当探针零成本枚举（未知场景返回 `12051100 操作失败`，已知场景返回 `200` 且 `data.valid=false`，**不消耗票据、不影响会话**）：
+
+| `sceneType` | 结果 |
+| --- | --- |
+| `LGN` / `SMS` / `RESET` / `REG` / `RESET_PASSWORD` / `CANCEL_ACCOUNT` | `200`，`data.valid` 为判定值 |
+| 其余全部（含 `LOGIN`、`SMS_LOGIN`、`REGISTER`、`LOGIN_BY_PWD`、`WECHAT`、`BIND` 等） | `12051100` |
+
+服务端认这 **6** 个场景。`LGN` 是 2026-11-01 从 4.2.0 真实登录流量里补上的——**它就是第二道滑块（`smsLogin` 那道）的场景**，`SMS` 是发码前那道。此前枚举漏了 `LGN`，据此得出的「没有登录专用场景」是错的（见 §4.2「票据通道就是 `drag/validate`，场景必须是 `LGN`」）。
+
+**`12040101 → 12040106` 是调用次数衰减，不是「退化成要滑块」**（对照实验，2026-10-31）：同一会话内**不做任何 drag**，连续调 `v5/login` 三次，结果依次是 `12040101`、`12040106`、`12040106`；先做一次 `drag/validate` 再调，首次仍是 `12040101`。所以 §4.2 此前「反复试探后退化为 `12040106`」的描述方向对，但**归因错了**——它与 `drag` 无关，纯属同一会话内重复调用 `v5/login` 的副作用。这也意味着 `12040106` 依旧不能当票据有效性的判据。
+
+**`v5/login` 的 `12040101` 与 `drag/validate` 无关**：用 5 个白名单场景各开新会话、各拖一次垃圾票，`v5/login` 首调**一律** `12040101`。`v5/login` 既不读 `validate` 字段，也不读 `drag/validate` 写的状态。
+
+**`smsLogin` 同样不读 `validate`**：body 加 `validate`、或加全套 `sceneType`+`captchaId`+`validate`，返回码与只带 `mobile` 完全一致（`12001402`）。
+
+#### 第二道滑块：`smsLogin` 前的独立闸门（2026-10-31 确认存在；**2026-11-01 攻克**）
 
 官方登录是**两道滑块**：滑块 → 短信验证码 → **再滑块**。第一道只管发码，第二道挡在 `smsLogin` 前。
 
@@ -444,11 +492,130 @@ logcat 的调用栈给出确切分工（两轮成功登录均一致）：
 | 第一道 | `LoginBySmsActivity.showDragVerifyCode` ← `LoginSmsPresenter.lambda$sendLoginSms$1` ← `f` | 发码方法 |
 | 第二道 | `LoginVerifyActivity.showDragVerifyCode` ← `LoginSmsPresenter.lambda$loginOrRegister$9` ← `h` | 登录/注册方法 |
 
-即 `smsLogin` 返回 `12040101` 后弹滑块，拖完重试 `smsLogin`。会话状态可区分：**验证码未过 → `12001402`；验证码已过 → `12040101`（要求滑块）→ 反复试探后退化为 `12040106`**。
+即 `smsLogin` 返回 `12040101` 后弹滑块，拖完重试 `smsLogin`。会话状态判据（2026-10-31 真号实测确认，三阶段状态机）：
 
-**`drag/validate` 不写会话状态**（对照实验）：同一会话内先用垃圾票 `drag` 得 `valid:false`、再用真票得 `valid:true`，`smsLogin` 的返回码前后**都是 `12001402`**（未过码会话）——`drag/validate` 只回判定结果，不改变会话。所以它不是第二道滑块的票据通道，尽管 App 构造的 body 与第一道完全相同（`sceneType:"SMS"` + 同 `captchaId`）。
+| `smsLogin` 返回 | 会话阶段 | 含义 |
+| --- | --- | --- |
+| `12001402` | 验证码未过 | 还没调过 `sms/validate`，或验证码错 |
+| `12040101` | 验证码已过、待滑块 | 第二道滑块窗口已开，须提交票据 |
+| `12040106` | 滑块尝试已消耗 | 未提交票据却重复调用，或票据无效 |
 
-**第二道滑块用易盾 native SDK，不是 H5**：连拍堆快照时，第二道滑块拖完后主进程堆里新出现 `com.netease.nis.wrapper.o`（此前各轮都没有）。所以 native 票据与 H5 票据可能不是同一套签名机制，这解释了为何 H5 票据全部失败。
+**每调一次 `smsLogin` 就消耗一次滑块尝试机会**，所以同一会话内反复试探会从 `12040101` 退化到 `12040106`——这与 `drag/validate` 无关，纯属调用次数副作用。
+
+##### 票据通道就是 `drag/validate`，场景必须是 `LGN`（2026-11-01 定论）
+
+**上一版「`drag/validate` 不写会话状态、换个 `sceneType` 可彻底排除」的结论被推翻。** 根因是枚举白名单时漏掉了 `LGN`：第二道滑块用的场景是 `LGN`，不是第一道的 `SMS`。
+
+4.2.0（versionCode 8916）真号登录的完整 HTTP/2 流量取证（`SSL_write` + `SSL_read` 双向 hook + HPACK 解码）：
+
+```
+[237] POST /sso/app/v3/smsLogin            → {"code":12040101}
+[240] POST /verification/app/v3/drag/validate → {"code":200,"data":{"valid":true}}
+[246] POST /sso/app/v3/smsLogin            → {"code":200,"data":{"sData":"WEEB…"}}
+```
+
+第二道滑块的请求体（明文，非加密）：
+
+```json
+{"sceneType":"LGN","mobile":"13000000000",
+ "captchaId":"f6c14777879d4a75b683b29be6709db6","validate":"CN31_ciA3VObsg5GyNSVnqOxXaJw*0lia…"}
+```
+
+`LGN` 的合法性用垃圾票据零成本复核：`LGN`/`SMS` 返 `200 {"valid":false}`，`LOGIN`/`PWD` 返 `12051100`。**白名单实际是 6 个：`LGN`/`SMS`/`RESET`/`REG`/`RESET_PASSWORD`/`CANCEL_ACCOUNT`。**
+
+上一版实验之所以得出「`drag/validate` 只判定不写会话」，是因为全程用 `sceneType:"SMS"` 提交第二道票据——那是发码前那道滑块的场景，用它提交不会解锁 `smsLogin`。**结论本身没错，但归因错了**：不是端点不写会话，是场景传错。
+
+##### 4.2.0 与 5.19.0 在登录返回上的协议差异
+
+4.2.0 的 `smsLogin` 成功时返回 `{"data":{"sData":"…"}}`，5.19.0 的 `token/refresh` 返回 `accessToken`/`refreshToken` 字段。**但自研侧打 `v5/smsLogin` 同样收到 `sData`**（2026-11-01 实测 `data_keys=['sData']`），说明 `sData` 是**服务端按请求特征下发的**，不是按端点版本区分。
+
+`sData` 结构（3414 B，`XA` 标记、keyIndex=0，与 WEEB 同一套外层布局）：
+
+```
+XA | ver | keyIndex@3 | … | iv@47..59 | ct@59..
+解开 → 32B 随机 + JSON：
+  {"accessToken":"WEEB…1436字符", "refreshToken":"WEEB…1436字符",
+   "expiresIn":7200, "refreshExpiresIn":7776000,
+   "uid":10000000, "type":0, "skipNickname":0,
+   "lastDeviceBrand":"google", "lastDeviceModel":"sdk_gphone64_arm64",
+   "lastDeviceUserName":"", "mqttAccount":"{…clientId: xmart:app:<uid>:<di>…}"}
+```
+
+内层 JSON 的字段集合与 5.19.0 `token/refresh` 的返回一致，`accessToken` 再解一次才是 968 B JWT。
+
+**解 `sData` 的密钥必须来自服务端当次下发的密钥池，不是本地 tee**（2026-11-01 实测，两次 `InvalidTag` 的根因）：
+
+- `selfclient.keys()` 每次调 `/biz/v5/secure/teeIndiv4App` 取一套密钥池，**请求信封用的就是这套**；
+- 服务端加密 `sData` 用的也是同一套；
+- 本地 `tee` 里的 `XmartV1LocalKey*` 是设备自己存的另一份，与服务端按 deviceId 下发的不保证同步——用它解就 `InvalidTag`。
+
+另外 4.2.0 与 5.19.0 的 `XTeeSecurityAlias` **RSA 私钥不同**（同一个 keystore 里只有当前安装那一把），拿 4.2.0 安装的 tee 去解 5.19.0 时期的信封同样失败。`unwrap_sdata` 因此以服务端密钥池为主、tee 仅兜底。
+
+##### 端到端打通实录（2026-11-01 01:38，真号）
+
+自研侧完整跑通，一次成功：
+
+```
+drag/validate{sceneType:"LGN"} → 200 {"valid":true}
+v3/smsLogin                    → 12040101   （v3 仍要滑块，非旁路）
+v5/smsLogin                    → 200 {"sData":"…"}   ← 换到 token
+sData 解开（用同次密钥池）      → uid=10000000, accessToken/refreshToken 各 1436 字符
+AT 再解                         → 968 B JWT
+落盘                            → work/live/access_token.txt（1436 字符）
+```
+
+**必须同时满足三个条件**，缺一即失败（这正是此前反复卡住的原因）：
+
+| 条件 | 错的样子 | 后果 |
+| --- | --- | --- |
+| `sceneType` 用 `LGN` | 用 `SMS`（发码那道） | `smsLogin` 恒 `12040101` |
+| 换 token 打 `v5`（`v3` 仍要滑块） | 只试 `v3` | `12040101` |
+| 解 `sData` 用**同次请求的密钥池** | 用本地 tee / 事后重取 | `InvalidTag` |
+
+**密钥池每次请求都变**（实测连续两次 `teeIndiv4App` 返回的 10 槽全不同），所以「发 `smsLogin` 那次的池」必须与响应绑定保存，事后重取一定解不开。已用「同一 `sData` + 正确池能解开、换一套池报 `InvalidTag`」做了决定性对照。为此 `_call` 全程把 `{请求体, 密钥池, 原始响应}` 落盘到 `work/live/trace/`，`login-ui.py` 另存 `/tmp/last_smslogin.json`。
+
+##### 业务请求的 `Xp-Uid` 必须等于 token 所属账号（2026-11-01 攻克）
+
+换到的 token 打业务接口曾**恒 `12010101 登录状态已过期`**。根因只有一个：**请求头没带 `Xp-Uid`**（或带错）。`Xp-Uid` 参与内层 `xpSign` 计算，必须在算签名**之前**设好。
+
+决定性对照（同一 AT、同一密钥池，只改 `Xp-Uid`）：
+
+| `Xp-Uid` | 返回 |
+| --- | --- |
+| 不设（`base_headers` 默认 `0`） | `12010101` |
+| `10000000`（`sData.uid`） | **`200`**，列出 `L1NSPGH91NA000000 沪A00000 D55` |
+
+所以自研登录链路是**完整可用**的：发码 → 验证码 → 第二道滑块(`LGN`) → `smsLogin` 200 → 解 `sData` → 用 `uid` 打业务接口 200。
+
+**排查过程中被推翻的假设**（都做过对照，别重复）：
+
+1. ~~deviceId 不一致~~：改成与 App 同身份后仍 `12010101`。此改动保留（登录与业务用同一身份更正确），但不是根因。
+2. ~~token 没绑设备~~：`smsLogin` 补 `deviceModel`/`deviceBrand` 后 `sData.lastDeviceModel/lastDeviceBrand` 确实回填为 `sdk_gphone64_arm64`/`google`，但当时仍失败。此改动保留（与真机请求体一致），不是根因。
+3. ~~内层明文缺字段~~：真机业务请求内层约 2111 B、自研只塞「签名+token」约 1121 B，曾据此判断「缺一批字段」。**实测推翻**——内层只放 `{"xpSign":…}&accessToken=<JWT>` 就够，2111 B 只是真机多塞了 `refreshToken`（两个 968 B JWT 相加 1936 B，加 UUID 与签名正好约 2103 B，长度吻合纯属巧合，不是必要条件）。
+4. ~~过期/密钥代际~~：AT 信封时间戳就是请求当时，同次池能解出 1000 B 明文。
+
+**踩坑记录（会直接导致 `12110009`）**：
+
+- `Xp-Uid` 一旦设了值却参与签名不一致，服务端报 `12110009 服务器开小差`（信封解不开），而不是 `12010101`。两种错误码的分界要看 `Xp-Uid` 是否在算 `xpSign` 前设好。
+- 密钥池必须**每次请求现取**（`selfclient.keys()`），不能复用上一次的池——池每次调用都变，复用会 `12110009`。
+
+**已确认的其它事实**：
+
+- 登录走 `apps-uc.xiaopeng.com`（要 mTLS），业务接口在 `apps.xiaopeng.com`、`dragon.xiaopeng.com`、`chargegateway.xiaopeng.com`；uc 主机上业务路径直接 404（返回非 JSON），不能用登录通道绕开。
+- 4.2.0 登录后实际调的是 `dragon.xiaopeng.com/xp-app/…`（`im/account/init`、`im/famous/list`、`open/get-team-ext`、`open/get-user-lead-status`）与 `chargegateway.xiaopeng.com/v5/charge/private-pile/query`，**没有调过 `myVehicles`**。
+- 真机业务请求头带 `XP-Ptoken`（恒定值 `9ca17ae2…`，跨请求不变，与登录阶段逐请求变化不同）。
+
+##### 已排除的假设（2026-11-01 复核后仍成立的部分）
+
+**`xp-ptoken` 不是滑块票据**：同一次会话内每个请求的 `xp-ptoken` 都不同（长度 172/174 浮动、尾部变化），是**逐请求重新生成**的设备指纹类头，不是一次性获取后复用的票据。`drag/validate` 与它前一个 `smsLogin` 的 ptoken 恰好相同（同一请求批次的复用），但下一个 `smsLogin` 又变了。
+
+**`com.netease.nis.wrapper.o` 不是滑块 SDK，是壳的 so 加载器**（2026-10-31 静态复核）：该类全文只有 `System.loadLibrary` / `System.load` + 从 APK 里解 `lib/<abi>/` 落盘再加载的逻辑，与验证码无关。堆快照里它出现，只说明当时触发了某个 native 库的加载（易盾壳自身行为），**不能作为「第二道滑块走 native SDK」的证据**。
+
+**第二道滑块的真实实现仍未知**：既没有证据表明它用 native SDK，也没有证据排除它用 H5。§4.2 上文「App 用的就是 `cstaticdun.126.net/api/v2/mobile.v2.8.1.html`」是全量搜 App 数据目录得到的唯一 captcha H5 地址，两道滑块共用同一份 SDK 仍是更简约的解释——那么第二道失败的原因就落在**票据与场景/会话的绑定方式**上，而不是票据生成机制。
+
+**但滑块 SDK 本身是独立的 `com.netease.nis.captcha` 包，不是壳**（2026-10-31 静态确认，此前文档从未记录）：dex 字符串池里有完整的 `com.netease.nis.captcha.Captcha` / `CaptchaListener` / `Captcha$LangType` 及其内部类 `a`~`d`，配套 `captcha_progress_dialog_layout` 布局、`Captcha Progress Dialog show/dismiss Error`、`Captcha SDK Validate Error`、`Captcha Tip Dialog show Error` 日志串，以及 `onVerifySuccess` / `onVerifyFailed` 回调方法名。
+
+这一点很重要：它说明**易盾滑块是 App 的一个普通依赖库，与加固壳（`com.netease.nis.wrapper`）是两个独立包**。`wrapper` 包是壳（so 加载、`a.auu.a.c` 字符串解密），`captcha` 包才是滑块。两者同属易盾产品线，此前把堆里出现的 `wrapper` 类误读成「第二道滑块用 native SDK」，是把壳当成了滑块。
 
 **`v5/login` 绕不过去**（此前记录的"不需要滑块"结论不足以利用）：它确实从不返回 `12040101`，但要求「该手机号已有成功下发的短信」，且**不认 `verification` 主机的发码**——用 `drag/validate` + `sms/code` 真实发出的短信，`v5/login` 仍返回 `12040102 请输入正确的验证码`。字段分层已确认：缺 `password` → `12001100/12001101`，有 `password` → `12040102`，与 `smsType`（1/2/11/21/31/41）无关。
 
@@ -456,9 +623,136 @@ logcat 的调用栈给出确切分工（两轮成功登录均一致）：
 
 **堆快照对第二道滑块无效**（重要，别再重复）：请求体与票据都是短命局部变量。`LoginVerifyActivity` 暂停在第二道滑块弹出态时 dump 75 MB，里面**既没有 `CN31_` 票据、也没有任何请求体或 `12040101` 响应**；连拍 12 个快照（主进程 + WebView 各 6 轮，覆盖整个拖动过程）同样一张票据都没抓到。第一道能抓到纯属票据恰好在 dump 时刻尚未提交。
 
-**易盾运行在独立 WebView 沙箱进程**（`com.google.android.webview:sandboxed_process0`），不在 App 主进程堆里；但第二道滑块的 native SDK 痕迹在主进程。
+**易盾运行在独立 WebView 沙箱进程**（`com.google.android.webview:sandboxed_process0`），不在 App 主进程堆里。此前「第二道滑块的 native SDK 痕迹在主进程」的说法依赖 `com.netease.nis.wrapper.o`，该依据已作废（见上），故「第二道在主进程」无证据。
 
-**未攻克的原因**：第二道滑块的票据窗口短于单次 dump（3~10 秒），且 native SDK 票据无法由 H5 页面生成。剩余方向只有内嵌易盾 native SDK（需脱壳 + 对抗反调试）或从 native 层 hook 取报文。
+**已攻克（2026-11-01）**：第二道滑块的票据通道就是 `drag/validate` + `sceneType:"LGN"`，详见 §4.2。上面这些 2026-10-31 的排查之所以结论为「票据通道未知」，根因是当时只枚举了 5 个场景、漏了 `LGN`，且全程用 `SMS` 提交。堆快照抓不到票据这个观察本身仍成立（票据是短命局部变量），但它不是阻塞点。
+
+#### 第二道滑块的候选通道（2026-10-31 排除法结论）
+
+已知「不是」的：
+
+| 通道 | 排除依据 |
+| --- | --- |
+| `drag/validate` + 任一 `sceneType`（垃圾票） | 5 个白名单场景全试，`smsLogin` 恒 `12001402`，不写会话 |
+| **`drag/validate` + 真票据（`valid=true`）** | **2026-10-31 真号实测：`SMS` 场景返回 `code=200 valid=true`，`smsLogin` 仍 `12040101`，会话未前进。这是最强的一次否定证据——票据真实有效也不够。** |
+| `smsLogin` body 里的 `validate`/`sceneType`/`captchaId` | 加上与不加返回码完全一致 |
+| `XP-Ptoken` / `XP-PtokenType` 请求头 | 加上与不加返回码完全一致 |
+| `sms/validate` 通过后自然放行 | 真号实测：验证码通过后 `smsLogin` 仍返回 `12040101`（见下节） |
+
+**`drag/validate` 已被彻底排除**：它在「验证码已通过」的会话上、用真人拖出的真票据、返回 `valid=true` 之后，`smsLogin` 依然是 `12040101`。所以这个端点**只判定票据、从不写会话状态**，与第二道滑块的票据通道无关。此前所有基于「往 `drag/validate` 提交票据」的尝试可以永久放弃。
+
+由此**尚不能**推出 `12040101` 的成因——但 2026-10-31 的真号实测给出了定论（见下节）。
+
+#### 真号实测：第二道滑块确实存在，且是 `smsLogin` 的强制闸门（2026-10-31 定论）
+
+**实测过程**（真实在网号 `130****36`，`scripts/login-ui.py`，一次完整流程）：
+
+1. 第一道滑块人工拖过 → `drag/validate` 返回 `data.valid=true` → `sms/code` 返回 `200`，短信真实下发（xid=`be3b086c…`）
+2. 真实验证码经 `sms/validate` **校验通过**
+3. `smsLogin` 返回 **`12040101 拖动滑块验证码`**
+4. 未拖第二道滑块、再点一次 → `sms/validate` 返回 `12051403 短信验证码已过期`（一次性验证码已被消费）
+
+**结论：H2 成立，H1 被推翻。** 第二道滑块不是「号码状态异常才出现」的风控分支，而是**验证码通过后 `smsLogin` 的必经闸门**。此前「`12040101` 按号码判定、真实号可绕过」的推论**错误**，作废。
+
+**为什么之前的号码对照实验误导了判断**：那次实验在**未发码**的会话上观测 `v5/login`，编造号码返回 `12040101`、真实号码返回 `12040102`。现在回看，这个差异反映的是「该号码能否进入验证码环节」，**不是**「验证码通过后是否需要滑块」。两者是不同阶段的两个闸门，混为一谈才得出「真实号不需滑块」的错误结论。
+
+**`12040106` 的真实含义（修正）**：此前记为「与票据内容无关、缺前置条件直接判失败」。真号实测显示，`12040106` 出现在**验证码已通过、但第二道滑块未提交**的会话上（第 4 步之后该会话的 `smsLogin`/`v5/login` 均返回 `12040106`）。即：`12001402` = 验证码未过；`12040101` = 验证码已过、待滑块；`12040106` = 滑块窗口已开但票据未通过/已失效。**三个码是同一状态机的三个阶段**，这解释了此前「同一会话内重复调用就退化」的现象——每调一次就消耗一次滑块尝试机会。
+
+**对自研客户端的直接影响**：登录链路在 `smsLogin` 前**必须**提交第二道滑块的票据，且该票据：
+- ~~不是 `drag/validate` 的返回~~ **此条已推翻**：当时用 `sceneType:"SMS"` 提交，场景传错。改用 `LGN` 后 `drag/validate` 返回 `valid:true` 即解锁 `smsLogin`（§4.2）。
+- 不接受 `smsLogin` body 里的 `validate`/`sceneType`/`captchaId`（已实测，返回码不变）——仍成立
+- 不接受 `XP-Ptoken` 请求头（已实测，返回码不变）——仍成立
+
+第二道滑块已于 2026-11-01 攻克，通道是 `drag/validate{sceneType:"LGN"}`。
+
+#### 票据通道的排除法已到尽头（2026-10-31 静态收敛）
+
+本轮把「客户端能提交什么」穷举完了，结论是**第二道滑块的票据不是通过任何独立端点或明文字段提交的**：
+
+**证据一：`/verification/` 下只有 7 个端点，全在 dex 里，全部已试过。**
+
+| 端点 | 状态 |
+| --- | --- |
+| `/verification/app/v5/sms/code` | 已用（第一道滑块后的发码） |
+| `/verification/app/v3/drag/validate` | 已用（只判定，不写会话，真票据 `valid=true` 也不推进） |
+| `/verification/app/v3/sms/validate` | 已用（校验验证码） |
+| `/verification/app/v3/sms/validateByUid` | 需登录态，返回 `12010103` |
+| `/verification/app/v3/sms/validateByUidAndMobile` | 同上 |
+| `/verification/app/v5/sms/codeByUid` | 同上 |
+| `/verification/app/v5/sms/codeByUidAndMobile` | 同上 |
+
+**不存在第二个滑块验证端点**。所以第二道滑块的票据不可能通过独立端点提交。
+
+**证据二：`smsLogin` 不读任何票据字段。** 穷举 20 个候选字段名（`validate`/`ptoken`/`token`/`ticket`/`riskToken`/`captchaValidate`/`dragValidate`/`validateToken`/`captchaToken`/`slideToken`/`verifyToken`/`sceneType`/`captchaId`/`smsCode`/`code`/`sign`/`risk`/`riskControlInfo`/`validateResult`/`dragResult`），**全部返回 `12001402`，无一差异**。
+
+这个探测的有效性已单独验证，不是被掩盖：
+- 故意破坏信封密钥 → 返回 `12110009`（信封层校验先于业务层，说明信封层是通的）
+- body 缺 `mobile` → 返回 `12001101 mobile不能为空`（**字段探测能穿透到业务层**）
+- 所以 `12001402` 是真正的业务判断，不是掩盖
+
+**证据三：`XP-Ptoken`/`XP-PtokenType` 等请求头无效**（`12001402` 不变）。
+
+~~**由此收敛出的唯一可能**：第二道滑块的票据由 native 层加密后塞进 `Xp-Authorization` 信封本体……~~ **此推断已推翻（2026-11-01）**：票据就是易盾 H5 的 `validate` 字符串，明文 JSON 提交给 `drag/validate` 即可，场景必须是 `LGN`（§4.2）。当时代码里没有 native 加密这一环，缺的只是正确场景。
+
+**尚未排除的两个客户端可控通道**（都不需要重新实现 native 加密）：
+
+**(a) 旧版本 `smsLogin` 端点。** 全版本扫描发现 v3/v4 的 `smsLogin` **仍然可用**：
+
+| 端点 | 返回 | 判断 |
+| --- | --- | --- |
+| `/sso/app/v3/smsLogin` | `12001402 短信验证码错误` | 可用，要求 `mobile` |
+| `/sso/app/v4/smsLogin` | `12001402 短信验证码错误` | 可用，要求 `mobile` |
+| `/sso/app/v5/smsLogin` | `12001402 短信验证码错误` | 可用，当前 App 在用 |
+| `/sso/app/v1|v2|v6|v7/smsLogin` | `12001100 操作失败` | 不存在 |
+
+关键佐证：**dex 字符串池里只有 `v5/smsLogin`**，说明 v3/v4 是服务端保留的旧路由、App 从不调用。旧版实现**可能没有第二道滑块**——若成立，直接就是绕行入口。
+
+**(b) 信封内层明文。** 已知 `accessToken`/`refreshToken` 就是以 `&accessToken=…` / `&refreshToken=…` 追加在信封内层明文末尾的（§4.4、§4.6），票据可能是同样形式。已验证该通道技术上可用（内层追加任意字段后信封仍正常解开，返回 `12001402` 而非 `12110009`）。
+
+这两条都**未在「验证码已通过」的会话上试过**——那是唯一还有信息量的实验，成本一条短信。
+
+**下一轮按优先级**：
+1. 在「验证码已通过」的会话上，依次试 v3/v4 端点与内层明文字段。**最后一个低成本假设，一次短信可测完两个。**
+2. 从 native 层 hook 第二道滑块提交时的出站请求（需对抗易盾反调试，§6.3 记录 Frida 约 15 秒被杀）。
+3. 脱壳后读 `LoginSmsPresenter.loginOrRegister` 与 `RiskService.verifyDragValidate` 的字节码。
+
+若第 1 条也失败，即可判定票据完全在 native 层，只有 2、3 两条路。
+
+**第 1 条已实现待跑**（2026-10-31）：`scripts/login.py` 的 `try_second_drag()` 现在按序试 **v3 端点 → v4 端点 → 内层 `validate`/`ptoken`/`captchaValidate`**，一命中即返回 `(trials, data)`；`_call()` 新增 `inner_extra` 参数用于追加内层明文。已离线验证：内层追加字段不破坏信封（返 `12001402` 而非 `12110009`），且整条探测链路在真实会话上跑通（5 次尝试全执行，返回结构正确）。`scripts/login-ui.py` 的第二道滑块步骤直接调用它，**下一轮只需一条真实短信即可判定两个假设**。
+
+#### 另一条独立入口：运营商一键登录 `oneclickLogin`（2026-10-31 新发现）
+
+dex 里存在完整的运营商一键登录栈与端点，**完全不经短信、不经任何滑块**：
+
+| 项 | 值 |
+| --- | --- |
+| 端点 | `POST /sso/app/v3/oneclickLogin`、`/sso/app/v4/oneclickLogin` |
+| 必填字段 | `accessCode`、`token`（缺任一报 `12001101 xxx不能为空`） |
+| 业务层返回 | 垃圾值 → `12001283 一键登录操作已过期，请重试` |
+| 客户端来源 | `com.cmic.gen.sdk`（移动）、`com.unicom.online.account.kernel`（联通）、`ctGetToken`（电信）；取号方法 `cmGetToken`/`cuGetToken`/`ctGetToken`，`*PrefetchMobileNumber` |
+
+**关键点**：`accessCode`/`token` 由运营商 SDK 在**本机 SIM 卡**上换取（运营商网关侧鉴权），与易盾、与小鹏的风控画像都无关。若该入口对小鹏侧开放，则它绕开了短信验证码与两道滑块——**是比攻克第二道滑块更短的一条路**。
+
+**待验**：`12001283` 对任意非空值恒定，说明服务端在**验签/解密前**就按「取号会话不存在」失败，无法从错误码判断格式。真正的判别需要一次真实取号：在有 SIM 卡的设备上跑运营商 SDK 拿 `accessCode`+`token`，再打该端点。**这条需要真机 + 真实 SIM，不能在模拟器上做**（模拟器无运营商网关鉴权能力）。
+
+**风险**：单会话约束同样适用——若该入口可用，自研客户端一键登录会把官方 App 踢下线。
+
+#### 端点版本矩阵（2026-10-31 全版本扫描，只读、编造号码）
+
+对两个关键端点扫 v1~v7，确认只有 v3 是 `drag/validate` 的真实入口，`smsLogin` 只有 v3/v4/v5 存在：
+
+| 版本 | `drag/validate` | `smsLogin` |
+| --- | --- | --- |
+| v1 | `12051100` | `12001100` |
+| v2 | `12001216 无效的appId或签名数据` | `12001100` |
+| v3 | **`200` + `data.valid`** | **`12001402`**（业务层） |
+| v4 | `12051100` | **`12001402`**（业务层） |
+| v5 | `12051100` | **`12001402`**（业务层） |
+| v6 / v7 | `12051100` | `12001100` |
+
+判据：`12001100 操作失败` 与 `12051100 操作失败` 是「路由未命中」兜底，业务层错误码（`12001402`）才表示端点真实存在并进入逻辑。**结论：不存在更高版本的无滑块登录入口**，v4/v5 的 `smsLogin` 行为与 v3 完全一致，版本矩阵这条路已穷尽。
+
+`drag/validate` 的 `sceneType` 白名单为 `{LGN, SMS, RESET, REG, RESET_PASSWORD, CANCEL_ACCOUNT}`（垃圾票据即可枚举）。**`LGN` 就是第二道滑块（`smsLogin` 那道）的场景**，2026-11-01 从 4.2.0 真机流量补上；此前枚举漏了它，据此得出的「没有登录专用场景」是错的。
 
 ### 4.3 为什么 MITM 抓不到 `apps*.xiaopeng.com`
 
@@ -939,7 +1233,7 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 | tenant 密钥池 | ✅ 闭环 | 0 |
 | 本地密钥 | ✅ 闭环 | 0 |
 | `Xp-Authorization` blob | ✅ 闭环（分版本） | 0 |
-| 登录与会话 | 🟡 三步链路已确认（发码 → `sms/validate` → `smsLogin`），`scripts/login.py` 已实现；发码需易盾票据 | 发码仍需人过滑块 |
+| 登录与会话 | ✅ 闭环（真号实测）：发码 → 验证码 → 第二道滑块(`LGN`) → `smsLogin` 200 → 解 `sData` → 带 `Xp-Uid` 打业务接口 200 | 两道滑块：第一道发码、第二道换 token（§4.2） |
 | 令牌续期 | ✅ 闭环，连续 5 次成功 | 0 |
 | MQTT 连接与凭据 | ✅ 闭环 | 0 |
 | 车控指令 | 🟡 10/12 | 单扇车窗、除霜、循环、座椅加热通风、智能清洁/除味/香氛（启动走 BLE，不在 MQTT；风量 App 无此功能） |
@@ -992,8 +1286,10 @@ App 自己承认两处结构性弱点：`ble_check_fail_des` = 「先关闭蓝�
 
 **登录**
 
-- **滑块验证码能否程序化通过**：未验。两次滑块均强制，UI 路径成功而纯 API 下发短信被拒（`12051401`）。这是登录环节的硬风险项。
-- **真正的验证码下发接口**：`/sso/app/v3/getSmsCode` 返回 `12001100`（遗留路径），正确接口未定位。
+- ~~**第二道滑块是否在真号正常流程下出现**~~：**已验（2026-10-31）**。真号发码 + `sms/validate` 通过后，`smsLogin` 返回 `12040101`，第二道滑块确认必经（§4.2）。
+- ~~**第二道滑块的票据通道**~~：**已解决（2026-11-01）**。通道是 `drag/validate` + `sceneType:"LGN"`（§4.2）。此前判「已排除 `drag/validate`」是枚举漏了 `LGN` 所致。
+- **运营商一键登录是否可用**：`oneclickLogin` 端点与三家 SDK 均在 App 内（§4.2），但 `accessCode`/`token` 必须在真机 + 真实 SIM 上由运营商网关鉴权换取，模拟器无法验证。若可用，这是完全绕开短信与滑块的入口。
+- ~~**真正的验证码下发接口**~~：**已解决**，是 `/verification/app/v5/sms/code`（§4.2）。
 
 **BLE**
 
