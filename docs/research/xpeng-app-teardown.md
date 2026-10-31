@@ -433,6 +433,33 @@ POST https://apps-uc.xiaopeng.com/verification/app/v5/sms/code
 
 **取 token 的现状**：自研侧已可独立发码（滑块由人在本地页面拖一次），后续 `sms/validate` → `smsLogin` 换 token 全程自动。
 
+#### 第二道滑块：`smsLogin` 另有独立闸门（2026-10-31 未攻克）
+
+官方登录是**两道滑块**：滑块 → 短信验证码 → **再滑块**。第一道只管发码，第二道挡在 `smsLogin` 前。
+
+logcat 的调用栈给出确切分工（两轮成功登录均一致）：
+
+| 滑块 | 触发栈 | 说明 |
+| --- | --- | --- |
+| 第一道 | `LoginBySmsActivity.showDragVerifyCode` ← `LoginSmsPresenter.lambda$sendLoginSms$1` ← `f` | 发码方法 |
+| 第二道 | `LoginVerifyActivity.showDragVerifyCode` ← `LoginSmsPresenter.lambda$loginOrRegister$9` ← `h` | 登录/注册方法 |
+
+即 `smsLogin` 返回 `12040101` 后弹滑块，拖完重试 `smsLogin`。会话状态可区分：**验证码未过 → `12001402`；验证码已过 → `12040101`（要求滑块）→ 反复试探后退化为 `12040106`**。
+
+**`drag/validate` 不写会话状态**（对照实验）：同一会话内先用垃圾票 `drag` 得 `valid:false`、再用真票得 `valid:true`，`smsLogin` 的返回码前后**都是 `12001402`**（未过码会话）——`drag/validate` 只回判定结果，不改变会话。所以它不是第二道滑块的票据通道，尽管 App 构造的 body 与第一道完全相同（`sceneType:"SMS"` + 同 `captchaId`）。
+
+**第二道滑块用易盾 native SDK，不是 H5**：连拍堆快照时，第二道滑块拖完后主进程堆里新出现 `com.netease.nis.wrapper.o`（此前各轮都没有）。所以 native 票据与 H5 票据可能不是同一套签名机制，这解释了为何 H5 票据全部失败。
+
+**`v5/login` 绕不过去**（此前记录的"不需要滑块"结论不足以利用）：它确实从不返回 `12040101`，但要求「该手机号已有成功下发的短信」，且**不认 `verification` 主机的发码**——用 `drag/validate` + `sms/code` 真实发出的短信，`v5/login` 仍返回 `12040102 请输入正确的验证码`。字段分层已确认：缺 `password` → `12001100/12001101`，有 `password` → `12040102`，与 `smsType`（1/2/11/21/31/41）无关。
+
+**`/sso/app/v3/sms/codeForApp` 不可用**：空 body、`mobile`、`mobile+smsType`、加 `captchaId`/`validate`/`sceneType` 全字段，一律 `12001100`，两个主机（`apps` / `apps-uc`）相同。错误码不随字段变化，说明在字段校验之前就失败，该端点当前不接受这些形状的请求。
+
+**堆快照对第二道滑块无效**（重要，别再重复）：请求体与票据都是短命局部变量。`LoginVerifyActivity` 暂停在第二道滑块弹出态时 dump 75 MB，里面**既没有 `CN31_` 票据、也没有任何请求体或 `12040101` 响应**；连拍 12 个快照（主进程 + WebView 各 6 轮，覆盖整个拖动过程）同样一张票据都没抓到。第一道能抓到纯属票据恰好在 dump 时刻尚未提交。
+
+**易盾运行在独立 WebView 沙箱进程**（`com.google.android.webview:sandboxed_process0`），不在 App 主进程堆里；但第二道滑块的 native SDK 痕迹在主进程。
+
+**未攻克的原因**：第二道滑块的票据窗口短于单次 dump（3~10 秒），且 native SDK 票据无法由 H5 页面生成。剩余方向只有内嵌易盾 native SDK（需脱壳 + 对抗反调试）或从 native 层 hook 取报文。
+
 ### 4.3 为什么 MITM 抓不到 `apps*.xiaopeng.com`
 
 **不是证书固定，是私有 CA 信任锚**。`apps*.xiaopeng.com` 的证书由 `CN=Xiaopeng Motors Intermediate CA`（`O=XiaopengMotors Ltd`）签发，而 `collect.xiaopeng.com`、`sentry.xiaopeng.com` 用 DigiCert RapidSSL。
