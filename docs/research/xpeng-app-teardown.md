@@ -285,7 +285,19 @@ base64 解码后 1075 B：
 
 正确路径是 `POST /sso/app/v5/smsLogin`（主机 `apps-uc.xiaopeng.com`），不是 `getSmsCode`。
 
-**验证码双滑块**：滑块共两次，不是异常。`smsType=1/2` 在**发短信前**验一次；短信校验通过后**换 token 时**再验一次。第二次同样强制。
+**存在第二条登录入口 `/sso/app/v5/login`**（2026-10-31 定位）：接受 `{mobile, password, smsCode}`，**不需要滑块票据**——带 `XP-Xid` 会话后填假码返回 `12040107 短信验证码错误`，全程不出现 `12040101`/`12040106`。但它同样绕不开发码：`v5/login` 只校验、不下发，必须先有一次成功的 `sms/code`。
+
+`v5/login` 的三个实测特性：
+
+| 观察 | 含义 |
+| --- | --- |
+| `password` 填 `x`、`wrongpwd123`、32 个 `a` 结果完全一致 | **密码在服务端未被真正校验**，非空即可 |
+| 无 `XP-Xid` 时报 `12040102 输入短信验证码`；有会话仍报 `12040102` | 它要求的是「该手机号已有一条成功下发的短信」，不是任意会话 |
+| 同会话内无关字段仍 `12040102`、`smsCode` 变 `12040107` | 字段名确认是 **`smsCode`** |
+
+**`smsCode` 的判定方法有坑**：必须先发一条无关字段确认基线仍是 `12040102`，再发 `smsCode`。因为一次失败的 `v5/login` 会消耗会话状态，之后所有字段名都会「变成」`12040107`，看起来像随便什么字段名都能命中——2026-10-31 就因此误判过一轮。
+
+**`qrcode/*` 与 `authToken/code` 不是登录入口**：空 body 调 `/sso/app/v3/{authToken/code,getWidgetToken,qrcode/permissionInfo,qrcode/validate}` 全部返回 `12010103 登录状态已过期`，而登录类端点在空 body 下会报具体字段缺失（`12001101 mobile不能为空`）。前者是登录后的功能接口。
 
 **`Xp-Xid` 是会话钥匙**。`/verification/app/v5/sms/code` 首次响应会下发 `Set-Cookie: XP-Xid=<uuid>`；后续请求把这个 uuid 放进 **`Xp-Xid` 请求头**，服务端才进入「校验票据」模式：
 
@@ -335,7 +347,17 @@ base64 解码后 1075 B：
 
 **已排除的可能**：不是会话绑定（同一 xid 内立即用、换新 xid 再用，都是 `12040106`）；不是票据过期（刚拖完立刻用）；不是字段名（三种字段名、加 `captchaId`/`type`/`sceneType` 全试过）；不是 App 用原生 SDK（dex 里只有 `ye.dun.163.com` 的 H5 方案）。
 
-**链路其余部分已验证可达**：`sms/validate` 用假码返回 `12051403 短信验证码已过期`（业务层），`smsLogin` 只带 `mobile` 返回 `12001402 短信验证码错误`（业务层）。即只有发码这一处卡住。
+**链路其余部分已验证可达**：`sms/validate` 用假码返回 `12051403 短信验证码已过期`（业务层），`smsLogin` 只带 `mobile` 返回 `12001402 短信验证码错误`（业务层），`v5/login` 返回 `12040107`（业务层）。即只有发码这一处卡住。
+
+**抓 App 真实发码请求的三条路全部失败**（2026-10-31 实测，不要重复尝试）：
+
+| 路径 | 失败原因 |
+| --- | --- |
+| Frida hook | 易盾反调试在注入后约 15 秒杀掉 App 进程，并连带搞崩过一次模拟器。`spawn` 抢跑能绕过 8 个 `TrustManager` 实现，但 `CertificatePinner` 在握手后另做证书链校验，TLS 仍被拒；且 `okio`/`okhttp3` 类在 App 网络栈初始化后才加载，hook 时机赶不上 |
+| mitmproxy | App 自带网络栈，不读系统 `http_proxy`。设代理后 mitm 日志 0 行，App 不发请求；反而因系统代理影响其他组件导致 ANR |
+| 读内存/缓存 | `/proc/PID/mem` 被 SELinux 挡住；`http-cache` 里没有易盾配置 |
+
+**结论**：App 用的就是 `cstaticdun.126.net/api/v2/mobile.v2.8.1.html`，与本地页面加载的是同一个 H5，差异不在 SDK 版本。抓真实请求这条路已封死。
 
 **当前可行的取 token 方式**：让官方 App 发码登录，再从模拟器取 token（`scripts/unseal-token.py --save`，内置 deviceId 同步）。自研侧独立发码尚未打通。
 
