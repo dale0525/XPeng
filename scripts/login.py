@@ -85,17 +85,35 @@ def _xid_of(cookies):
 
 
 def send_code(mobile, validate=None):
-    """发短信，返回会话 xid。validate 为易盾票据时一并提交。"""
-    body = {'mobile': mobile, 'smsType': SMS_TYPE}
-    if validate:
-        body['validate'] = validate
-    r, cookies = _call('/verification/app/v5/sms/code', json.dumps(body))
-    if r.get('code') != 200:
-        raise RuntimeError(f"发码失败: {r.get('code')} {r.get('desc') or r.get('msg')}")
+    """发短信，返回会话 xid。validate 为易盾票据时一并提交。
+
+    带票据时必须两步走：服务端只在**已有会话**的请求里才校验票据。首个请求
+    没有 ``XP-Xid``，无论票据真假一律 ``12040101 拖动滑块验证码``；先用一次
+    无票据请求拿到 xid（该响应照样下发 cookie），再带 xid + 票据重试。
+    """
+    base = {'mobile': mobile, 'smsType': SMS_TYPE}
+
+    if not validate:
+        r, cookies = _call('/verification/app/v5/sms/code', json.dumps(base))
+        if r.get('code') != 200:
+            raise RuntimeError(f"发码失败: {r.get('code')} {r.get('desc') or r.get('msg')}")
+        xid = _xid_of(cookies)
+        if not xid:
+            raise RuntimeError('发码成功但响应里没有 XP-Xid，无法继续')
+        return xid
+
+    # 第一步：拿会话。预期 12040101（还没票据），但 cookie 会下发。
+    _, cookies = _call('/verification/app/v5/sms/code', json.dumps(base))
     xid = _xid_of(cookies)
     if not xid:
-        raise RuntimeError('发码成功但响应里没有 XP-Xid，无法继续')
-    return xid
+        raise RuntimeError('发码接口没有下发 XP-Xid，无法建立会话')
+
+    # 第二步：带票据 + 会话，服务端这才真正校验票据。
+    body = dict(base, validate=validate)
+    r, cookies2 = _call('/verification/app/v5/sms/code', json.dumps(body), xid=xid)
+    if r.get('code') != 200:
+        raise RuntimeError(f"发码失败: {r.get('code')} {r.get('desc') or r.get('msg')}")
+    return _xid_of(cookies2) or xid
 
 
 def verify_code(mobile, code, xid):
