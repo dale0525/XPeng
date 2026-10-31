@@ -1,0 +1,6 @@
+# 下载的 APK、解包产物、逆向工具，都不入版本库
+work/
+.tools/
+.pixi/
+.sdk/
+__pycache__/

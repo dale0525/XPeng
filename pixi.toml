@@ -1,0 +1,42 @@
+[workspace]
+name = "xpeng"
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[dependencies]
+python = "3.13.*"
+openjdk = "21.*"
+jq = "*"
+curl = "*"
+unzip = "*"
+
+[tasks]
+
+# 把逆向工具（jadx / apktool）下载到仓库内 .tools/，不污染系统目录
+fetch-tools = { cmd = "bash scripts/fetch-tools.sh" }
+
+# 下载小鹏 App 最新 APK 到 work/apk/
+fetch-apk = { cmd = "bash scripts/fetch-apk.sh" }
+
+# 反编译：jadx 出 Java 源码 + 资源，apktool 出可回编译的资源工程
+decompile = { cmd = "bash scripts/decompile.sh" }
+
+# 扫描清单：权限、组件、SDK 体积占比
+manifest = { cmd = "bash scripts/manifest.sh" }
+
+# 从官方 App 运行进程的 Dalvik 堆里取国内签名凭据（需 root 设备/模拟器）
+heap-hunt = { cmd = "bash scripts/heap-hunt.sh" }
+
+[feature.rev.dependencies]
+capstone = "*"
+pyelftools = "*"
+pip = "*"
+cryptography = "*"
+websocket-client = "*"
+pillow = ">=13.0.0,<14"
+numpy = ">=2.5.4,<3"
+paho-mqtt = ">=2.1.0,<3"
+mitmproxy = ">=12.3.1,<13"
+
+[environments]
+rev = ["rev"]
