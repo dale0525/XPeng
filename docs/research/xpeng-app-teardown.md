@@ -359,6 +359,42 @@ base64 解码后 1075 B：
 
 **结论**：App 用的就是 `cstaticdun.126.net/api/v2/mobile.v2.8.1.html`，与本地页面加载的是同一个 H5，差异不在 SDK 版本。抓真实请求这条路已封死。
 
+#### 易盾官方文档给出的规则（2026-10-31 查证）
+
+二次校验接口是 `POST http://c.dun.163.com/api/v2/verify`（`application/x-www-form-urlencoded`），私有参数 `captchaId`、`validate`、`user`，另有公用签名参数 `version=v2`/`nonce`/`timestamp`/`secretId`/`signature`。
+
+三条关键规则：
+
+1. **`validate` 只能校验成功一次，重复校验返回校验不通过**；有效期默认 20 分钟（可配 1~20 分钟）。——这条对排查极其重要：同一张票据反复试，第二次起必然失败，会把人误导成「票据格式不对」。
+2. **`user` 字段必传**，可填空值。
+3. `verify` 的错误描述直接指明失败原因：`WRONG_DATA`（过期）、`SDK UNAVAILABLE`（降级票据）、**`ID_NOT_MATCHED`（服务端与客户端 captchaId 不一致）**、`TOKEN DECRYPT ERROR`（validate 不合法）。
+
+客户端错误码表里，`200` 是「校验未通过，业务错误含超限」，`300` 是「校验未通过，含轨迹错误」——**轨迹错误与业务错误是分开的两类**。
+
+**已排除 `ID_NOT_MATCHED`**：全量搜 App 数据目录，`captchaId=` 只出现过 `f6c14777879d4a75b683b29be6709db6` 一个值，与本地页面用的相同。
+
+#### 决定性实测：`validate` 根本没被读取
+
+在 `apps.xiaopeng.com` 上，只要 `mobile` + `smsType` 齐全，`validate` 取任何值结果都一样：
+
+| `validate` 取值 | 长度 | 返回 |
+| --- | --- | --- |
+| 空串 / 空格 / 单字符 | 0~1 | `12040106` |
+| 32 位 hex / `CN31_`+假串 | 32 / 105 | `12040106` |
+| 真人拖出的真票据 | 531 | `12040106` |
+| 5000 字符垃圾 | 5000 | `12040106` |
+
+而 body 本身是被解析的——乱码 body 报 `12051101 smsType不能为空`，只带 `validate` 报 `12051101 mobile不能为空`。**所以服务端读 body，但不读 `validate`**。
+
+同一现象在 `drag/validate` 上复现：真票据与垃圾票据都是 `12051100 操作失败`。
+
+**已排除的其他可能**：补 `Xp-SDK`/`Xp-DEPENDENCE`/`Xp-Ptoken`/`Xp-PtokenType` 四个缺失头无效；xid 放 Cookie 而非请求头会退回 `12040101`（请求头才是正确方式）；同一会话内连续三次请求状态不推进；`smsType` 1~199 扫描发现 58 个走滑块分支、141 个返回 `12051401 短信发送失败`（连 `abc`/`1` 这种非法号码同样报错，说明是未知场景兜底，无发送逻辑）。
+
+#### 社区与同类项目
+
+- 易盾二次校验必须用 `secretId`+`signature` 走服务端签名，**客户端无法自验票据真伪**，这也是本地无法判断票据是否有效的原因。
+- XPENG 海外版（`com.xiaopeng.globalcarinfo`）的 Homey 插件用户遇到同样报错「Please verify the slider verification code」，**其解法是用 Google 登录绕开短信滑块**——国内版没有 Google 登录，但「换登录方式绕开滑块」这条思路与我们的 `v5/login` 发现一致。
+
 **当前可行的取 token 方式**：让官方 App 发码登录，再从模拟器取 token（`scripts/unseal-token.py --save`，内置 deviceId 同步）。自研侧独立发码尚未打通。
 
 ### 4.3 为什么 MITM 抓不到 `apps*.xiaopeng.com`
