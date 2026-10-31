@@ -13,8 +13,12 @@ WEEB 信封（base64 解码后 1075 B）：
 
 明文 = 32 B 随机前缀 + 968 B JWT。
 
-**keyIndex 直接就是 XmartV1LocalKey 的槽位号**，这是解开 WEEB 的关键。
-用哪把密钥由信封自己带，不需要猜。
+**keyIndex 直接就是密钥槽的槽位号**，用哪把密钥由信封自己带，不需要猜。
+
+**密钥来自服务端下发的池，不是本地 tee**（2026-11-01 修正）：每次请求
+`teeIndiv4App` 都会得到一套新池，签发该 token 的那次请求用的池才能解开它。
+事后再取一套新池、或用设备本地的 XmartV1LocalKey，都会 `InvalidTag`。
+请求信封同理——带 `tee_id` 段会直接 `12110009`（信封解不开）。
 
 用法：
     pixi run -e rev python scripts/renew.py status    # 看当前 token 是否可用
@@ -43,12 +47,6 @@ import local_env  # noqa: E402
 
 ROOT = os.path.dirname(_HERE)
 
-# unseal-token.py 文件名带连字符，不能直接 import，用 importlib 加载
-import importlib.util  # noqa: E402
-_spec = importlib.util.spec_from_file_location(
-    'unseal_token', os.path.join(_HERE, 'unseal-token.py'))
-unseal = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(unseal)
 LIVE = os.path.join(ROOT, 'work/live')
 AT_PATH = os.path.join(LIVE, 'access_token.txt')
 RT_PATH = os.path.join(LIVE, 'refresh_token.txt')
@@ -59,34 +57,22 @@ AT_LIFETIME = 2.5 * 3600
 RENEW_MARGIN = 600
 
 
-def _keys():
-    """从本地 tee 取 10 把 XmartV1LocalKey（已二次 base64 解码）。"""
-    from cryptography.hazmat.primitives.asymmetric import padding
-    buf = open(unseal.TEE, 'rb').read()
-    iv = base64.b64decode(unseal.mmkv_read(buf, b'XTeeSecurityIv'))
-    wrapped = base64.b64decode(unseal.mmkv_read(buf, b'XTeeEncryptAesKey'))
-    key = unseal.rsa_key().decrypt(wrapped, padding.PKCS1v15())
-    return unseal.local_keys(key, iv, buf)
+def _keys(di=None):
+    """取一套当次有效的服务端密钥池 ``{index: 16B}``。**每次调用都不同，不要缓存。**
+
+    以前这里读本地 tee，那条路走不通：服务端加密 token 与请求信封用的是它
+    当次下发的池，不是设备本地的 XmartV1LocalKey。用本地 tee 只会拿到
+    ``12110009``（信封解不开）或 ``InvalidTag``（token 解不开）。
+    """
+    import selfclient
+    return selfclient.keys(di or probe.DI)
 
 
-def _tee_id():
-    """5.19.0 的 tee 里有 tee_id 键；4.2.0 没有。返回 str 或 None。"""
-    buf = open(unseal.TEE, 'rb').read()
-    try:
-        v = unseal.mmkv_read(buf, b'tee_id')
-    except Exception:
-        return None
-    if not v:
-        return None
-    s = v.decode('utf8', 'replace') if isinstance(v, bytes) else str(v)
-    s = s.strip('\x00').strip()
-    return s or None
-
-
-def unwrap_weeb(weeb):
+def unwrap_weeb(weeb, pool=None):
     """解开 WEEB 信封，返回 (jwt, key_index)。
 
-    keyIndex 直接索引密钥槽；AAD 为空。
+    keyIndex 直接索引密钥槽；AAD 为空。``pool`` 必须是**签发该 token 的那次
+    请求**所用的池，事后重取的新池解不开（``InvalidTag``）。
     """
     raw = base64.b64decode(weeb)
     if len(raw) < 60:
@@ -96,7 +82,7 @@ def unwrap_weeb(weeb):
     idx = raw[3]
     iv = raw[47:59]
     ct = raw[59:]
-    keys = _keys()
+    keys = pool or _keys()
     if idx not in keys:
         raise ValueError(f'keyIndex={idx} 不在密钥池里（有 {sorted(keys)}）')
     pt = AESGCM(keys[idx]).decrypt(iv, ct, None)
@@ -108,7 +94,14 @@ def unwrap_weeb(weeb):
     return jwt, idx
 
 
-def _post(path, extra_plain):
+def _post(path, extra_plain, pool=None):
+    """打一个 SSO 接口，返回 (响应 dict, 本次用的密钥池)。
+
+    池必须连同响应一起返回：响应里的 WEEB 只能用**本次请求**的池解开，
+    事后再取一个新池解不开（2026-11-01 实测）。
+
+    ``tee_id`` 传 None：信封带 tee_id 段时服务端一律 ``12110009``。
+    """
     body = '{}'
     ts = int(time.time() * 1000)
     xp = probe.base_headers(ts)
@@ -122,9 +115,9 @@ def _post(path, extra_plain):
              + base64.b64encode(json.dumps({'xpSign': inner},
                                            separators=(',', ':')).encode()).decode()
              + extra_plain).encode()
-    keys = _keys()
+    pool = pool or _keys()
     xp['Xp-Authorization'] = probe.build_auth(
-        _tee_id(), probe.DI, 7, keys[7], plain,
+        None, probe.DI, 7, pool[7], plain,
         version=2, nonce_length=36, ts_ms=ts)
     hh = dict(xp)
     hh['Xp-Signature'] = hmac.new(probe.SECRET.encode(),
@@ -133,7 +126,7 @@ def _post(path, extra_plain):
     raw = probe.dechunk(probe.http('apps.xiaopeng.com', path, hh, body))
     s = raw if isinstance(raw, str) else raw.decode('utf8', 'replace')
     i, j = s.find('{'), s.rfind('}')
-    return json.loads(s[i:j + 1])
+    return json.loads(s[i:j + 1]), pool
 
 
 def call(path, token, body='{}'):
@@ -150,9 +143,9 @@ def call(path, token, body='{}'):
              + base64.b64encode(json.dumps({'xpSign': inner},
                                            separators=(',', ':')).encode()).decode()
              + '&accessToken=' + token).encode()
-    keys = _keys()
+    pool = _keys()
     xp['Xp-Authorization'] = probe.build_auth(
-        _tee_id(), probe.DI, 7, keys[7], plain,
+        None, probe.DI, 7, pool[7], plain,
         version=2, nonce_length=36, ts_ms=ts)
     hh = dict(xp)
     hh['Xp-Signature'] = hmac.new(probe.SECRET.encode(),
@@ -195,12 +188,12 @@ def renew():
     if not rt:
         raise RuntimeError(f'没有 refreshToken，先跑 unseal-token.py 或登录一次\n'
                            f'预期位置: {RT_PATH}')
-    r = _post('/sso/app/v3/token/refresh', '&refreshToken=' + rt)
+    r, pool = _post('/sso/app/v3/token/refresh', '&refreshToken=' + rt)
     if r.get('code') != 200:
         raise RuntimeError(f"续期失败: {r.get('code')} {r.get('desc')}")
     d = r['data']
-    at_new, idx_a = unwrap_weeb(d['accessToken'])
-    rt_new, idx_r = unwrap_weeb(d['refreshToken'])
+    at_new, idx_a = unwrap_weeb(d['accessToken'], pool=pool)
+    rt_new, idx_r = unwrap_weeb(d['refreshToken'], pool=pool)
     _save(at_new, rt_new)
     print(f'续期成功  AT idx={idx_a} 尾={at_new[-16:]}  '
           f'RT idx={idx_r} 尾={rt_new[-16:]}  expiresIn={d.get("expiresIn")}')
