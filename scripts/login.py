@@ -51,9 +51,67 @@ SMS_TYPE = '11'  # 登录场景；服务端对 1/2/11/21/31 不校验取值，�
 # drag/validate 必须带上它，否则服务端无法定位是哪个验证码实例。
 CAPTCHA_ID = 'f6c14777879d4a75b683b29be6709db6'
 
+# smsLogin 请求体里的设备信息，取自 4.2.0 真机抓包。服务端据此回填
+# sData.lastDeviceModel / lastDeviceBrand（缺这两项时这两个字段为空）。
+# 注意：它**不是**业务接口 12010101 的成因——那个是请求头缺 Xp-Uid 导致的。
+DEVICE_MODEL = 'sdk_gphone64_arm64'
+DEVICE_BRAND = 'google'
 
-def _call(path, body, xid=None):
-    """带双层签名的 POST，返回 (json, set_cookie 列表)。"""
+# drag/validate 的 sceneType 白名单。未知场景返回 12051100，已知场景返回 200。
+# 2026-11-01 从 4.2.0 真实登录流量里看到第二道滑块用的是 **LGN**，不是 SMS：
+#   smsLogin → 12040101 → drag/validate{sceneType:"LGN"} → 200{valid:true} → smsLogin 200。
+# 此前枚举漏了 LGN，导致第二道滑块票据一直被以错误场景提交。
+SECOND_DRAG_SCENES = ('LGN', 'SMS', 'RESET', 'REG', 'RESET_PASSWORD', 'CANCEL_ACCOUNT')
+
+# 第二道滑块（smsLogin 返回 12040101 之后那道）的真实场景。
+SECOND_DRAG_SCENE = 'LGN'
+
+# 第二道滑块票据在内层明文里的候选字段名。依据：accessToken/refreshToken 就是
+# 以 `&accessToken=…` 形式追加在内层明文末尾的（研究文档 §4.4、§4.6）。
+INNER_TICKET_FIELDS = ('validate', 'ptoken', 'captchaValidate')
+
+# 旧版 smsLogin 端点。实测 v3/v4 仍可用（返 12001402 而非 12001100），
+# 但 dex 字符串池里只有 v5/smsLogin —— 说明 v3/v4 是服务端保留的旧路由，
+# App 从不调用。旧版可能没有第二道滑块，故列为待验候选。
+OLD_SMSLOGIN_VERSIONS = (3, 4)
+
+
+TRACE_DIR = os.path.join(LIVE, 'trace')
+_TRACE_SEQ = [0]
+
+
+def _trace(path, body, pool, raw, parsed):
+    """把一次请求的完整上下文落盘，供事后离线诊断。
+
+    为什么必须存 **密钥池**：``sData`` 是用服务端当次下发的密钥池加密的，
+    而 ``selfclient.keys()`` 每次调用都可能返回不同的一套。若不在请求时刻
+    存下来，事后拿到 ``sData`` 也无从解密——只能再发一条短信重来。
+    """
+    try:
+        os.makedirs(TRACE_DIR, exist_ok=True)
+        _TRACE_SEQ[0] += 1
+        name = os.path.basename(path).replace('/', '_') or 'root'
+        fn = os.path.join(TRACE_DIR, f'{int(time.time()*1000)}_{_TRACE_SEQ[0]:03d}_{name}.json')
+        with open(fn, 'w') as f:
+            json.dump({
+                'path': path,
+                'body': body,
+                'keypool': {str(k): v.hex() for k, v in (pool or {}).items()},
+                'response': parsed,
+                'raw': raw[:200000],
+            }, f, ensure_ascii=False)
+        return fn
+    except Exception:
+        return None
+
+
+def _call(path, body, xid=None, inner_extra=''):
+    """带双层签名的 POST，返回 (json, set_cookie 列表)。
+
+    ``inner_extra`` 追加到 ``Xp-Authorization`` 内层明文末尾（形如
+    ``&validate=…``）。内层是唯一客户端可控、且实测仍能正常解封的载体——
+    已知 accessToken/refreshToken 就走这条路。
+    """
     di = selfclient.device_id()
     pool = selfclient.keys(di)
     ts = int(time.time() * 1000)
@@ -65,7 +123,8 @@ def _call(path, body, xid=None):
                      hashlib.sha256).hexdigest()
     plain = (str(uuid.uuid4())
              + base64.b64encode(json.dumps({'xpSign': inner},
-                                           separators=(',', ':')).encode()).decode())
+                                           separators=(',', ':')).encode()).decode()
+             + inner_extra)
     xp['Xp-Authorization'] = probe.build_auth(
         None, di, 3, pool[3], plain.encode(), version=2, nonce_length=36, ts_ms=ts)
     hh = dict(xp)
@@ -77,7 +136,33 @@ def _call(path, body, xid=None):
                for line in raw.split('\r\n')
                if line.lower().startswith('set-cookie:')]
     s = probe.dechunk(raw)
-    return json.loads(s[:s.rindex('}') + 1]), cookies
+    parsed = json.loads(s[:s.rindex('}') + 1])
+    _trace(path, body, pool, raw, parsed)
+    return parsed, cookies
+
+
+def _call_pooled(path, body, xid=None, inner_extra=''):
+    """同 ``_call``，但额外返回**本次请求用的密钥池**。
+
+    ``sData`` 是用「服务端当次下发的密钥池」加密的，而该池每次调用
+    ``/biz/v5/secure/teeIndiv4App`` 都会变（2026-11-01 实测两次取池不同）。
+    所以必须把「发 smsLogin 那次用的池」与响应绑定返回，不能事后再取一份。
+    """
+    captured = {}
+
+    orig = selfclient.keys
+
+    def _spy(di=None):
+        p = orig(di)
+        captured['pool'] = p
+        return p
+
+    selfclient.keys = _spy
+    try:
+        r, cookies = _call(path, body, xid=xid, inner_extra=inner_extra)
+    finally:
+        selfclient.keys = orig
+    return r, cookies, captured.get('pool')
 
 
 def _xid_of(cookies):
@@ -154,16 +239,176 @@ def verify_code(mobile, code, xid):
     return r.get('data')
 
 
+def try_second_drag(mobile, xid, validate, captcha_id=None):
+    """第二道滑块：把票据提交给 ``drag/validate``，场景必须是 ``LGN``。
+
+    **2026-11-01 从 4.2.0 真实登录流量取证确定**（此前结论被推翻）：
+    ``drag/validate`` 在 ``sceneType:"LGN"`` 下**确实会写会话**——真实时序为
+
+        smsLogin → 12040101
+        drag/validate{sceneType:"LGN", mobile, captchaId, validate} → 200 {valid:true}
+        smsLogin → 200 {sData: "WEEB…"}
+
+    2026-10-31 之所以判定它「只判定、不写会话」，是因为当时用 ``sceneType:"SMS"``
+    提交：SMS 是**发码前那道**滑块的场景，用它提交第二道滑块的票据不会解锁
+    ``smsLogin``。LGN 当时不在枚举出的白名单里，被漏掉了。
+
+    返回 ``(out, data)``；``data`` 非 ``None`` 表示已换到 token。
+    """
+    out = []
+    drag_body = json.dumps({
+        'sceneType': SECOND_DRAG_SCENE,
+        'mobile': mobile,
+        'captchaId': captcha_id or CAPTCHA_ID,
+        'validate': validate,
+    }, separators=(',', ':'))
+    r, _ = _call('/verification/app/v3/drag/validate', drag_body, xid=xid)
+    out.append(f'drag/validate({SECOND_DRAG_SCENE}): {r.get("code")} '
+               f'valid={(r.get("data") or {}).get("valid")}')
+    if r.get('code') != 200 or not (r.get('data') or {}).get('valid'):
+        return out, None
+    # smsLogin 按版本依次试：4.2.0 真机走 v3（2026-11-01 抓包确认），v5 是
+    # 5.19.0 的路径。两版服务端都可能只认自己那条，故 v3 优先、v5 兜底。
+    body = smslogin_body(mobile)
+    for v in (3, 5):
+        r2, _, pool2 = _call_pooled(f'/sso/app/v{v}/smsLogin', body, xid=xid)
+        d = r2.get('data')
+        keys = sorted(d.keys()) if isinstance(d, dict) else type(d).__name__
+        out.append(f'v{v}/smsLogin: {r2.get("code")} data_keys={keys}')
+        if r2.get('code') == 200:
+            # 把这次的密钥池挂到 data 上，解密 sData 时必须用同一套
+            if isinstance(d, dict):
+                d['_keypool'] = pool2
+                try:
+                    d['_uid'] = unwrap_sdata(d['sData'], pool=pool2).get('uid')
+                except Exception:
+                    pass
+            return out, d
+    return out, None
+
+
+def unwrap_sdata(sdata, tee_path=None, pool=None):
+    """解开 ``smsLogin`` 返回的 ``sData`` 信封，返回内层 dict。
+
+    ``sData`` 是「外层 WEEB 套内层 JSON」：外层解开后是 ``32B 随机 + JSON``，
+    JSON 里的 ``accessToken``/``refreshToken`` 本身又是 WEEB 信封（各 1436 字符），
+    需再用同一套 keypool 解一次才是 JWT。
+
+    外层布局与 ``renew.unwrap_weeb`` 相同（``XA`` + ver + keyIndex@3 +
+    iv@47..59 + ct@59..），区别是明文不固定 1000 B、且前 32 B 是随机数。
+
+    **密钥来源是服务端当次下发的密钥池，不是本地 tee**（2026-11-01 实测）：
+    ``selfclient.keys()`` 每次调 ``/biz/v5/secure/teeIndiv4App`` 取一套，
+    请求信封用的就是这套，服务端也用同一套加 ``sData``。用本地 tee 的
+    keypool 解会报 ``InvalidTag``——tee 里那套是设备自己存的另一份，
+    与服务端按 deviceId 下发的不一定同步。
+
+    ``pool`` 由调用方从请求 trace 里带进来（最可靠：就是那次请求用的池）。
+    缺省时现取一份；``tee_path`` 仅作最后兜底。
+    """
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    raw = base64.b64decode(sdata)
+    if raw[:2] != b'XA':
+        raise ValueError(f'sData 标记不是 XA: {raw[:2]!r}')
+    idx = raw[3]
+
+    keys = pool
+    if not keys or idx not in keys:
+        try:
+            keys = selfclient.keys()
+        except Exception:
+            keys = None
+    if not keys or idx not in keys:
+        import importlib.util
+        from cryptography.hazmat.primitives.asymmetric import padding
+        spec = importlib.util.spec_from_file_location(
+            'unseal_token', os.path.join(_HERE, 'unseal-token.py'))
+        unseal = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(unseal)
+        buf = open(tee_path or os.path.join(LIVE, 'tee.bin'), 'rb').read()
+        key = unseal.rsa_key().decrypt(
+            base64.b64decode(unseal.mmkv_read(buf, b'XTeeEncryptAesKey')),
+            padding.PKCS1v15())
+        iv0 = base64.b64decode(unseal.mmkv_read(buf, b'XTeeSecurityIv'))
+        keys = unseal.local_keys(key, iv0, buf)
+
+    if idx not in keys:
+        raise ValueError(f'keyIndex={idx} 不在 keypool（有 {sorted(keys)}）')
+    pt = AESGCM(keys[idx]).decrypt(raw[47:59], raw[59:], None)
+    return json.loads(pt[32:].decode())
+
+
+def unwrap_token_weeb(weeb, tee_path=None, pool=None):
+    """把 ``sData`` 内层的 ``accessToken``/``refreshToken`` 信封解成 JWT。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'renew', os.path.join(_HERE, 'renew.py'))
+    renew = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renew)
+    if pool:
+        # token 信封同样用「服务端当次下发的密钥池」加密，与 sData 一致。
+        # renew.unwrap_weeb 内部调 renew._keys()，把它替换成用传入的池。
+        renew._keys = lambda: pool
+    elif tee_path:
+        # renew._keys() 读的是 unseal.TEE（不是 renew.TEE），必须改到源头
+        renew.unseal.TEE = tee_path
+    jwt, _ = renew.unwrap_weeb(weeb)
+    return jwt
+
+
+def tokens_of(data, tee_path=None):
+    """从 ``smsLogin`` 的 data 取 (accessToken, refreshToken)。
+
+    兼容两种返回结构：
+
+    - 5.19.0：``{"accessToken": "WEEB…", "refreshToken": "WEEB…"}``
+    - 4.2.0：``{"sData": "XA…"}`` —— 需解外层信封才能拿到内层同名字段
+
+    返回的是**信封字符串**（不是 JWT），与既有 ``save()`` 落盘口径一致。
+    """
+    if not isinstance(data, dict):
+        return None, None
+    if data.get('accessToken'):
+        return data['accessToken'], data.get('refreshToken')
+    if data.get('sData'):
+        inner = unwrap_sdata(data['sData'], tee_path, pool=data.get('_keypool'))
+        return inner.get('accessToken'), inner.get('refreshToken')
+    return None, None
+
+
+def smslogin_body(mobile):
+    """``smsLogin`` 的请求体，字段与顺序对齐 4.2.0 真机抓包。
+
+    带上 ``deviceModel``/``deviceBrand`` 才能让服务端回填 ``sData`` 里的设备
+    字段（见 ``DEVICE_MODEL`` 处注释）。
+    """
+    return json.dumps({
+        'ext': '',
+        'deviceUserName': None,
+        'mobile': mobile,
+        'deviceModel': DEVICE_MODEL,
+        'deviceBrand': DEVICE_BRAND,
+    }, separators=(',', ':'))
+
+
 def login(mobile, xid):
     """换 token。返回 (accessToken, refreshToken)。"""
-    r, _ = _call('/sso/app/v5/smsLogin', json.dumps({'mobile': mobile}), xid=xid)
+    r, _, pool = _call_pooled('/sso/app/v5/smsLogin', smslogin_body(mobile), xid=xid)
     if r.get('code') != 200:
         raise RuntimeError(f"登录失败: {r.get('code')} {r.get('desc') or r.get('msg')}")
-    d = r['data']
-    return d['accessToken'], d['refreshToken']
+    at, rt = tokens_of({**(r.get('data') or {}), '_keypool': pool})
+    if not at:
+        raise RuntimeError(f"登录返回 200 但取不到 token：keys={sorted(r['data'])}")
+    return at, rt
 
 
-def save(at, rt):
+def save(at, rt, uid=None):
+    """落盘 token（信封形式，与既有 renew/unseal 口径一致）。
+
+    ``uid`` 一并存：业务请求的 ``Xp-Uid`` 必须是 token 所属账号，
+    否则带 token 也恒 ``12010101``（2026-11-01 实测）。
+    """
     os.makedirs(LIVE, exist_ok=True)
     atp, rtp = os.path.join(LIVE, 'access_token.txt'), os.path.join(LIVE, 'refresh_token.txt')
     open(atp, 'w').write(at)
@@ -171,6 +416,8 @@ def save(at, rt):
     os.chmod(atp, 0o600)
     os.chmod(rtp, 0o600)
     open(atp + '.ts', 'w').write(str(int(time.time())))
+    if uid:
+        open(os.path.join(LIVE, 'uid.txt'), 'w').write(str(uid))
 
 
 def main():
