@@ -11,7 +11,7 @@
 
 **客户端身份层已全部闭环**：签名、appId、secret、密钥池、本地密钥、信封格式、MQTT 凭据全部打通并线上验证。
 
-**续期已闭环**：一次登录 + refresh 循环即可长期免重登。连续 5 次续期全部成功，每次 `keyIndex` 轮换。**注意**：重新登录后若解出的 token 尾部不变，说明 `mmkv_read` 读到了 MMKV 里的历史值，见 §4.6。
+**续期已闭环**：一次登录 + refresh 循环即可长期免重登。连续 5 次续期全部成功，每次 `keyIndex` 轮换。**注意**：重新登录后若解出的 token 尾部不变，说明 `mmkv_read` 读到了 MMKV 里的历史值，见 §4.9。
 
 **车控已打通 13 条**：解锁、锁车、闪灯、遮阳帘开关、空调开关、设温度、全车车窗升降、极速降温、极速升温、高温抑菌、鸣笛、哨兵开关、哨兵灵敏度。均实测成功并有 `code:200` 回执。
 
@@ -200,12 +200,12 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 
 **仍未变**：登录仍是单会话约束，自研客户端登录会把官方 App 踢下线。这一条独立注册解决不了。
 
-### 2.7 没有任何证书 pin
+### 2.7 没有证书 pin，但有私有 CA 信任锚
 
 - 四份网络配置（`network.xml`、`jz_network_security_config.xml`、`network_security_config.xml`、`network_security_config_2.xml`）只有 `<base-config>` / `<domain-config>` 的 `cleartextTrafficPermitted`，**无 `<trust-anchors>`、无 `<pin-set>`**；dex 内无 `sha256/` 形式 pin 常量。
 - `res/raw/my_ca.pem` 是一张 Charles Proxy CA，但四份配置都没引用它，dex 内 `raw/my_ca` 命中 0，属开发期遗留。
 
-但**这不等于可以 MITM**：`targetSdkVersion=31`，按 Android 7+ 规则不信任用户 CA。实测 mitmproxy 抓到 `Client TLS handshake failed. The client does not trust the proxy's certificate for apps.xiaopeng.com`。系统信任库三个路径全部只读，模拟器 `adb remount` 报 `Device must be bootloader unlocked`。**不要指望 MITM。**
+**但「没有 pin」不等于能 MITM**。`apps*.xiaopeng.com` 的服务端证书由 `CN=Xiaopeng Motors Intermediate CA`（`O=XiaopengMotors Ltd`）签发，App 对这批主机持有自家私有 CA 作为信任锚，系统 CA 对它无效。而 `collect`/`sentry` 用 DigiCert RapidSSL，系统 CA 一装就能解密——这个对比证明 CA 安装方式没问题，差异在信任锚。详见 §4.3。
 
 ---
 
@@ -287,9 +287,57 @@ base64 解码后 1075 B：
 
 **验证码双滑块**：滑块共两次，不是异常。`smsType=1/2` 在**发短信前**验一次；短信校验通过后**换 token 时**再验一次。第二次同样强制。
 
-接口直连下发短信对任何号码（含真实号码）统一返回 `12051401 短信发送失败`，而 App 界面路径成功——说明 UI 额外带了 Yidun `validate` ticket 或设备上下文头，纯 API 调用无法复现。**自研客户端应复用官方滑块或改用其他登录方式，不要试图绕开。**
+**`Xp-Xid` 是会话钥匙**。`/verification/app/v5/sms/code` 首次响应会下发 `Set-Cookie: XP-Xid=<uuid>`；后续请求把这个 uuid 放进 **`Xp-Xid` 请求头**，服务端才进入「校验票据」模式：
 
-### 4.2 令牌结构
+| 请求形态 | 响应 |
+| --- | --- |
+| 无 `Xp-Xid` 头，body 带任意 `validate` | `12040101 请验证滑块验证码` |
+| 有 `Xp-Xid` 头，body 带 `validate`（**含垃圾值 `zzz`、空串、已用过的票据**） | `12040106 滑块验证码校验不通过` |
+| 有 `Xp-Xid` 头，body 不带 `validate` | `12040106` |
+
+即：带 `Xp-Xid` 只是把错误码从「要求滑块」变成「滑块不通过」，**并不代表票据被真正校验过**——垃圾票据与真票据返回同一个码。所以 `12040106` 不能用作票据是否有效的判据。
+
+`/verification/app/v3/drag/validate` 需要 `{validate, captchaId, type, sceneType}` 四字段才通过反序列化（少 `type`/`sceneType` 报 `12051101 请求参数异常`；四字段齐全但票据无效报 `12051100 操作失败`）；但真票据与垃圾票据在此同样都是 `12051100`，**无法用它验证票据**。
+
+**独立解出的易盾票据不被接受**。用 Chrome + CDP 驱动易盾官方 H5（`cstaticdun.126.net/api/v2/mobile.v2.8.1.html`，`captchaId=f6c14777879d4a75b683b29be6709db6`），按缺口位置拖动、客户端回调 `result=true` 并拿到 531 B 的 `validate`，服务端仍判失败。易盾 check 接口（`c.dun.163.com/api/v1/check`）需要私有密钥才能自验，无法从客户端侧确认票据真伪。结论：**票据绑定服务端会话与轨迹风控，纯脚本生成的轨迹过不了。**
+
+**接口直连下发短信**对任何号码（含真实号码）统一返回 `12051401 短信发送失败`，而 App 界面路径成功——UI 走的是官方 SDK 生成的票据，纯 API 调用无法复现。**自研客户端应复用官方滑块或改用其他登录方式，不要试图绕开。**
+
+**登录是三步，不是一步**。dex 里同时存在 `/verification/app/v5/sms/code`、`/verification/app/v3/sms/validate` 与 `/sso/app/v5/smsLogin`，实测这三步各司其职：
+
+| 步骤 | 端点 | 职责 |
+| --- | --- | --- |
+| 1 | `POST /verification/app/v5/sms/code` | 发短信，响应 `Set-Cookie: XP-Xid=<uuid>` |
+| 2 | `POST /verification/app/v3/sms/validate` | 校验验证码，把通过状态写进会话 |
+| 3 | `POST /sso/app/v5/smsLogin` | **只带 `mobile`**，从会话取状态换 token |
+
+**`smsLogin` 不从 body 读验证码**。证据是服务端的字段校验报错：只传 `mobile` 时返回 `12001402 短信验证码错误`（不是「code 不能为空」）；而 `sms/validate` 缺字段会明确报 `code不能为空`、`smsType不能为空`。换 `code`/`smsCode`/`verifyCode` 三种字段名喂给 `smsLogin` 结果完全一致——它根本没看这些字段。
+
+这解释了 2026-10-31 那次失败：App 内发码拿到真码 `1532`，直接喂 `smsLogin` 一律 `12001402`，因为**从未在同一个会话里调过 `sms/validate`**。
+
+`sms/validate` 的必填字段是 `{mobile, smsType, code}`。`smsType` 只要非空即可，`1`/`2`/`11`/`21`/`31` 返回一致（都用假码，统一 `12051403 短信验证码已过期`，说明服务端确实在校验码而非忽略）。会话缺失或过期返回 `12051102 session会话过期`。
+
+`/sso/app/v5/login` 是**密码**登录（缺 `password` 报 `12001101 password不能为空`），不要与短信登录混用。
+
+实现见 `scripts/login.py`。
+
+### 4.2 滑块：卡在发码这一步
+
+滑块只在**发码**时强制。`smsLogin` 与 `sms/validate` 本身都不校验滑块。
+
+发码请求必须带易盾票据，而票据**无法由脚本生成**：用 Chrome + CDP 驱动易盾官方 H5（`cstaticdun.126.net/api/v2/mobile.v2.8.1.html`，`captchaId=f6c14777879d4a75b683b29be6709db6`），按缺口位置拖动、客户端回调 `result=true` 并拿到 531 B 的 `validate`，服务端仍判失败。易盾 check 接口（`c.dun.163.com/api/v1/check`）需要私有密钥才能自验，无法从客户端侧确认票据真伪。结论：**票据绑定服务端会话与轨迹风控，纯脚本生成的轨迹过不了。**
+
+所以自研侧的可行路径是：让官方 App 发码，把 App 的 `XP-Xid` 与验证码喂给 `scripts/login.py --xid <uuid> --code <验证码>`。
+
+### 4.3 为什么 MITM 抓不到 `apps*.xiaopeng.com`
+
+**不是证书固定，是私有 CA 信任锚**。`apps*.xiaopeng.com` 的证书由 `CN=Xiaopeng Motors Intermediate CA`（`O=XiaopengMotors Ltd`）签发，而 `collect.xiaopeng.com`、`sentry.xiaopeng.com` 用 DigiCert RapidSSL。
+
+模拟器系统 CA 装好后（`scripts/emu-ca.sh`，tmpfs 挂载进 `/apex/com.android.conscrypt/cacerts`），实测 `collect`/`sentry` 能正常解密，`apps*` 一律 `Client TLS handshake failed ... does not trust the proxy's certificate`。系统信任库对 DigiCert 主机生效，说明 CA 安装本身没问题；App 对 API 主机另有一套信任锚，指向自家私有 CA。
+
+这也修正了 §2.7 的旧结论：当时看到 `network_security_config` 里没有 `<pin-set>` 就判定「没有 pin」，但私有 CA 信任锚不需要写 pin-set，照样让系统 CA 失效。
+
+### 4.4 令牌结构
 
 登录成功后，token **不在 HTTP 头里**，而在内层明文末尾：
 
@@ -299,7 +347,7 @@ UUID + base64({"xpSign":"…"}) + "&accessToken=" + JWT(968 B)
 
 post-login 的 canonical 头集合与登录前不同：出现 `XP-UID`，且 `appVersion`/`brand`/`deviceModel`/`osVersion`/`versionCode` 改为小写形式，另加 `XP-OTA-DATA-WITH-OBJECT-VALUE=1`、`XP-OTA-DATA-WITH-VERSION=1`；`XP-TEE-ID`、`XP-PTOKEN` 不再作为独立头出现（TEE 值仍嵌在 `Xp-Authorization` blob 内）。
 
-### 4.3 令牌寿命
+### 4.5 令牌寿命
 
 JWT 解三段：
 
@@ -325,7 +373,7 @@ JWT 解三段：
 
 **一个必须记住的坑**：`12010101` 同时表示「过期」与「被新登录顶掉」（单会话约束）。两者错误码相同，靠文案无法区分，只能靠本地记录的签发时刻判断。
 
-### 4.4 续期（已闭环）
+### 4.6 续期（已闭环）
 
 `POST /sso/app/v3/token/refresh`，`refreshToken` 放在**内层明文**里（`…&refreshToken=<值>`），放 body 无效（报 `12010203`）。
 
@@ -359,15 +407,27 @@ pixi run -e rev python scripts/renew.py auto     # 快过期才续期
 
 token 落在 `work/live/{access,refresh}_token.txt`（0600），不进版本库。
 
-### 4.5 单会话约束
+### 4.7 token 与 deviceId 绑定（2026-10-31 实测）
+
+**现象**：App 内登录成功、界面显示已登录（车主「杰尼」/ G6），`unseal-token.py` 解出 968 B token，但 `renew.py status` 返回 `12010104 登录状态已过期，请重新登录`，`renew.py renew` 返回 `12010204`。
+
+**诊断**：空 token 返回 `12010103`，真 token 返回 `12010104`。**两者不同就证明信封解开了、token 被读到了**，纯粹是身份对不上——不是签名问题、不是信封格式问题、不是 token 过期。
+
+**根因**：`deviceId` 存在 `shared_prefs/device_id.xml.xml`（键 `device_id`），**App 每重装一次就换一个**。`work/local.env` 里的 `XP_DI` 还是上一次的 `00000000…`，而当前是 `00000000…`。用旧 DI 签名，服务端认为这份 token 不属于该设备。
+
+**修复**：`unseal-token.py` 增加 `sync_device_id()`，每次解 token 前从模拟器读当前 deviceId 并写回 `work/local.env`。修复后 `renew.py status` 直接 `code:200` 并列出车辆。
+
+**排查顺序**（下次遇到「token 解出来却失效」按此走）：先比空 token 与真 token 的错误码——不同则查 deviceId，相同才是 token 本身的问题。
+
+### 4.8 单会话约束
 
 同一账号同时只允许一个有效会话，自研 App 登录会把官方 App 踢下线。已在真实账号上触发过一次，**尚未找到共存办法**。
 
-### 4.6 重新登录后解出的 token 仍失效——MMKV 追加写陷阱（2026-10-30 定位并修复）
+### 4.9 重新登录后解出的 token 仍失效——MMKV 追加写陷阱（2026-10-30 定位并修复）
 
 **现象**：用户退出并重新登录后，`unseal-token.py` 解出的 accessToken 尾部不变（`ou-tBUvxONOK0SaI`），`renew.py status` 返回 `12010101 登录状态已过期`，`renew.py renew` 返回 `12010201`。App 自身却工作正常。
 
-**误判过程（本应避免）**：一度怀疑 token 存在别处、试图从 `/proc/PID/mem` 捞明文（读 `I/O error`，SELinux `u:r:su:s0` 下受限）、试了 `vehicle/list`、`queryList` 等错误路径。文档 §4.4 已写明续期闭环，正确做法是先读文档再排查。
+**误判过程（本应避免）**：一度怀疑 token 存在别处、试图从 `/proc/PID/mem` 捞明文（读 `I/O error`，SELinux `u:r:su:s0` 下受限）、试了 `vehicle/list`、`queryList` 等错误路径。文档 §4.6 已写明续期闭环，正确做法是先读文档再排查。
 
 **真正根因**：`tee` 文件里 `accessToken` 出现 **4 次**（offset 1177 / 4428 / 7742 / 7835），`refreshToken` 也 4 次。MMKV 是**追加写**，同一个键会留下多份历史值，**最新的在最后**。而 `unseal-token.py` 的 `mmkv_read` 用 `buf.find(name)` 取**第一次**出现，读到的是登录前那份已失效的旧 token。
 
@@ -748,7 +808,7 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 | tenant 密钥池 | ✅ 闭环 | 0 |
 | 本地密钥 | ✅ 闭环 | 0 |
 | `Xp-Authorization` blob | ✅ 闭环（分版本） | 0 |
-| 登录与会话 | ✅ `/sso/app/v5/smsLogin` | 滑块需复用官方 |
+| 登录与会话 | 🟡 三步链路已确认（发码 → `sms/validate` → `smsLogin`），`scripts/login.py` 已实现；发码需易盾票据 | 发码仍需人过滑块 |
 | 令牌续期 | ✅ 闭环，连续 5 次成功 | 0 |
 | MQTT 连接与凭据 | ✅ 闭环 | 0 |
 | 车控指令 | 🟡 10/12 | 单扇车窗、除霜、循环、座椅加热通风、智能清洁/除味/香氛（启动走 BLE，不在 MQTT；风量 App 无此功能） |
@@ -894,7 +954,7 @@ pixi run -e rev python scripts/mqtt-send.py camera-state # 读摄像头状态（
 | 内层明文结构未知导致 `12110001` | **错**。真正原因是反复调 refresh 把令牌链作废 | 干净 token 一次通过 |
 | 车控指令可通过 REST 下发 | **错**。60+ 路径全 `Handler Not Found`，走 MQTT | 内存里抓到 MQTT 报文 |
 | 静态可从 dex 还原业务逻辑 | **错**。dex 整体加密，99.98% 是密文 | dex 头解析 |
-| 可以 MITM 抓明文 | **错**。`targetSdk=31` 不信任用户 CA，系统信任库只读 | mitmproxy 实测拒绝 |
+| 可以 MITM 抓明文 | **对一半**。系统 CA 可装进 `/apex/com.android.conscrypt/cacerts`（tmpfs），DigiCert 主机（`collect`/`sentry`）能解密；`apps*` 因私有 CA 信任锚仍拒绝 | mitmproxy 实测 |
 | 5.19.0 无法在模拟器运行 | **错**。可运行，是 5.23.5 崩 | 实测 |
 | 哨兵模式只能读不能写 | **错**。`st=8 action:2` 可写，`SENTINEL_MODE_VIDEO` 就是开关位 | 写 1/0 后 `soldier_camera_status` 0→1→0 |
 | `st=8` 的 `settings[]` 按数组位置对齐 | **错**。按键名匹配，顺序无关；未知 `code` 被静默忽略 | 首元素塞 `ZZ_BOGUS` 后灵敏度仍正确落位 |
