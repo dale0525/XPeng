@@ -54,7 +54,14 @@ function captchaHtml(captchaId: string): string {
       mode: 'embed',
       width: '100%',
       onVerify: function (err, data) {
-        if (err) { XpengBridge.onError((err && err.message) || '滑块出错'); return; }
+        if (err) {
+          // 拖错了。易盾的实例在失败后仍可复用，但要主动 reset 才会重新出图；
+          // 不 reset 就停在失败态，用户再拖也拿不到新票据（实测「拖错一次后
+          // 再也过不去」就是这么来的）。
+          XpengBridge.onError((err && err.message) || '滑块出错');
+          try { if (window.__cap && window.__cap.reset) window.__cap.reset(); } catch (e) {}
+          return;
+        }
         XpengBridge.onValidate(data.validate);
       }
     }, function (instance) {
@@ -78,7 +85,14 @@ export function SliderCaptcha({
   onError?: (message: string) => void;
 }) {
   const html = useMemo(() => captchaHtml(CAPTCHA_ID), []);
-  const settled = useRef(false);
+  /**
+   * 防止同一次拖动重复回传票据（易盾会在成功后连发多次回调）。
+   *
+   * 拖错时**不能**把它设成 true 后就不管：那会让第二次拖动永远被挡在门外，
+   * 表现为「拖错一次后再也过不去，只能杀进程」。所以只在拿到有效票据时置位，
+   * 出错路径一律不动它。
+   */
+  const delivered = useRef(false);
 
   return (
     <View
@@ -89,8 +103,8 @@ export function SliderCaptcha({
         html={html}
         onChange={(e) => {
           const { type, value } = e.nativeEvent;
-          if (type === 'validate' && !settled.current) {
-            settled.current = true;
+          if (type === 'validate' && !delivered.current) {
+            delivered.current = true;
             onValidated(value);
           } else if (type === 'error') {
             onError?.(value);
@@ -123,6 +137,17 @@ export function CaptchaModal({
 }) {
   // Modal 渲染在独立根节点上，拿不到页面根节点的 --c-* 变量，必须自己注入
   const themed = themeVars(scheme);
+  /**
+   * 每次打开换一个递增的 `key`，强制重建 WebView。
+   *
+   * 不能用 `key={String(visible)}`：visible 的取值只有 true/false 两种，关掉再
+   * 打开时 key 与上次相同，React 会复用旧 WebView，里面那个易盾实例已经拖过一次
+   * （票据一次性），第二次拖动必然失败——表现就是「拖错一次后重试也没用」。
+   */
+  const generation = useRef(0);
+  const prevVisible = useRef(false);
+  if (visible && !prevVisible.current) generation.current += 1;
+  prevVisible.current = visible;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
@@ -134,7 +159,11 @@ export function CaptchaModal({
               <Text className="text-[13px] text-on-surface-variant">取消</Text>
             </Pressable>
           </View>
-          <SliderCaptcha key={String(visible)} onValidated={onValidated} onError={onError} />
+          <SliderCaptcha
+            key={generation.current}
+            onValidated={onValidated}
+            onError={onError}
+          />
         </View>
       </View>
     </Modal>

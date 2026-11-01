@@ -30,7 +30,13 @@ class CaptchaWebView(context: ThemedReactContext) : WebView(context) {
     init {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
-        settings.userAgentString = settings.userAgentString + " XpengMobile/0.1"
+        // UA 必须伪装成普通 Chrome：WebView 默认 UA 带 `; wv` 标记，易盾据此识别
+        // 非浏览器环境并直接判轨迹失败（onVerify 回 300 unpass）。去掉 wv、补齐
+        // Version/4.0 段后与同版本 Chrome 的 UA 一致——实测对照：模拟器 Chrome 里
+        // 同一张图能过，而带 wv 的 WebView 必失败。
+        settings.userAgentString = settings.userAgentString
+            .replace("; wv", "")
+            .replace("Version/4.0 ", "")
         addJavascriptInterface(Bridge(), "XpengBridge")
         webViewClient = WebViewClient()
         // 页面里的 JS 错误与 console 输出都进 logcat：滑块页白屏时只能从这里查
