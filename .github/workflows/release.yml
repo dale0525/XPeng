@@ -19,9 +19,6 @@ jobs:
     env:
       # tag 名（如 v0.2.0）；用前会去掉前导 v。手动触发时给一个不会被当成正式版的占位。
       XP_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-dev' }}
-      # versionCode 必须单调递增，否则覆盖安装会被系统拒绝。
-      # run_number 单调递增，加基数保证第一次发布也大于历史手装的 1。
-      XP_VERSION_CODE: ${{ github.run_number + 1000 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -65,9 +62,12 @@ jobs:
           # versionName 必须与 release 的 tag 去掉 v 后完全一致：应用内更新拿
           # 安装包的 versionName 和 GitHub 上最新的 tag 比，两边格式不同就会永远报有更新。
           VERSION="${XP_TAG#v}"
+          # versionCode 必须单调递增，否则覆盖安装会被系统拒绝。run_number 单调递增，
+          # 加基数保证第一次发布也大于历史手装的 1。表达式里不能写算术，所以在 shell 里算。
+          VERSION_CODE=$(( ${{ github.run_number }} + 1000 ))
           ./gradlew assembleRelease --no-daemon \
             -PxpVersionName="$VERSION" \
-            -PxpVersionCode="$XP_VERSION_CODE" \
+            -PxpVersionCode="$VERSION_CODE" \
             -PxpReleaseStoreFile="$RUNNER_TEMP/release.keystore" \
             -PxpReleaseStorePassword="$XP_RELEASE_STORE_PASSWORD" \
             -PxpReleaseKeyAlias="$XP_RELEASE_KEY_ALIAS" \
