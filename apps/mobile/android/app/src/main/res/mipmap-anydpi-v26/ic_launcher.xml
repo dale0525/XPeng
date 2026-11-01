@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 8.0+ 的自适应图标。
+
+  之前只有 mipmap-*/ic_launcher.png 一套普通位图，系统在圆形/圆角遮罩下会把它
+  整体再缩一圈塞进去，四周因此出现大片空白（桌面与登录页都显得图标很小）。
+  拆成前景 + 背景两层后，由系统按当前启动器形状裁切，logo 能真正占满视觉面积。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

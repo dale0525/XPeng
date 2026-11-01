@@ -280,23 +280,27 @@ export function LoginScreen() {
               </Pressable>
             )}
 
-            <Pressable
-              onPress={() => {
-                if (stage === 'code') {
+            {/* 只在验证码阶段出现：给用户一条改号重来的退路。
+                手机号阶段不显示——本地会话由 sessionStore.init() 在启动时自动恢复，
+                有令牌就直接进主界面、根本到不了这个页面，所以「使用已保存的令牌
+                登录」这个按钮从来没有可执行的动作，已删除。 */}
+            {stage === 'code' ? (
+              <Pressable
+                onPress={() => {
                   setStage('phone');
                   setCode('');
                   setCooldownUntil(0);
                   flow.current = null;
-                }
-                setMessage('');
-                setError('');
-              }}
-              className="w-full h-11 rounded-xl bg-surface-container/70 border border-outline-variant/90 items-center justify-center flex-row gap-2 active:scale-[0.98]">
-              <Text className="font-icon text-[18px] text-secondary-fixed-dim">{Icon.lock}</Text>
-              <Text className="font-body text-[13px] font-semibold text-on-surface-variant">
-                {stage === 'code' ? '换一个手机号' : '使用已保存的令牌登录'}
-              </Text>
-            </Pressable>
+                  setMessage('');
+                  setError('');
+                }}
+                className="w-full h-11 rounded-xl bg-surface-container/70 border border-outline-variant/90 items-center justify-center flex-row gap-2 active:scale-[0.98]">
+                <Text className="font-icon text-[18px] text-secondary-fixed-dim">{Icon.lock}</Text>
+                <Text className="font-body text-[13px] font-semibold text-on-surface-variant">
+                  换一个手机号
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {/* 状态行：设计稿没有，但流程需要；左对齐贴在卡片里，不用居中 Banner */}
