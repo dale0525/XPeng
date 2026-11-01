@@ -5,9 +5,10 @@
  * 交给调用方，不缓存。
  */
 import { useMemo, useRef } from 'react';
-import { Text, View } from 'react-native';
+import { Modal, Pressable, Text, View } from 'react-native';
 import { requireNativeComponent, type NativeSyntheticEvent } from 'react-native';
 import { CAPTCHA_ID } from '@xpeng/protocol/src/config';
+import { themeVars } from '../core/theme';
 
 interface ChangeEvent {
   type: 'validate' | 'error' | 'ready';
@@ -98,5 +99,44 @@ export function SliderCaptcha({
       />
       <Text className="text-[11px] text-outline text-center py-1">向右拖动滑块完成验证</Text>
     </View>
+  );
+}
+
+/**
+ * 弹层版滑块：与官方一致——用户点「获取验证码」后自动弹出，拖完即关。
+ *
+ * 每次打开都要重建 WebView（`key` 随 visible 变），因为易盾的 `validate` 票据
+ * 一次性且 SDK 实例拖过一次就作废；复用同一个 WebView 会让第二次拖动的票据失效。
+ */
+export function CaptchaModal({
+  visible,
+  scheme,
+  onValidated,
+  onError,
+  onCancel,
+}: {
+  visible: boolean;
+  scheme: 'light' | 'dark';
+  onValidated: (validate: string) => void;
+  onError: (message: string) => void;
+  onCancel: () => void;
+}) {
+  // Modal 渲染在独立根节点上，拿不到页面根节点的 --c-* 变量，必须自己注入
+  const themed = themeVars(scheme);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={themed} className="flex-1 bg-black/50 items-center justify-center px-6">
+        <View className="w-full bg-surface rounded-2xl border border-outline-variant/40 p-4">
+          <View className="flex-row items-center justify-between mb-3">
+            <Text className="font-headline font-bold text-sm text-on-surface">安全验证</Text>
+            <Pressable onPress={onCancel} hitSlop={12} className="active:scale-95">
+              <Text className="text-[13px] text-on-surface-variant">取消</Text>
+            </Pressable>
+          </View>
+          <SliderCaptcha key={String(visible)} onValidated={onValidated} onError={onError} />
+        </View>
+      </View>
+    </Modal>
   );
 }

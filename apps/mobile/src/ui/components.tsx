@@ -303,7 +303,8 @@ export function Banner({
       box: 'bg-secondary-container/20',
       label: 'text-secondary',
       dot: 'bg-secondary',
-      g: 'info' as IconName,
+      // 同上：字体子集里没有 `info`，用已验证存在的 verified_user 代替。
+      g: 'verified_user' as IconName,
     },
     warn: {
       box: 'bg-primary-container/25',
@@ -315,7 +316,9 @@ export function Banner({
       box: 'bg-error-container',
       label: 'text-on-error-container',
       dot: 'bg-error',
-      g: 'cancel' as IconName,
+      // 图标字体是 48 字形的子集，没有 `cancel`；用同在表里的 gpp_bad 代替，
+      // 否则这个位置会渲染成方框。
+      g: 'gpp_bad' as IconName,
     },
   }[tone];
   return (
