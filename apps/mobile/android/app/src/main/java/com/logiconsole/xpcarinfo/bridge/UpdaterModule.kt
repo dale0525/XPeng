@@ -27,6 +27,18 @@ class UpdaterModule(private val ctx: ReactApplicationContext) : ReactContextBase
 
     override fun getName() = "XpengUpdater"
 
+    /**
+     * 这两个是 `NativeEventEmitter` 的硬要求：RN 构造 emitter 时会检查模块有没有
+     * 它们，缺了就打印 `called with a non-null argument without the required
+     * addListener method` 警告。开发版里这条警告会顶出一条黄色 LogBox 条盖住页面
+     * 底部。本模块只单向发事件，不需要真的增删监听，给空实现即可。
+     */
+    @ReactMethod
+    fun addListener(eventName: String) = Unit
+
+    @ReactMethod
+    fun removeListeners(count: Double) = Unit
+
     /** 当前安装包的版本与设备主 ABI，用来决定该下哪个分架构包。 */
     @ReactMethod
     fun versionInfo(promise: Promise) {

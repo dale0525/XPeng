@@ -10,8 +10,8 @@
  *
  * 取值都照抄设计稿的 px，不另立一套。
  */
-import type { ReactNode } from 'react';
-import { Platform, Text, View, type ViewStyle } from 'react-native';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { Animated, Easing, Platform, Text, View, type ViewStyle } from 'react-native';
 import { Icon, type IconName } from './icons';
 
 /**
@@ -218,5 +218,45 @@ export function DotTag({
       <Text className="text-[11px] text-on-surface">{label}</Text>
       <Text className={`text-[10px] font-mono font-bold ${valueClass}`}>{value}</Text>
     </View>
+  );
+}
+
+/**
+ * 旋转的加载图标。`pending` 为真时以 1s/圈匀速转，为假时不渲染。
+ *
+ * 为什么不用 ActivityIndicator：设计稿里的所有图标都来自 Material Symbols 子集，
+ * 平台自带的菊花图在这套字体/配色下显得格格不入；直接转同一个 `sync` 字形，
+ * 与按钮内其余图标同族同色。
+ */
+export function SpinnerIcon({
+  size = 19,
+  className = '',
+}: {
+  size?: number;
+  className?: string;
+}) {
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 1000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  return (
+    <Animated.Text
+      className={`font-icon ${className}`}
+      style={{ fontSize: size, transform: [{ rotate }] }}>
+      {Icon.sync}
+    </Animated.Text>
   );
 }

@@ -26,6 +26,13 @@ class XpengNetModule(private val ctx: ReactApplicationContext) :
 
     override fun getName() = "XpengNet"
 
+    /** `NativeEventEmitter` 要求模块提供这两个方法，否则构造 emitter 时报警告（开发版会弹出黄色 LogBox 条）。 */
+    @ReactMethod
+    fun addListener(eventName: String) = Unit
+
+    @ReactMethod
+    fun removeListeners(count: Double) = Unit
+
     /**
      * POST 到 `host`。`clientCertPem`/`clientKeyPem` 同时给出时启用 mTLS。
      * 返回 `{status, body, setCookie}`。
