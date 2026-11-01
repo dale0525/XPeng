@@ -1,0 +1,14 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    // 上游预设默认 types:["jest"]，但本项目没有测试；不覆盖会因缺 @types/jest 直接报错。
+    "types": [],
+    "paths": {
+      "@xpeng/protocol": ["../../packages/protocol/src/index.ts"],
+      "@xpeng/protocol/*": ["../../packages/protocol/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"],
+  "exclude": ["**/node_modules"]
+}

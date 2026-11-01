@@ -36,7 +36,8 @@ KEYHEX = '/tmp/k3.hex'
 META_PATH = os.path.join(ROOT, 'work/live/token_meta.json')
 
 _KEYS = None
-_TEE = '0000000000000000000000000000000000000000000000000000000000000000'
+# 本机设备标识，写进 `work/local.env` 的 `XP_TEE`，不入版本库。
+_TEE = local_env.get('XP_TEE')
 
 
 def _keys():

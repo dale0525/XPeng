@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>状态 - 车况遥测核验清单</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:ital,wght@0,400;0,700;0,800;0,900;1,700&amp;family=Space+Grotesk:wght@400;500;700&amp;family=Space+Mono:ital,wght@0,400;0,700;1,400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "background": "#12131a",
+            "surface-container-lowest": "#0d0e15",
+            "secondary-container": "#00eefc",
+            "on-background": "#e3e1ec",
+            "inverse-surface": "#e3e1ec",
+            "tertiary-container": "#ffadc0",
+            "on-error": "#690005",
+            "on-tertiary-fixed": "#3f0019",
+            "error-container": "#93000a",
+            "surface-dim": "#12131a",
+            "surface-container-low": "#1a1b22",
+            "primary-fixed": "#ffdea9",
+            "on-tertiary-fixed-variant": "#8f0041",
+            "tertiary": "#ffd5dd",
+            "inverse-on-surface": "#2f3038",
+            "error": "#ffb4ab",
+            "surface-bright": "#383941",
+            "outline": "#9e8f78",
+            "primary": "#ffdba0",
+            "on-tertiary": "#66002c",
+            "tertiary-fixed-dim": "#ffb1c3",
+            "surface": "#12131a",
+            "on-tertiary-container": "#a1004b",
+            "on-secondary-container": "#00686f",
+            "on-secondary-fixed": "#002022",
+            "on-secondary": "#00363a",
+            "on-primary-fixed-variant": "#5e4100",
+            "surface-container-highest": "#34343c",
+            "primary-container": "#ffb703",
+            "secondary-fixed": "#7df4ff",
+            "surface-variant": "#34343c",
+            "on-secondary-fixed-variant": "#004f54",
+            "on-surface-variant": "#d5c4ac",
+            "on-primary-container": "#6b4b00",
+            "surface-tint": "#ffba27",
+            "secondary-fixed-dim": "#00dbe9",
+            "on-primary": "#422c00",
+            "surface-container-high": "#292931",
+            "on-error-container": "#ffdad6",
+            "primary-fixed-dim": "#ffba27",
+            "on-surface": "#e3e1ec",
+            "surface-container": "#1e1f26",
+            "tertiary-fixed": "#ffd9e0",
+            "secondary": "#d3fbff",
+            "outline-variant": "#514532",
+            "inverse-primary": "#7d5800",
+            "on-primary-fixed": "#271900"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "space-xs": "0.25rem",
+            "space-sm": "0.5rem",
+            "space-2xl": "3rem",
+            "gutter": "1rem",
+            "space-md": "0.875rem",
+            "gutter-tablet": "1.25rem",
+            "space-xl": "2rem",
+            "margin-tablet": "1.5rem",
+            "space-lg": "1.25rem",
+            "margin": "1rem",
+            "margin-desktop": "2.5rem",
+            "gutter-desktop": "1.5rem"
+          },
+          "fontFamily": {
+            "headline-md": ["Anybody"],
+            "display-hero-mobile": ["Anybody"],
+            "body-sm": ["Space Grotesk"],
+            "body-md": ["Space Grotesk"],
+            "headline-sm": ["Anybody"],
+            "display-hero": ["Anybody"],
+            "label-badge": ["Anybody"],
+            "body-lg": ["Space Grotesk"],
+            "headline-lg-mobile": ["Anybody"],
+            "telemetry-readout": ["Space Mono"],
+            "label-mono": ["Space Mono"],
+            "headline-lg": ["Anybody"]
+          },
+          "fontSize": {
+            "headline-md": ["24px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+            "display-hero-mobile": ["42px", { "lineHeight": "44px", "letterSpacing": "-0.03em", "fontWeight": "900" }],
+            "body-sm": ["13px", { "lineHeight": "18px", "letterSpacing": "0.01em", "fontWeight": "400" }],
+            "body-md": ["15px", { "lineHeight": "22px", "letterSpacing": "0em", "fontWeight": "400" }],
+            "headline-sm": ["20px", { "lineHeight": "24px", "letterSpacing": "0em", "fontWeight": "700" }],
+            "display-hero": ["56px", { "lineHeight": "56px", "letterSpacing": "-0.04em", "fontWeight": "900" }],
+            "label-badge": ["12px", { "lineHeight": "14px", "letterSpacing": "0.12em", "fontWeight": "800" }],
+            "body-lg": ["18px", { "lineHeight": "26px", "letterSpacing": "-0.01em", "fontWeight": "500" }],
+            "headline-lg-mobile": ["28px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "800" }],
+            "telemetry-readout": ["32px", { "lineHeight": "32px", "letterSpacing": "-0.05em", "fontWeight": "700" }],
+            "label-mono": ["11px", { "lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "400" }],
+            "headline-lg": ["36px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "800" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    /* Chamfer cutting */
+    .chamfer-card {
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+    }
+    /* Subtle HUD corner crosshairs */
+    .hud-brackets {
+      position: relative;
+    }
+    .hud-brackets::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 6px;
+      height: 6px;
+      border-top: 1.5px solid rgba(0, 238, 252, 0.45);
+      border-left: 1.5px solid rgba(0, 238, 252, 0.45);
+    }
+    .hud-brackets::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 6px;
+      height: 6px;
+      border-bottom: 1.5px solid rgba(255, 183, 3, 0.45);
+      border-right: 1.5px solid rgba(255, 183, 3, 0.45);
+    }
+    /* Hide scrollbar for seamless chrome-less feel */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+    body {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+      background-color: #12131a;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body-md antialiased min-h-screen flex justify-center selection:bg-primary-container selection:text-surface-container-lowest">
+<!-- Mobile Viewport Shell (Strict Portrait 390-412px bounds) -->
+<div class="w-full max-w-[412px] min-h-screen bg-surface-container-lowest flex flex-col relative pb-20 shadow-2xl">
+<!-- Android Native Status Bar Simulation -->
+<div class="h-6 w-full flex items-center justify-between px-margin pt-1 select-none z-50 text-on-surface-variant font-label-mono text-label-mono opacity-80">
+<div class="flex items-center space-x-1">
+<span class="font-bold">14:32</span>
+<span class="text-[9px] px-1 py-0.2 rounded bg-surface-container-highest text-secondary-container tracking-tighter">5G</span>
+</div>
+<div class="flex items-center space-x-2 text-[13px]">
+<span class="material-symbols-outlined text-[13px]" data-icon="cell_tower">cell_tower</span>
+<span class="material-symbols-outlined text-[13px]" data-icon="wifi">wifi</span>
+<span class="material-symbols-outlined text-[14px]" data-icon="battery_full">battery_full</span>
+</div>
+</div>
+<!-- TopAppBar (Mapped from Shared Components JSON) -->
+<header class="sticky top-0 left-0 right-0 z-40 bg-surface/90 backdrop-blur-md px-margin py-2 border-b border-outline-variant/30 shadow-md">
+<div class="flex items-center justify-between">
+<!-- Leading cluster -->
+<div class="flex items-center space-x-2">
+<div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center border border-outline-variant/40 -skew-x-6">
+<span class="material-symbols-outlined text-primary text-[18px]" data-icon="directions_car">directions_car</span>
+</div>
+<div>
+<div class="flex items-center space-x-2">
+<h1 class="font-headline-sm text-headline-sm text-on-surface tracking-tight leading-none font-bold">状态</h1>
+<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-high border border-secondary-container/30 text-[10px] text-secondary-container font-label-mono">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-container animate-pulse"></span>
+                LIVE
+              </span>
+</div>
+<p class="font-label-mono text-label-mono text-on-surface-variant flex items-center gap-1.5 mt-0.5">
+<span>沪A00000 · D55</span>
+<span class="text-outline-variant">|</span>
+<span class="text-[10px] text-primary/80">ECU 23ms</span>
+</p>
+</div>
+</div>
+<!-- Trailing action (Refresh) -->
+<button class="flex items-center space-x-1 px-2.5 py-1 rounded bg-surface-container border border-outline-variant/40 active:scale-95 transition-transform hover:text-primary-container text-on-surface">
+<span class="material-symbols-outlined text-[16px] text-primary" data-icon="refresh">refresh</span>
+<span class="font-label-badge text-label-badge tracking-wider uppercase text-on-surface">刷新</span>
+</button>
+</div>
+</header>
+<!-- Real-Time Telemetry Meta Ribbon -->
+<div class="px-margin pt-2.5 pb-1 flex items-center justify-between border-b border-surface-container-high/60 bg-surface-dim/95 text-on-surface-variant font-label-mono text-label-mono">
+<div class="flex items-center gap-2">
+<span class="text-[10px] uppercase text-outline">PROTO: CAN-FD</span>
+<span class="text-[10px] px-1 bg-surface-container text-secondary-container border border-secondary-container/20">SYNCED</span>
+</div>
+<div class="flex items-center gap-1 text-[10px]">
+<span class="material-symbols-outlined text-[12px] text-primary-container" data-icon="schedule">schedule</span>
+<span>2024-05-18 14:32:09 CST</span>
+</div>
+</div>
+<!-- Main Scrollable Checklist Container -->
+<main class="flex-1 px-margin pt-3 pb-8 space-y-3">
+<!-- 1. 分组「车门与锁」 (DOORS & CLOSURES) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-primary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">车门与锁</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">DOORS &amp; CLOSURES</span>
+</div>
+<span class="font-label-mono text-[10px] text-primary/80 bg-surface-container px-1.5 py-0.5 border border-outline-variant/30">7/7 正常</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">主驾门锁</span>
+<span class="font-label-mono text-secondary-container font-medium px-2 py-0.5 rounded bg-surface-container border border-secondary-container/20">已锁</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">中控锁</span>
+<span class="font-label-mono text-secondary-container font-medium px-2 py-0.5 rounded bg-surface-container border border-secondary-container/20">已锁止</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">主驾门</span>
+<span class="font-label-mono text-on-surface font-medium">关闭</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">副驾门</span>
+<span class="font-label-mono text-on-surface font-medium">关闭</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">左后门</span>
+<span class="font-label-mono text-on-surface font-medium">关闭</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">右后门</span>
+<span class="font-label-mono text-on-surface font-medium">关闭</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">后备箱</span>
+<span class="font-label-mono text-on-surface font-medium">关闭</span>
+</div>
+</div>
+</section>
+<!-- 2. 分组「车窗」 (WINDOWS & SHADE) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-secondary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">车窗</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">WINDOWS &amp; SHADE</span>
+</div>
+<span class="font-label-mono text-[10px] text-secondary-container bg-surface-container px-1.5 py-0.5 border border-secondary-container/20">全闭合</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">左前窗</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">0%</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">右前窗</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">0%</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">左后窗</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">0%</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">右后窗</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">0%</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">天幕遮阳帘</span>
+<span class="font-telemetry-readout text-[14px] text-primary-container">0%</span>
+</div>
+</div>
+</section>
+<!-- 3. 分组「空调」 (CLIMATE HVAC) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-primary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">空调</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">CLIMATE HVAC</span>
+</div>
+<span class="font-label-mono text-[10px] text-primary-container bg-surface-container px-1.5 py-0.5 border border-primary-container/30">运行中</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">空调开关</span>
+<span class="font-label-mono text-primary-container font-medium px-2 py-0.5 rounded bg-surface-container border border-primary-container/20">开</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">设定温度</span>
+<span class="font-telemetry-readout text-[15px] text-primary">24°C</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">车内温度</span>
+<span class="font-telemetry-readout text-[15px] text-secondary-container">26.5°C</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">风量</span>
+<span class="font-label-mono text-on-surface font-medium">3 档</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">AUTO</span>
+<span class="font-label-mono text-secondary-container font-medium px-2 py-0.5 rounded bg-surface-container border border-secondary-container/20">开</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">除霜</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">极速升温</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">极速降温</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">高温抑菌</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+</div>
+</section>
+<!-- 4. 分组「电池与充电」 (BATTERY & CHARGING) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-primary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">电池与充电</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">BATTERY &amp; CHARGING</span>
+</div>
+<span class="font-telemetry-readout text-[13px] text-primary-container">SOC 78%</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">剩余电量</span>
+<span class="font-telemetry-readout text-[16px] text-primary-container font-bold">78%</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">充电状态</span>
+<span class="font-label-mono text-outline font-medium">未充电</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">充电枪</span>
+<span class="font-label-mono text-outline font-medium">未连接</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">充电枪锁</span>
+<span class="font-label-mono text-outline font-medium">未锁</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">慢充口</span>
+<span class="font-label-mono text-on-surface font-medium">关闭</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">快充口</span>
+<span class="font-label-mono text-on-surface font-medium">关闭</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">满电续航</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">520 km</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">预计充满</span>
+<span class="font-label-mono text-outline">—</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">电池保温</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+</div>
+</section>
+<!-- 5. 分组「里程」 (ODOMETER & RANGE) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-secondary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">里程</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">ODOMETER &amp; RANGE</span>
+</div>
+<span class="font-label-mono text-[10px] text-secondary-container">EST RANGE</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">总里程</span>
+<span class="font-telemetry-readout text-[16px] text-on-surface font-bold tracking-tight">72939 km</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">剩余续航</span>
+<span class="font-telemetry-readout text-[16px] text-secondary-container font-bold tracking-tight">412 km</span>
+</div>
+</div>
+</section>
+<!-- 6. 分组「胎压」 (TIRE PRESSURE TPMS) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-primary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">胎压</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">TIRE PRESSURE TPMS</span>
+</div>
+<span class="font-label-mono text-[10px] text-secondary-container bg-surface-container px-1.5 py-0.5 border border-secondary-container/30">4 轮匹配</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">左前</span>
+<div class="flex items-center space-x-2">
+<span class="font-telemetry-readout text-[14px] text-on-surface">2.5 bar</span>
+<span class="font-label-mono text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-secondary-container border border-secondary-container/30">正常</span>
+</div>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">右前</span>
+<div class="flex items-center space-x-2">
+<span class="font-telemetry-readout text-[14px] text-on-surface">2.5 bar</span>
+<span class="font-label-mono text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-secondary-container border border-secondary-container/30">正常</span>
+</div>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">左后</span>
+<div class="flex items-center space-x-2">
+<span class="font-telemetry-readout text-[14px] text-on-surface">2.4 bar</span>
+<span class="font-label-mono text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-secondary-container border border-secondary-container/30">正常</span>
+</div>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">右后</span>
+<div class="flex items-center space-x-2">
+<span class="font-telemetry-readout text-[14px] text-on-surface">2.4 bar</span>
+<span class="font-label-mono text-[10px] px-1.5 py-0.5 rounded bg-surface-container-high text-secondary-container border border-secondary-container/30">正常</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 7. 分组「座椅」 (SEATS COMFORT) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-secondary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">座椅</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">SEATS COMFORT</span>
+</div>
+<span class="font-label-mono text-[10px] text-primary/80">主驾通风活跃</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">主驾座椅加热</span>
+<span class="font-label-mono text-outline font-medium">0 档 (关)</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">副驾座椅加热</span>
+<span class="font-label-mono text-outline font-medium">0 档 (关)</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">左后座椅加热</span>
+<span class="font-label-mono text-outline font-medium">0 档 (关)</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">右后座椅加热</span>
+<span class="font-label-mono text-outline font-medium">0 档 (关)</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">主驾通风</span>
+<span class="font-label-mono text-secondary-container font-medium px-2 py-0.5 rounded bg-surface-container border border-secondary-container/20">2 档</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">副驾通风</span>
+<span class="font-label-mono text-outline font-medium">0 档 (关)</span>
+</div>
+</div>
+</section>
+<!-- 8. 分组「太阳能天窗」 (SOLAR ROOF) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-primary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">太阳能天窗</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">SOLAR ROOF</span>
+</div>
+<span class="font-label-mono text-[10px] text-primary-container bg-surface-container px-1.5 py-0.5 border border-primary-container/30">光伏生成中</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">工作状态</span>
+<span class="font-label-mono text-primary font-medium px-2 py-0.5 rounded bg-surface-container border border-primary/20">采光发电中</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">故障状态</span>
+<span class="font-label-mono text-secondary-container font-medium">无故障 (正常)</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">通风状态</span>
+<span class="font-label-mono text-outline font-medium">未开启</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">今日通风次数</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">0 次</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">今日通风时长</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">0 分钟</span>
+</div>
+</div>
+</section>
+<!-- 9. 分组「电动尾门」 (POWER LIFTGATE) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-secondary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">电动尾门</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">POWER LIFTGATE</span>
+</div>
+<span class="font-label-mono text-[10px] text-outline">LATCH SECURED</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">开关</span>
+<span class="font-label-mono text-on-surface font-medium">已关闭</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">自动关闭倒计时</span>
+<span class="font-label-mono text-outline">—</span>
+</div>
+</div>
+</section>
+<!-- 10. 分组「哨兵」 (SENTRY SECURITY) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-primary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">哨兵</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">SENTRY SECURITY</span>
+</div>
+<span class="font-label-mono text-[10px] text-primary-container">GUARD ACTIVE</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">灵敏度</span>
+<span class="font-label-mono text-on-surface font-medium px-2 py-0.5 rounded bg-surface-container">中</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">哨兵影像</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">录像使能</span>
+<span class="font-label-mono text-secondary-container font-medium px-2 py-0.5 rounded bg-surface-container border border-secondary-container/20">开</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">维修模式</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+</div>
+</section>
+<!-- 11. 分组「电源与驱动」 (PROPULSION & POWERTRAIN) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-secondary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">电源与驱动</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">PROPULSION &amp; POWERTRAIN</span>
+</div>
+<span class="font-label-mono text-[10px] text-outline">STANDBY</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">远程启动</span>
+<span class="font-label-mono text-outline font-medium">关</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">点火状态</span>
+<span class="font-label-mono text-outline font-medium">OFF (未点火)</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">电源状态</span>
+<span class="font-label-mono text-on-surface-variant font-medium">休眠待机</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">挡位</span>
+<span class="font-telemetry-readout text-[15px] text-primary-container font-bold px-2.5 py-0.5 rounded bg-surface-container border border-primary-container/30">P 挡</span>
+</div>
+</div>
+</section>
+<!-- 12. 分组「充电统计」 (CHARGE STATISTICS) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-primary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">充电统计</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">CHARGE STATISTICS</span>
+</div>
+<span class="font-label-mono text-[10px] text-primary/80">LIFETIME</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">累计用电量</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">14,820 kWh</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">累计充电时长</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">682 h</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">累计充满次数</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">142 次</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">累计增加续航</span>
+<span class="font-telemetry-readout text-[14px] text-secondary-container">58,400 km</span>
+</div>
+</div>
+</section>
+<!-- 13. 分组「定位」 (GNSS TELEMETRY) -->
+<section class="chamfer-card hud-brackets bg-surface-container-low border border-outline-variant/30 p-space-md shadow-[0_4px_16px_rgba(0,0,0,0.5)]">
+<div class="flex items-center justify-between pb-2 mb-2 border-b border-surface-container-high">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-3.5 bg-secondary-container rounded-xs -skew-x-6"></span>
+<h2 class="font-headline-sm text-[16px] text-on-surface font-bold">定位</h2>
+<span class="font-label-mono text-[10px] text-on-surface-variant tracking-wider">GNSS TELEMETRY</span>
+</div>
+<span class="font-label-mono text-[10px] text-secondary-container bg-surface-container px-1.5 py-0.5 border border-secondary-container/30">RTK FIX</span>
+</div>
+<div class="space-y-2 font-body-sm text-body-sm">
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">纬度</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">31.2304° N</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">经度</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">121.4737° E</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">航向角</span>
+<span class="font-telemetry-readout text-[14px] text-on-surface">182° (南)</span>
+</div>
+<div class="flex items-center justify-between py-1 border-b border-surface-container-highest/20">
+<span class="text-on-surface-variant">车速</span>
+<span class="font-telemetry-readout text-[14px] text-primary-container">0 km/h</span>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-on-surface-variant">坐标有效</span>
+<span class="font-label-mono text-secondary-container font-medium px-2 py-0.5 rounded bg-surface-container border border-secondary-container/20">是 (RTK已固定)</span>
+</div>
+</div>
+</section>
+<!-- Bottom verification seal footer -->
+<div class="pt-2 pb-6 text-center">
+<p class="font-label-mono text-[10px] text-outline uppercase tracking-wider">
+          END OF TELEMETRY BUFFER • 13 BLOCKS VERIFIED
+        </p>
+<p class="font-label-mono text-[9px] text-outline/60 mt-0.5">
+          SHA256: 7e9b...4a12 · ISO-14229 UDS COMPLIANT
+        </p>
+</div>
+</main>
+<!-- BottomNavBar (Execution of Shared Component JSON commands) -->
+<nav class="fixed bottom-0 left-0 right-0 w-full z-50 flex justify-around items-center h-16 px-gutter bg-surface-container-low/95 border-t border-secondary-container/20 shadow-[0_-4px_24px_rgba(0,0,0,0.6)] backdrop-blur-lg">
+<!-- Tab 1: 首页 (Inactive) -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant py-1 px-3 opacity-60 hover:text-secondary-container transition-colors active:scale-90 transition-transform duration-100">
+<span class="material-symbols-outlined text-[20px]" data-icon="home">home</span>
+<span class="font-label-badge text-label-badge uppercase tracking-wider mt-0.5">首页</span>
+</button>
+<!-- Tab 2: 车控 (Inactive) -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant py-1 px-3 opacity-60 hover:text-secondary-container transition-colors active:scale-90 transition-transform duration-100">
+<span class="material-symbols-outlined text-[20px]" data-icon="sports_score">sports_score</span>
+<span class="font-label-badge text-label-badge uppercase tracking-wider mt-0.5">车控</span>
+</button>
+<!-- Tab 3: 状态 (ACTIVE per Semantic Match with Page Purpose) -->
+<button class="flex flex-col items-center justify-center text-secondary-container py-1 px-3 rounded-lg bg-surface-container-high/60 shadow-[0_0_12px_rgba(0,238,252,0.25)] -skew-x-6 active:scale-90 transition-transform duration-100">
+<span class="material-symbols-outlined text-[20px]" data-icon="speed">speed</span>
+<span class="font-label-badge text-label-badge uppercase tracking-wider mt-0.5">状态</span>
+</button>
+<!-- Tab 4: 设置 (Inactive) -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant py-1 px-3 opacity-60 hover:text-secondary-container transition-colors active:scale-90 transition-transform duration-100">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+<span class="font-label-badge text-label-badge uppercase tracking-wider mt-0.5">设置</span>
+</button>
+</nav>
+</div>
+</body></html>

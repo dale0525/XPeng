@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>设置 - Horizon Pulse Daylight</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:ital,wght@0,700;0,800;0,900;1,800&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;family=Public+Sans:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            surface: '#FFFFFF',
+            'surface-dim': '#F4F1EA',
+            'surface-bright': '#FFFFFF',
+            'surface-container-lowest': '#FFFFFF',
+            'surface-container-low': '#F8F5EF',
+            'surface-container': '#F1ECE2',
+            'surface-container-high': '#E9E2D4',
+            'surface-container-highest': '#E0D8C7',
+            'on-surface': '#1C1A15',
+            'on-surface-variant': '#5C5442',
+            'inverse-surface': '#1C1A15',
+            'inverse-on-surface': '#F4F1EA',
+            outline: '#8A7F68',
+            'outline-variant': '#D6CCB8',
+            'surface-tint': '#B37400',
+            primary: '#8A5A00',
+            'on-primary': '#FFFFFF',
+            'primary-container': '#FFB703',
+            'on-primary-container': '#3A2600',
+            'inverse-primary': '#FFB703',
+            secondary: '#00626D',
+            'on-secondary': '#FFFFFF',
+            'secondary-container': '#00D4E5',
+            'on-secondary-container': '#00363B',
+            tertiary: '#A80050',
+            'on-tertiary': '#FFFFFF',
+            error: '#B3261E',
+            'on-error': '#FFFFFF',
+            background: '#F4F1EA',
+            'on-background': '#1C1A15',
+            'surface-variant': '#E9E2D4',
+            accent: '#B37400',
+            telemetry: '#007A87',
+            success: '#0F7B5A'
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "sm": "0.125rem",
+            "md": "0.375rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Anybody", "Public Sans", "sans-serif"],
+            display: ["Anybody", "sans-serif"],
+            body: ["Space Grotesk", "sans-serif"],
+            mono: ["Space Mono", "monospace"],
+            label: ["Space Grotesk", "Public Sans", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .material-symbols-outlined[data-weight="fill"] {
+      font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+    }
+    .cut-corner-card {
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+    }
+    .skew-badge {
+      transform: skewX(-8deg);
+    }
+    .unskew-text {
+      transform: skewX(8deg);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body antialiased min-h-screen flex justify-center selection:bg-primary-container selection:text-on-primary-container">
+<!-- Android Phone Viewport Container -->
+<div class="w-full max-w-md bg-background min-h-screen flex flex-col relative pb-24 shadow-2xl overflow-x-hidden">
+<!-- Top App Bar (Centered Headline "设置", No Status Bar, No Back, No Help) -->
+<header class="sticky top-0 z-40 bg-surface/95 backdrop-blur-md border-b border-outline-variant/30 px-5 h-14 flex items-center justify-center transition-colors">
+<h1 class="font-headline font-extrabold text-[20px] text-on-surface tracking-tight">设置</h1>
+</header>
+<!-- Main Content Area: Exactly 5 Telemetry Cards -->
+<main class="flex-1 px-4 py-4 space-y-3.5">
+<!-- CARD 1: 账户卡片 -->
+<section class="bg-surface rounded-xl p-4 border border-outline-variant/30 shadow-[0_4px_16px_-2px_rgba(28,26,21,0.06)] relative overflow-hidden cut-corner-card">
+<!-- Sub-surface accent bar -->
+<div class="absolute top-0 left-0 w-1.5 h-full bg-accent"></div>
+<div class="flex items-start justify-between pl-1.5">
+<div class="space-y-1">
+<div class="flex items-center gap-2">
+<span class="font-headline font-bold text-lg text-on-surface">车主</span>
+<div class="skew-badge bg-primary text-on-primary text-[10px] font-headline font-extrabold px-2 py-0.5 rounded-sm inline-flex items-center justify-center">
+<span class="unskew-text">车主</span>
+</div>
+</div>
+<div class="font-mono text-xs text-on-surface-variant font-medium tracking-wide">
+              138******00
+            </div>
+</div>
+<!-- Online status dot -->
+<div class="flex items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full border border-outline-variant/40">
+<span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+<span class="text-xs font-medium text-success">已登录</span>
+</div>
+</div>
+<!-- Token Duration & Action Button -->
+<div class="mt-4 pt-3 border-t border-outline-variant/20 flex items-center justify-between pl-1.5">
+<div class="flex items-center gap-1.5 text-xs text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px] text-outline" data-icon="schedule">schedule</span>
+<span class="font-mono">剩余 1 小时 12 分</span>
+</div>
+<button class="skew-badge px-3 py-1.5 bg-surface-container-high hover:bg-surface-container-highest active:scale-95 transition-all rounded-sm text-xs font-headline font-bold text-on-surface" type="button">
+<span class="unskew-text inline-block">退出登录</span>
+</button>
+</div>
+</section>
+<!-- CARD 2: 车辆卡片 -->
+<section class="bg-surface rounded-xl p-4 border border-outline-variant/30 shadow-[0_4px_16px_-2px_rgba(28,26,21,0.06)] relative cut-corner-card">
+<!-- Telemetry Cyan strip -->
+<div class="absolute top-0 left-0 w-1.5 h-full bg-telemetry"></div>
+<div class="pl-1.5">
+<div class="flex items-baseline justify-between">
+<div class="flex items-center gap-2">
+<span class="font-headline font-extrabold text-xl text-on-surface tracking-tight">沪A·00000</span>
+<span class="font-headline font-bold text-xs px-2 py-0.5 bg-surface-container text-telemetry rounded-sm border border-telemetry/30">D55</span>
+</div>
+<span class="text-[11px] font-mono text-outline font-medium">小鹏纯电智能旗舰</span>
+</div>
+<!-- VIN & Mileage Readout -->
+<div class="mt-3 bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/30 space-y-1.5">
+<div class="flex items-center justify-between text-xs">
+<span class="text-on-surface-variant">VIN</span>
+<span class="font-mono text-on-surface font-semibold tracking-wider">L1NSPGH91NA000000</span>
+</div>
+<div class="flex items-center justify-between text-xs">
+<span class="text-on-surface-variant">总里程</span>
+<span class="font-mono text-telemetry font-bold">72,939 公里</span>
+</div>
+</div>
+<!-- Feature Capability Badges -->
+<div class="mt-3">
+<div class="flex flex-wrap gap-1.5">
+<span class="px-2 py-1 text-[11px] font-medium bg-surface-container text-on-surface-variant rounded border border-outline-variant/30">远程车控</span>
+<span class="px-2 py-1 text-[11px] font-medium bg-surface-container text-on-surface-variant rounded border border-outline-variant/30">哨兵模式</span>
+<span class="px-2 py-1 text-[11px] font-medium bg-surface-container text-on-surface-variant rounded border border-outline-variant/30">胎压监测</span>
+<span class="px-2 py-1 text-[11px] font-medium bg-surface-container text-on-surface-variant rounded border border-outline-variant/30">遮阳帘</span>
+<span class="px-2 py-1 text-[11px] font-medium bg-surface-container text-on-surface-variant rounded border border-outline-variant/30">蓝牙钥匙</span>
+</div>
+</div>
+</div>
+</section>
+<!-- CARD 3: 连接卡片 -->
+<section class="bg-surface rounded-xl p-4 border border-outline-variant/30 shadow-[0_4px_16px_-2px_rgba(28,26,21,0.06)] relative cut-corner-card">
+<div class="flex items-center justify-between mb-3">
+<div class="flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-success shadow-[0_0_8px_rgba(15,123,90,0.4)]"></span>
+<h2 class="font-headline font-bold text-sm text-on-surface tracking-tight">云端连接：已连接</h2>
+</div>
+<span class="font-mono text-xs font-bold text-success bg-success/10 px-2 py-0.5 rounded">18 ms 极佳</span>
+</div>
+<div class="bg-surface-container-low rounded-lg p-3 border border-outline-variant/30 flex items-center justify-between">
+<div>
+<div class="text-[11px] text-outline font-medium">MQTT 凭据到期时间</div>
+<div class="font-mono text-xs font-bold text-on-surface mt-0.5">剩余 2 小时 14 分</div>
+</div>
+<button class="skew-badge px-3 py-1.5 bg-telemetry hover:bg-telemetry/90 active:scale-95 text-white font-headline font-bold text-xs rounded transition-all shadow-sm" type="button">
+<span class="unskew-text inline-block">重新连接</span>
+</button>
+</div>
+</section>
+<!-- CARD 4: 外观卡片 (Segmented Control) -->
+<section class="bg-surface rounded-xl p-4 border border-outline-variant/30 shadow-[0_4px_16px_-2px_rgba(28,26,21,0.06)]">
+<div class="flex items-center justify-between mb-3">
+<h2 class="font-headline font-bold text-sm text-on-surface tracking-tight">外观</h2>
+<span class="text-[11px] text-outline font-mono">THEME</span>
+</div>
+<!-- 3-Segment Selector -->
+<div class="grid grid-cols-3 p-1 bg-surface-container rounded-lg border border-outline-variant/40 gap-1" role="radiogroup">
+<button aria-checked="false" class="py-2 rounded text-xs font-headline font-bold transition-all text-on-surface-variant hover:text-on-surface" role="radio" type="button">
+            跟随系统
+          </button>
+<button aria-checked="true" class="py-2 rounded text-xs font-headline font-bold bg-surface text-telemetry shadow-sm border border-outline-variant/30" role="radio" type="button">
+            浅色
+          </button>
+<button aria-checked="false" class="py-2 rounded text-xs font-headline font-bold transition-all text-on-surface-variant hover:text-on-surface" role="radio" type="button">
+            深色
+          </button>
+</div>
+</section>
+<!-- CARD 5: 关于卡片 -->
+<section class="bg-surface rounded-xl p-4 border border-outline-variant/30 shadow-[0_4px_16px_-2px_rgba(28,26,21,0.06)]">
+<div class="flex items-center justify-between">
+<h2 class="font-headline font-bold text-sm text-on-surface tracking-tight">关于</h2>
+<span class="font-mono text-xs font-bold text-on-surface-variant bg-surface-container-high px-2 py-0.5 rounded border border-outline-variant/40">v0.1.0</span>
+</div>
+<p class="mt-2.5 text-xs text-on-surface-variant leading-relaxed">
+          登录一次后自动续期，续期失败时会提示重新登录
+        </p>
+</section>
+</main>
+<!-- Bottom Navigation Bar (Strictly 2 destinations: 车控 & 设置) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 bg-surface border-t border-outline-variant/30 shadow-[0_-4px_16px_-2px_rgba(28,26,21,0.06)]">
+<div class="max-w-md mx-auto flex justify-around items-center px-6 py-2">
+<!-- Destination 1: 车控 (Inactive) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant font-medium py-1 active:scale-95 transition-transform duration-100 hover:text-primary" href="#vehicle">
+<span class="material-symbols-outlined text-[24px]" data-icon="directions_car">directions_car</span>
+<span class="font-label font-bold text-[11px] tracking-wider mt-0.5">车控</span>
+</a>
+<!-- Destination 2: 设置 (Active) -->
+<a class="flex flex-col items-center justify-center text-primary font-bold py-1 active:scale-95 transition-transform duration-100" href="#settings">
+<span class="material-symbols-outlined text-[24px]" data-icon="settings" data-weight="fill">settings</span>
+<span class="font-label font-bold text-[11px] tracking-wider mt-0.5">设置</span>
+</a>
+</div>
+</nav>
+</div>
+</body></html>

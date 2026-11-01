@@ -4,3 +4,17 @@ work/
 .pixi/
 .sdk/
 __pycache__/
+
+# JS 依赖与构建产物
+node_modules/
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+apps/mobile/ios/Pods/
+apps/mobile/ios/build/
+# Metro 产物：每次构建重新生成，不提交
+apps/mobile/android/app/src/main/assets/index.android.bundle
+apps/mobile/android/app/src/main/res/drawable-*/
+apps/mobile/android/app/src/main/res/raw/
+
+.DS_Store

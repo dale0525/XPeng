@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>小鹏车控 - 一体化控制大厅</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:ital,wght@0,400;0,700;0,800;0,900;1,700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:ital,wght@0,400;0,700;1,400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-bright": "#383941",
+            "tertiary-container": "#ffadc0",
+            "on-secondary-fixed": "#002022",
+            "surface-dim": "#12131a",
+            "background": "#12131a",
+            "primary-fixed": "#ffdea9",
+            "on-primary-fixed": "#271900",
+            "surface-container-lowest": "#0d0e15",
+            "surface-container-high": "#292931",
+            "on-secondary-container": "#00686f",
+            "on-secondary": "#00363a",
+            "on-surface": "#e3e1ec",
+            "surface-container-highest": "#34343c",
+            "surface-container-low": "#1a1b22",
+            "outline": "#9e8f78",
+            "on-primary": "#422c00",
+            "surface-container": "#1e1f26",
+            "error-container": "#93000a",
+            "on-surface-variant": "#d5c4ac",
+            "on-error-container": "#ffdad6",
+            "inverse-primary": "#7d5800",
+            "secondary-container": "#00eefc",
+            "on-tertiary-fixed": "#3f0019",
+            "tertiary-fixed": "#ffd9e0",
+            "on-primary-container": "#6b4b00",
+            "surface": "#12131a",
+            "secondary": "#d3fbff",
+            "surface-variant": "#34343c",
+            "on-secondary-fixed-variant": "#004f54",
+            "tertiary": "#ffd5dd",
+            "surface-tint": "#ffba27",
+            "secondary-fixed": "#7df4ff",
+            "primary": "#ffdba0",
+            "on-primary-fixed-variant": "#5e4100",
+            "secondary-fixed-dim": "#00dbe9",
+            "primary-fixed-dim": "#ffba27",
+            "tertiary-fixed-dim": "#ffb1c3",
+            "on-tertiary-fixed-variant": "#8f0041",
+            "on-tertiary-container": "#a1004b",
+            "error": "#ffb4ab",
+            "inverse-on-surface": "#2f3038",
+            "primary-container": "#ffb703",
+            "outline-variant": "#514532",
+            "on-error": "#690005",
+            "on-tertiary": "#66002c",
+            "on-background": "#e3e1ec",
+            "inverse-surface": "#e3e1ec"
+          },
+          borderRadius: {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          spacing: {
+            "margin-desktop": "2.5rem",
+            "space-sm": "0.5rem",
+            "gutter-tablet": "1.25rem",
+            "space-xl": "2rem",
+            "space-md": "0.875rem",
+            "gutter-desktop": "1.5rem",
+            "space-2xl": "3rem",
+            "space-xs": "0.25rem",
+            "margin-tablet": "1.5rem",
+            "space-lg": "1.25rem",
+            "gutter": "1rem",
+            "margin": "1rem"
+          },
+          fontFamily: {
+            "headline-sm": ["Anybody"],
+            "display-hero": ["Anybody"],
+            "label-badge": ["Anybody"],
+            "body-md": ["Space Grotesk"],
+            "body-lg": ["Space Grotesk"],
+            "display-hero-mobile": ["Anybody"],
+            "headline-lg-mobile": ["Anybody"],
+            "label-mono": ["Space Mono"],
+            "headline-md": ["Anybody"],
+            "headline-lg": ["Anybody"],
+            "body-sm": ["Space Grotesk"],
+            "telemetry-readout": ["Space Mono"]
+          },
+          fontSize: {
+            "headline-sm": ["20px", { lineHeight: "24px", letterSpacing: "0em", fontWeight: "700" }],
+            "display-hero": ["56px", { lineHeight: "56px", letterSpacing: "-0.04em", fontWeight: "900" }],
+            "label-badge": ["12px", { lineHeight: "14px", letterSpacing: "0.12em", fontWeight: "800" }],
+            "body-md": ["15px", { lineHeight: "22px", letterSpacing: "0em", fontWeight: "400" }],
+            "body-lg": ["18px", { lineHeight: "26px", letterSpacing: "-0.01em", fontWeight: "500" }],
+            "display-hero-mobile": ["42px", { lineHeight: "44px", letterSpacing: "-0.03em", fontWeight: "900" }],
+            "headline-lg-mobile": ["28px", { lineHeight: "32px", letterSpacing: "-0.02em", fontWeight: "800" }],
+            "label-mono": ["11px", { lineHeight: "14px", letterSpacing: "0.06em", fontWeight: "400" }],
+            "headline-md": ["24px", { lineHeight: "28px", letterSpacing: "-0.01em", fontWeight: "700" }],
+            "headline-lg": ["36px", { lineHeight: "40px", letterSpacing: "-0.02em", fontWeight: "800" }],
+            "body-sm": ["13px", { lineHeight: "18px", letterSpacing: "0.01em", fontWeight: "400" }],
+            "telemetry-readout": ["32px", { lineHeight: "32px", letterSpacing: "-0.05em", fontWeight: "700" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    .hud-chamfer {
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+    }
+    .skew-tag {
+      transform: skewX(-8deg);
+    }
+    .skew-tag-content {
+      transform: skewX(8deg);
+    }
+    .glow-amber {
+      box-shadow: 0 0 18px rgba(255, 183, 3, 0.35);
+    }
+    .glow-cyan {
+      box-shadow: 0 0 18px rgba(0, 238, 252, 0.3);
+    }
+    .asphalt-card {
+      background: linear-gradient(180deg, #1e1f26 0%, #161822 100%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      position: relative;
+    }
+    .asphalt-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 219, 160, 0.25), transparent);
+    }
+    /* Hide scrollbars while enabling momentum scroll */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-surface-container-lowest text-on-surface antialiased font-body-md min-h-screen pb-24 selection:bg-primary-container selection:text-surface-container-lowest">
+<!-- TOP APP BAR -->
+<header class="fixed top-0 left-0 w-full z-50 bg-surface/90 backdrop-blur-md border-b border-outline-variant/30 shadow-md"><div class="flex justify-between items-center w-full px-4 py-3 max-w-lg mx-auto"><div class="flex items-center space-x-2"><span class="material-symbols-outlined text-primary text-xl" data-icon="directions_car">directions_car</span><h1 class="font-headline-sm text-headline-sm text-on-surface tracking-wider uppercase">沪A·00000 · D55</h1></div><div class="flex items-center space-x-2.5"><div class="flex items-center space-x-1.5 px-2 py-1 rounded bg-surface-container border border-outline-variant/20"><span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary-fixed opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-secondary-container"></span></span><span class="font-label-mono text-[10px] text-secondary-fixed-dim uppercase tracking-wider">在线联机</span></div><button class="flex items-center justify-center p-2 rounded-lg bg-surface-container-high text-primary hover:text-secondary transition-colors duration-150 active:scale-95 border border-outline-variant/20 shadow-sm" title="刷新状态"><span class="material-symbols-outlined text-lg" data-icon="sync">sync</span></button></div></div></header>
+<!-- MAIN SCROLLABLE CONTENT CANVAS -->
+<main class="w-full max-w-lg mx-auto pt-16 px-3.5 space-y-4">
+<!-- 1. VEHICLE STAGE (车辆舞台) -->
+<section class="asphalt-card rounded-xl p-3 pt-3.5 overflow-hidden shadow-2xl relative"><div class="flex items-center justify-between mb-2"><div class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded bg-surface-container-high/90 border border-secondary-container/30 skew-tag"><span class="skew-tag-content flex items-center space-x-1 text-secondary-container font-label-badge text-label-badge"><span class="material-symbols-outlined text-xs" data-icon="verified_user" style="font-variation-settings: 'FILL' 1;">verified_user</span><span>整车已闭锁 · 防盗已布防</span></span></div><span class="font-label-mono text-[10px] text-secondary-fixed text-right tracking-tight">安全布控中</span></div><div class="relative w-full h-56 flex items-center justify-center rounded-lg bg-surface-container-lowest/80 overflow-hidden border border-outline-variant/20"><div class="absolute inset-0 opacity-15 pointer-events-none" style="background-image: radial-gradient(circle, #00eefc 1px, transparent 1px); background-size: 16px 16px;"></div><img alt="White Electric SUV" class="w-full h-full object-contain filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.9)] z-10 select-none pointer-events-none transform -scale-x-100" src="https://lh3.googleusercontent.com/aida/AEtjO1Wd2Nc4fpvuDUNN26D9Esl1CRKN6a3uReBrk9YHseIKwkSarEzLut3GBY4yXdQE0M4pKJ3Jnek4G1qHntUeJT9EH3lcvvTsmlJNRhAfqSgQhTpbQxJAUGogptirTj6aEgD7QAvlXZ3IxR7PaOrE2-5O_valrWGDClgO6EDXF7BDWaRJIEKO-ql4fqWUFBhFI_oTD2-uilCZ1w0QOxBHxHKZAnWq_JVsqwtcoLJZAlaJoR6MZ4i-3w_PXuc"/><div class="absolute top-8 left-2 z-20 flex items-center space-x-1 px-1.5 py-0.5 rounded bg-surface-container-lowest/85 border border-secondary-container/40 backdrop-blur-sm shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed"></span><span class="font-label-mono text-[10px] text-on-surface">左前门</span><span class="font-label-badge text-[9px] text-secondary-fixed px-1 rounded bg-secondary-container/20">闭合</span></div><div class="absolute top-8 right-2 z-20 flex items-center space-x-1 px-1.5 py-0.5 rounded bg-surface-container-lowest/85 border border-secondary-container/40 backdrop-blur-sm shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed"></span><span class="font-label-mono text-[10px] text-on-surface">右前门</span><span class="font-label-badge text-[9px] text-secondary-fixed px-1 rounded bg-secondary-container/20">闭合</span></div><div class="absolute bottom-11 left-3 z-20 flex items-center space-x-1 px-1.5 py-0.5 rounded bg-surface-container-lowest/85 border border-secondary-container/40 backdrop-blur-sm shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed"></span><span class="font-label-mono text-[10px] text-on-surface">左后门</span><span class="font-label-badge text-[9px] text-secondary-fixed px-1 rounded bg-secondary-container/20">闭合</span></div><div class="absolute bottom-11 right-3 z-20 flex items-center space-x-1 px-1.5 py-0.5 rounded bg-surface-container-lowest/85 border border-secondary-container/40 backdrop-blur-sm shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed"></span><span class="font-label-mono text-[10px] text-on-surface">右后门</span><span class="font-label-badge text-[9px] text-secondary-fixed px-1 rounded bg-secondary-container/20">闭合</span></div><div class="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center space-x-1 px-2 py-0.5 rounded bg-surface-container-lowest/90 border border-primary-container/40 backdrop-blur-sm shadow-md"><span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span><span class="font-label-mono text-[10px] text-on-surface">后备箱</span><span class="font-label-badge text-[9px] text-primary px-1 rounded bg-primary-container/20">闭合</span></div></div><div class="mt-2.5 pt-2 border-t border-outline-variant/30 flex items-center justify-between text-xs font-label-mono"><div class="flex items-center space-x-1 text-secondary-fixed"><span class="material-symbols-outlined text-sm font-bold" data-icon="check_circle">check_circle</span><span class="text-on-surface-variant font-body-sm text-[12px]">4门+后备箱防盗闭锁就绪</span></div><div class="flex items-center space-x-1 text-primary-container"><span class="inline-block w-2 h-2 rounded-full bg-primary-container animate-pulse"></span><span class="text-on-surface font-body-sm text-[12px]">哨兵模式：开启中</span></div></div></section>
+<!-- 2. DOOR LOCKS (车门与锁) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg hud-chamfer"><div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2"><div class="flex items-center space-x-2"><span class="material-symbols-outlined text-primary-container" data-icon="lock">lock</span><h2 class="font-headline-sm text-headline-sm text-on-surface">车门与锁</h2></div><span class="font-label-mono text-label-mono px-2 py-0.5 rounded bg-surface-container-high text-secondary-fixed border border-secondary-fixed/20">已锁止 · 全部安全</span></div><div class="grid grid-cols-2 gap-3 mb-3.5"><button class="flex items-center justify-center space-x-2 py-3 px-4 rounded bg-surface-container border border-outline-variant/40 hover:border-secondary-container text-on-surface active:scale-95 transition-all shadow-md group"><span class="material-symbols-outlined text-xl text-on-surface-variant group-hover:text-secondary transition-colors" data-icon="lock_open">lock_open</span><span class="font-headline-sm text-[16px] text-on-surface tracking-wider">解锁车门</span></button><button class="relative flex items-center justify-center space-x-2 py-3 px-4 rounded bg-primary-container hover:bg-primary-fixed-dim text-surface-container-lowest font-headline-sm text-[16px] font-bold active:scale-95 transition-all glow-amber"><span class="material-symbols-outlined text-xl font-bold" data-icon="lock">lock</span><span class="tracking-wider">锁车</span></button></div><div class="grid grid-cols-5 gap-1.5 pt-1"><div class="flex flex-col items-center justify-center p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><span class="font-label-mono text-[10px] text-on-surface-variant">主驾门</span><span class="material-symbols-outlined text-base text-secondary-fixed mt-1 mb-0.5" data-icon="sensor_door">sensor_door</span><span class="font-label-badge text-[10px] text-secondary font-bold">闭合</span></div><div class="flex flex-col items-center justify-center p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><span class="font-label-mono text-[10px] text-on-surface-variant">副驾门</span><span class="material-symbols-outlined text-base text-secondary-fixed mt-1 mb-0.5" data-icon="sensor_door">sensor_door</span><span class="font-label-badge text-[10px] text-secondary font-bold">闭合</span></div><div class="flex flex-col items-center justify-center p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><span class="font-label-mono text-[10px] text-on-surface-variant">左后门</span><span class="material-symbols-outlined text-base text-secondary-fixed mt-1 mb-0.5" data-icon="sensor_door">sensor_door</span><span class="font-label-badge text-[10px] text-secondary font-bold">闭合</span></div><div class="flex flex-col items-center justify-center p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><span class="font-label-mono text-[10px] text-on-surface-variant">右后门</span><span class="material-symbols-outlined text-base text-secondary-fixed mt-1 mb-0.5" data-icon="sensor_door">sensor_door</span><span class="font-label-badge text-[10px] text-secondary font-bold">闭合</span></div><div class="flex flex-col items-center justify-center p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><span class="font-label-mono text-[10px] text-on-surface-variant">后备箱</span><span class="material-symbols-outlined text-base text-primary-container mt-1 mb-0.5" data-icon="luggage">luggage</span><span class="font-label-badge text-[10px] text-primary font-bold">闭合</span></div></div></section>
+<!-- 3. WINDOWS & SHADE (车窗与遮阳帘) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg"><div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2"><div class="flex items-center space-x-2"><span class="material-symbols-outlined text-secondary-fixed" data-icon="roller_shades">roller_shades</span><h2 class="font-headline-sm text-headline-sm text-on-surface">车窗与遮阳帘</h2></div><span class="font-label-mono text-label-mono text-on-surface-variant bg-surface-container px-2 py-0.5 rounded">天幕开度：0%（完全关闭）</span></div><div class="grid grid-cols-2 gap-2 mb-3"><button class="flex items-center justify-center space-x-1.5 py-2.5 px-2 rounded bg-surface-container border border-outline-variant/30 hover:border-secondary transition-all active:scale-95 text-xs font-headline-sm text-on-surface"><span class="material-symbols-outlined text-sm text-secondary-fixed" data-icon="expand_less">expand_less</span><span>打开遮阳帘</span></button><button class="flex items-center justify-center space-x-1.5 py-2.5 px-2 rounded bg-surface-container border border-outline-variant/30 hover:border-secondary transition-all active:scale-95 text-xs font-headline-sm text-on-surface"><span class="material-symbols-outlined text-sm text-secondary-fixed" data-icon="expand_more">expand_more</span><span>关闭遮阳帘</span></button><button class="flex items-center justify-center space-x-1.5 py-2.5 px-2 rounded bg-surface-container border border-outline-variant/30 hover:border-primary-container transition-all active:scale-95 text-xs font-headline-sm text-on-surface"><span class="material-symbols-outlined text-sm text-primary-container" data-icon="air">air</span><span>全车车窗通风</span></button><button class="flex items-center justify-center space-x-1.5 py-2.5 px-2 rounded bg-surface-container border border-outline-variant/30 hover:border-secondary transition-all active:scale-95 text-xs font-headline-sm text-on-surface"><span class="material-symbols-outlined text-sm text-secondary-fixed" data-icon="vertical_align_bottom">vertical_align_bottom</span><span>全车车窗关闭</span></button></div><div class="grid grid-cols-4 gap-2 mb-3"><div class="p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><div class="font-label-mono text-[10px] text-on-surface-variant">左前窗</div><div class="font-telemetry-readout text-lg text-secondary-fixed mt-0.5">0%</div><div class="font-label-badge text-[9px] text-on-surface-variant/70">已闭</div></div><div class="p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><div class="font-label-mono text-[10px] text-on-surface-variant">右前窗</div><div class="font-telemetry-readout text-lg text-secondary-fixed mt-0.5">0%</div><div class="font-label-badge text-[9px] text-on-surface-variant/70">已闭</div></div><div class="p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><div class="font-label-mono text-[10px] text-on-surface-variant">左后窗</div><div class="font-telemetry-readout text-lg text-secondary-fixed mt-0.5">0%</div><div class="font-label-badge text-[9px] text-on-surface-variant/70">已闭</div></div><div class="p-2 rounded bg-surface-container-lowest border border-outline-variant/20 text-center"><div class="font-label-mono text-[10px] text-on-surface-variant">右后窗</div><div class="font-telemetry-readout text-lg text-secondary-fixed mt-0.5">0%</div><div class="font-label-badge text-[9px] text-on-surface-variant/70">已闭</div></div></div><div class="grid grid-cols-2 gap-2 text-xs"><div class="p-2.5 rounded bg-surface-container-low border border-outline-variant/20 space-y-1.5"><div class="flex items-center space-x-1 text-primary-fixed-dim font-headline-sm text-xs"><span class="material-symbols-outlined text-sm" data-icon="solar_power">solar_power</span><span>太阳能天窗</span></div><div class="flex justify-between font-label-mono text-[10px]"><span class="text-on-surface-variant">工作状态</span><span class="text-secondary-fixed">采光发电中</span></div><div class="flex justify-between font-label-mono text-[10px]"><span class="text-on-surface-variant">故障状态</span><span class="text-on-surface">无故障(正常)</span></div><div class="flex justify-between font-label-mono text-[10px]"><span class="text-on-surface-variant">今日通风次数</span><span class="text-on-surface">0 次</span></div><div class="flex justify-between font-label-mono text-[10px]"><span class="text-on-surface-variant">今日通风时长</span><span class="text-on-surface">0 分钟</span></div></div><div class="p-2.5 rounded bg-surface-container-low border border-outline-variant/20 space-y-1.5"><div class="flex items-center space-x-1 text-secondary font-headline-sm text-xs"><span class="material-symbols-outlined text-sm" data-icon="garage">garage</span><span>电动尾门</span></div><div class="flex justify-between font-label-mono text-[10px]"><span class="text-on-surface-variant">开关状态</span><span class="text-secondary-fixed">已关闭</span></div><div class="flex justify-between font-label-mono text-[10px]"><span class="text-on-surface-variant">自动关闭倒计时</span><span class="text-on-surface">-- (闭锁正常)</span></div></div></div></section>
+<!-- 4. CLIMATE & SEATS (空调与座椅) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg"><div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2"><div class="flex items-center space-x-2"><span class="material-symbols-outlined text-primary-container" data-icon="ac_unit">ac_unit</span><h2 class="font-headline-sm text-headline-sm text-on-surface">空调与座椅</h2></div><div class="flex items-center space-x-1 px-2 py-0.5 rounded bg-surface-container font-label-mono text-label-mono text-primary"><span class="text-on-surface-variant">车内温度</span><span class="font-bold text-primary-fixed-dim">26.5°C</span></div></div><div class="grid grid-cols-5 gap-1.5 mb-3"><button class="flex flex-col items-center justify-center py-2 px-1 rounded bg-primary-container text-surface-container-lowest active:scale-95 transition-transform"><span class="material-symbols-outlined text-base font-bold" data-icon="power_settings_new">power_settings_new</span><span class="font-headline-sm text-[10px] mt-0.5">打开空调</span></button><button class="flex flex-col items-center justify-center py-2 px-1 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 text-on-surface active:scale-95 transition-transform"><span class="material-symbols-outlined text-base text-on-surface-variant" data-icon="power_off">power_off</span><span class="font-headline-sm text-[10px] mt-0.5">关闭空调</span></button><button class="flex flex-col items-center justify-center py-2 px-1 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 text-on-surface active:scale-95 transition-transform"><span class="material-symbols-outlined text-base text-secondary-fixed" data-icon="mode_cool">mode_cool</span><span class="font-headline-sm text-[10px] mt-0.5">极速降温</span></button><button class="flex flex-col items-center justify-center py-2 px-1 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 text-on-surface active:scale-95 transition-transform"><span class="material-symbols-outlined text-base text-tertiary-fixed" data-icon="mode_heat">mode_heat</span><span class="font-headline-sm text-[10px] mt-0.5">极速升温</span></button><button class="flex flex-col items-center justify-center py-2 px-1 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 text-on-surface active:scale-95 transition-transform"><span class="material-symbols-outlined text-base text-secondary-fixed" data-icon="sanitizer">sanitizer</span><span class="font-headline-sm text-[10px] mt-0.5">高温抑菌</span></button></div><div class="p-3 rounded bg-surface-container-lowest border border-outline-variant/25 mb-3 flex items-center justify-between"><div><div class="font-label-mono text-[10px] text-on-surface-variant uppercase tracking-wider">SET CLIMATE TEMP</div><div class="font-body-sm text-[11px] text-secondary-fixed">双温区同步 · 自动模式</div></div><div class="flex items-center space-x-3"><button class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-on-surface hover:text-primary active:scale-90 border border-outline-variant/30"><span class="material-symbols-outlined text-base" data-icon="remove">remove</span></button><div class="flex items-baseline"><span class="font-telemetry-readout text-3xl font-bold text-primary-container">24</span><span class="font-headline-sm text-sm text-on-surface-variant ml-0.5">°C</span></div><button class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-on-surface hover:text-primary active:scale-90 border border-outline-variant/30"><span class="material-symbols-outlined text-base" data-icon="add">add</span></button></div></div><div class="grid grid-cols-6 gap-1 mb-3 text-center"><div class="p-1.5 rounded bg-surface-container border border-outline-variant/15"><div class="font-label-mono text-[9px] text-on-surface-variant">风量</div><div class="font-headline-sm text-[11px] text-secondary-fixed">3 档</div></div><div class="p-1.5 rounded bg-surface-container border border-outline-variant/15"><div class="font-label-mono text-[9px] text-on-surface-variant">AUTO</div><div class="font-headline-sm text-[11px] text-secondary-container">开启</div></div><div class="p-1.5 rounded bg-surface-container border border-outline-variant/15"><div class="font-label-mono text-[9px] text-on-surface-variant">除霜</div><div class="font-headline-sm text-[11px] text-on-surface-variant/70">关闭</div></div><div class="p-1.5 rounded bg-surface-container border border-outline-variant/15"><div class="font-label-mono text-[9px] text-on-surface-variant">极速降温</div><div class="font-headline-sm text-[11px] text-on-surface-variant/70">关闭</div></div><div class="p-1.5 rounded bg-surface-container border border-outline-variant/15"><div class="font-label-mono text-[9px] text-on-surface-variant">极速升温</div><div class="font-headline-sm text-[11px] text-on-surface-variant/70">关闭</div></div><div class="p-1.5 rounded bg-surface-container border border-outline-variant/15"><div class="font-label-mono text-[9px] text-on-surface-variant">高温抑菌</div><div class="font-headline-sm text-[11px] text-on-surface-variant/70">关闭</div></div></div><div class="p-2.5 rounded bg-surface-container-low border border-outline-variant/20"><div class="flex items-center justify-between mb-2"><span class="font-headline-sm text-xs text-on-surface flex items-center space-x-1"><span class="material-symbols-outlined text-sm text-primary" data-icon="airline_seat_recline_extra">airline_seat_recline_extra</span><span>座椅舒适矩阵</span></span></div><div class="grid grid-cols-5 gap-1.5 text-center"><div class="p-1.5 rounded bg-surface-container-lowest border border-outline-variant/20"><span class="font-label-mono text-[9px] text-on-surface-variant block">主驾加热</span><span class="font-label-mono text-[10px] text-on-surface">0 档 (关)</span></div><div class="p-1.5 rounded bg-surface-container-lowest border border-outline-variant/20"><span class="font-label-mono text-[9px] text-on-surface-variant block">副驾加热</span><span class="font-label-mono text-[10px] text-on-surface">0 档 (关)</span></div><div class="p-1.5 rounded bg-surface-container-lowest border border-outline-variant/20"><span class="font-label-mono text-[9px] text-on-surface-variant block">后排加热</span><span class="font-label-mono text-[10px] text-on-surface">左0 / 右0</span></div><div class="p-1.5 rounded bg-surface-container-lowest border border-secondary-container/40"><span class="font-label-mono text-[9px] text-secondary-fixed block">主驾通风</span><span class="font-label-mono text-[10px] text-secondary-container font-bold">2 档 (开启)</span></div><div class="p-1.5 rounded bg-surface-container-lowest border border-outline-variant/20"><span class="font-label-mono text-[9px] text-on-surface-variant block">副驾通风</span><span class="font-label-mono text-[10px] text-on-surface">0 档 (关)</span></div></div></div></section>
+<!-- 5. LIGHTS & HORN (灯光与寻车) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg"><div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2"><div class="flex items-center space-x-2"><span class="material-symbols-outlined text-primary-container" data-icon="highlight">highlight</span><h2 class="font-headline-sm text-headline-sm text-on-surface">灯光与寻车</h2></div></div><div class="grid grid-cols-2 gap-3"><button class="flex items-center justify-center space-x-2 py-3 px-4 rounded bg-surface-container border border-outline-variant/40 hover:border-primary-container text-on-surface active:scale-95 transition-all shadow-md group"><span class="material-symbols-outlined text-xl text-primary-container group-hover:animate-pulse" data-icon="light_mode">light_mode</span><span class="font-headline-sm text-[16px] text-on-surface tracking-wider">闪灯</span></button><button class="flex items-center justify-center space-x-2 py-3 px-4 rounded bg-surface-container border border-outline-variant/40 hover:border-secondary-container text-on-surface active:scale-95 transition-all shadow-md group"><span class="material-symbols-outlined text-xl text-secondary-container group-hover:animate-bounce" data-icon="volume_up">volume_up</span><span class="font-headline-sm text-[16px] text-on-surface tracking-wider">鸣笛</span></button></div></section>
+<!-- 6. SENTRY MODE (哨兵模式) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg">
+<div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-secondary-fixed" data-icon="security">security</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">哨兵模式</h2>
+</div>
+<span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-secondary-container/20 text-secondary-fixed border border-secondary-container/30 font-label-mono text-[10px]">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed animate-ping"></span>
+<span>防御监视中</span>
+</span>
+</div>
+<!-- Action Toggle Buttons -->
+<div class="grid grid-cols-2 gap-2 mb-3">
+<button class="py-2.5 px-3 rounded bg-secondary-container/20 border border-secondary-container text-secondary font-headline-sm text-xs flex items-center justify-center space-x-1.5 shadow-sm active:scale-95">
+<span class="material-symbols-outlined text-base" data-icon="shield">shield</span>
+<span>开启哨兵模式</span>
+</button>
+<button class="py-2.5 px-3 rounded bg-surface-container border border-outline-variant/30 text-on-surface-variant font-headline-sm text-xs flex items-center justify-center space-x-1.5 hover:bg-surface-container-high active:scale-95">
+<span class="material-symbols-outlined text-base" data-icon="shield_with_heart">shield_with_heart</span>
+<span>关闭哨兵模式</span>
+</button>
+</div>
+<!-- Sensitivity Segmented Controls -->
+<div class="p-2.5 rounded bg-surface-container-lowest border border-outline-variant/20 mb-3">
+<div class="flex justify-between items-center mb-2">
+<span class="font-body-sm text-xs text-on-surface">碰撞与靠近感应灵敏度</span>
+<span class="font-label-mono text-[10px] text-secondary-fixed">已选：中</span>
+</div>
+<div class="grid grid-cols-3 gap-1.5">
+<button class="py-1 rounded bg-surface-container text-on-surface-variant font-label-mono text-[11px] text-center border border-transparent">低</button>
+<button class="py-1 rounded bg-secondary-container text-surface-container-lowest font-label-mono text-[11px] font-bold text-center glow-cyan">中 (当前选中)</button>
+<button class="py-1 rounded bg-surface-container text-on-surface-variant font-label-mono text-[11px] text-center border border-transparent">高</button>
+</div>
+</div>
+<!-- Detail Switch States -->
+<div class="grid grid-cols-3 gap-2 text-center text-xs">
+<div class="p-2 rounded bg-surface-container border border-outline-variant/20">
+<span class="font-label-mono text-[10px] text-on-surface-variant block">哨兵影像开关</span>
+<span class="font-label-badge text-on-surface-variant/80 mt-1 block">关闭</span>
+</div>
+<div class="p-2 rounded bg-surface-container border border-secondary-container/30">
+<span class="font-label-mono text-[10px] text-secondary-fixed block">录像使能</span>
+<span class="font-label-badge text-secondary mt-1 block font-bold">开启</span>
+</div>
+<div class="p-2 rounded bg-surface-container border border-outline-variant/20">
+<span class="font-label-mono text-[10px] text-on-surface-variant block">维修模式</span>
+<span class="font-label-badge text-on-surface-variant/80 mt-1 block">关闭</span>
+</div>
+</div>
+</section>
+<!-- 7. BATTERY & CHARGING (电池与充电) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg"><div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2"><div class="flex items-center space-x-2"><span class="material-symbols-outlined text-primary-container" data-icon="bolt">bolt</span><h2 class="font-headline-sm text-headline-sm text-on-surface">电池与充电</h2></div></div><div class="p-3.5 rounded bg-surface-container-lowest border border-outline-variant/25 mb-3"><div class="flex items-baseline justify-between mb-1.5"><div class="flex items-baseline space-x-1"><span class="font-telemetry-readout text-display-hero-mobile text-primary-container">78</span><span class="font-headline-sm text-xl text-primary">%</span><span class="font-label-mono text-[11px] text-on-surface-variant ml-2">剩余电量</span></div><div class="text-right"><span class="font-telemetry-readout text-headline-md text-secondary-fixed">412</span><span class="font-label-mono text-xs text-on-surface-variant">km 可用续航</span></div></div><div class="grid grid-cols-10 gap-1 my-2"><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-primary-container shadow-[0_0_8px_#ffb703]"></div><div class="h-2 rounded-sm bg-surface-container-highest"></div><div class="h-2 rounded-sm bg-surface-container-highest"></div></div><div class="flex justify-between font-label-mono text-[10px] text-on-surface-variant pt-1"><span>总里程 72,939 km</span><span>充电限值 90%</span></div></div><div class="p-2.5 rounded bg-surface-container-low border border-outline-variant/20 mb-3 space-y-1.5 font-label-mono text-xs"><div class="flex justify-between"><span class="text-on-surface-variant">充电状态</span><span class="text-on-surface">未充电</span></div><div class="flex justify-between"><span class="text-on-surface-variant">充电枪连接</span><span class="text-on-surface">未连接</span></div><div class="flex justify-between"><span class="text-on-surface-variant">充电枪锁</span><span class="text-on-surface">未锁</span></div><div class="flex justify-between"><span class="text-on-surface-variant">慢充口</span><span class="text-secondary-fixed">关闭</span></div><div class="flex justify-between"><span class="text-on-surface-variant">快充口</span><span class="text-secondary-fixed">关闭</span></div><div class="flex justify-between"><span class="text-on-surface-variant">预计充满时间</span><span class="text-on-surface">--</span></div><div class="flex justify-between"><span class="text-on-surface-variant">电池保温</span><span class="text-on-surface">关闭</span></div></div><div class="p-3 rounded bg-surface-container border border-outline-variant/20"><div class="font-headline-sm text-xs text-primary-fixed mb-2 flex items-center space-x-1"><span class="material-symbols-outlined text-sm" data-icon="insights">insights</span><span>上次充电</span></div><div class="grid grid-cols-2 gap-2 text-xs"><div class="bg-surface-container-lowest p-2 rounded"><span class="font-label-mono text-[10px] text-on-surface-variant block">上次充电用电量</span><span class="font-telemetry-readout text-sm text-on-surface">49.2 kWh</span></div><div class="bg-surface-container-lowest p-2 rounded"><span class="font-label-mono text-[10px] text-on-surface-variant block">上次充电时长</span><span class="font-telemetry-readout text-sm text-on-surface">5 小时 46 分</span></div><div class="bg-surface-container-lowest p-2 rounded"><span class="font-label-mono text-[10px] text-on-surface-variant block">上次充电完成时间</span><span class="font-telemetry-readout text-sm text-on-surface">2026-10-29 03:48</span></div><div class="bg-surface-container-lowest p-2 rounded"><span class="font-label-mono text-[10px] text-on-surface-variant block">上次充电增加续航</span><span class="font-telemetry-readout text-sm text-secondary-fixed">328 km</span></div></div></div></section>
+<!-- 8. TPMS (胎压监测) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg">
+<div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-secondary-fixed" data-icon="tire_repair">tire_repair</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">胎压监测 (TPMS)</h2>
+</div>
+<span class="font-label-mono text-[10px] px-2 py-0.5 rounded bg-secondary-container/20 text-secondary-fixed border border-secondary-fixed/20">
+          四轮气压均衡 / 正常
+        </span>
+</div>
+<!-- 4 Wheels Parameter Grid -->
+<div class="grid grid-cols-2 gap-2.5">
+<!-- FL 左前 -->
+<div class="p-3 rounded bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-between">
+<div>
+<div class="font-label-mono text-[10px] text-on-surface-variant">FL · 左前轮</div>
+<div class="font-telemetry-readout text-xl text-secondary-fixed mt-0.5">2.5 <span class="text-xs font-label-mono text-outline">bar</span></div>
+</div>
+<span class="font-label-badge text-[10px] text-secondary-fixed px-1.5 py-0.5 rounded bg-secondary-container/20">正常</span>
+</div>
+<!-- FR 右前 -->
+<div class="p-3 rounded bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-between">
+<div>
+<div class="font-label-mono text-[10px] text-on-surface-variant">FR · 右前轮</div>
+<div class="font-telemetry-readout text-xl text-secondary-fixed mt-0.5">2.5 <span class="text-xs font-label-mono text-outline">bar</span></div>
+</div>
+<span class="font-label-badge text-[10px] text-secondary-fixed px-1.5 py-0.5 rounded bg-secondary-container/20">正常</span>
+</div>
+<!-- RL 左后 -->
+<div class="p-3 rounded bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-between">
+<div>
+<div class="font-label-mono text-[10px] text-on-surface-variant">RL · 左后轮</div>
+<div class="font-telemetry-readout text-xl text-secondary-fixed mt-0.5">2.4 <span class="text-xs font-label-mono text-outline">bar</span></div>
+</div>
+<span class="font-label-badge text-[10px] text-secondary-fixed px-1.5 py-0.5 rounded bg-secondary-container/20">正常</span>
+</div>
+<!-- RR 右后 -->
+<div class="p-3 rounded bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-between">
+<div>
+<div class="font-label-mono text-[10px] text-on-surface-variant">RR · 右后轮</div>
+<div class="font-telemetry-readout text-xl text-secondary-fixed mt-0.5">2.4 <span class="text-xs font-label-mono text-outline">bar</span></div>
+</div>
+<span class="font-label-badge text-[10px] text-secondary-fixed px-1.5 py-0.5 rounded bg-secondary-container/20">正常</span>
+</div>
+</div>
+</section>
+<!-- 9. ODOMETER & RTK (里程与定位遥测) -->
+<section class="asphalt-card rounded-xl p-3.5 shadow-lg"><div class="flex items-center justify-between mb-3 border-b border-outline-variant/20 pb-2"><div class="flex items-center space-x-2"><span class="material-symbols-outlined text-primary-container" data-icon="location_on">location_on</span><h2 class="font-headline-sm text-headline-sm text-on-surface">里程与定位</h2></div></div><div class="p-3 rounded bg-surface-container-lowest border border-outline-variant/25 space-y-2 mb-2"><div class="flex justify-between items-center text-xs"><span class="text-on-surface-variant font-label-mono">经纬度坐标</span><span class="font-telemetry-readout text-xs text-primary-container tracking-wider">31.2304° N, 121.4737° E</span></div><div class="flex justify-between items-center text-xs"><span class="text-on-surface-variant font-label-mono">航向角</span><span class="font-label-mono text-xs text-on-surface">182° (南)</span></div><div class="flex justify-between items-center text-xs"><span class="text-on-surface-variant font-label-mono">当前车速</span><span class="font-label-mono text-xs text-on-surface">0 km/h</span></div></div><div class="grid grid-cols-2 gap-2 text-center"><div class="p-2 rounded bg-surface-container border border-outline-variant/20"><span class="font-label-mono text-[10px] text-on-surface-variant block">总里程</span><span class="font-telemetry-readout text-sm text-on-surface font-bold">72,939 km</span></div><div class="p-2 rounded bg-surface-container border border-outline-variant/20"><span class="font-label-mono text-[10px] text-on-surface-variant block">剩余续航</span><span class="font-telemetry-readout text-sm text-secondary-fixed font-bold">412 km</span></div></div></section>
+</main>
+<!-- BOTTOM NAVIGATION BAR (Strictly 2 destinations as declared in Shared Components JSON) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 border-t border-outline-variant/20 bg-surface-container-low/95 backdrop-blur-lg shadow-2xl">
+<!-- Tab 1: 车控 (Active State) -->
+<a class="flex flex-col items-center justify-center text-primary-container dark:text-primary-container font-headline-sm py-1 group" href="#control">
+<span class="material-symbols-outlined text-2xl" data-icon="tune" style="font-variation-settings: 'FILL' 1;">tune</span>
+<span class="font-label-mono text-label-mono mt-0.5 tracking-wider font-bold">车控</span>
+</a>
+<!-- Tab 2: 设置 (Inactive State) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant py-1 hover:text-secondary-fixed transition-colors duration-150 active:scale-95" href="#settings">
+<span class="material-symbols-outlined text-2xl" data-icon="settings">settings</span>
+<span class="font-label-mono text-label-mono mt-0.5 tracking-wider">设置</span>
+</a>
+</nav>
+</body></html>

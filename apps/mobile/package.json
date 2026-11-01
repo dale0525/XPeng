@@ -1,0 +1,36 @@
+{
+  "name": "@xpeng/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "start": "react-native start",
+    "build:apk": "cd android && ./gradlew assembleRelease",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@xpeng/protocol": "workspace:*",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "^5.5.2"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "20.2.0",
+    "@react-native-community/cli-platform-android": "20.2.0",
+    "@react-native/babel-preset": "0.88.1",
+    "@react-native/metro-config": "0.88.1",
+    "@react-native/typescript-config": "0.88.1",
+    "@types/react": "^19.2.0",
+    "nativewind": "^4.2.7",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">= 22.11.0"
+  }
+}
