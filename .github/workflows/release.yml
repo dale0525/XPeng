@@ -36,11 +36,12 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      # build.gradle 要求 buildTools 37 / compileSdk 37 / NDK 27.1，runner 自带的版本不够
-      - uses: android-actions/setup-android@v3
-
+      # ubuntu runner 自带 Android SDK（ANDROID_SDK_ROOT 已设好），只需补 build.gradle
+      # 要求而 runner 没预装的三个包。不引 android-actions/setup-android：它会在新版
+      # cmdline-tools 上去装已被移除的 `tools` 包，直接失败。
       - name: Install Android SDK components
         run: |
+          yes | sdkmanager --licenses > /dev/null
           sdkmanager --install "ndk;27.1.12297006" "build-tools;37.0.0" "platforms;android-37.0"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
 
