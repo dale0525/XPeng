@@ -27,3 +27,4 @@ work/       APK、dump、live token（gitignore）
 | 触发 | 技能 |
 | --- | --- |
 | 启动/截屏/点击取证模拟器，跑官方 App 走登录或滑块，从模拟器取文件 | [`.agents/skills/android-emulator`](.agents/skills/android-emulator/SKILL.md) |
+| 改自研客户端 `apps/mobile` 的界面：NativeWind 样式、动态样式切换、加载动画、界面卡死排查 | [`.agents/skills/mobile-ui`](.agents/skills/mobile-ui/SKILL.md) |
