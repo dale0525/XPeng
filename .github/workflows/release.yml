@@ -41,8 +41,11 @@ jobs:
       # cmdline-tools 上去装已被移除的 `tools` 包，直接失败。
       - name: Install Android SDK components
         run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager --install "ndk;27.1.12297006" "build-tools;37.0.0" "platforms;android-37.0"
+          # sdkmanager 不在 PATH 上，runner 的 cmdline-tools 版本号随镜像变化，动态找
+          SDKMGR=$(ls -d "$ANDROID_SDK_ROOT"/cmdline-tools/*/bin/sdkmanager | head -1)
+          echo "sdkmanager: $SDKMGR"
+          yes | "$SDKMGR" --licenses > /dev/null
+          "$SDKMGR" --install "ndk;27.1.12297006" "build-tools;37.0.0" "platforms;android-37.0"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
 
       - run: pnpm install --frozen-lockfile
