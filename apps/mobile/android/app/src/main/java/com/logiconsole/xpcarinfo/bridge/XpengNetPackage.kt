@@ -1,4 +1,4 @@
-package com.xpengmobile.bridge
+package com.logiconsole.xpcarinfo.bridge
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule
@@ -7,7 +7,7 @@ import com.facebook.react.uimanager.ViewManager
 
 class XpengNetPackage : ReactPackage {
     override fun createNativeModules(ctx: ReactApplicationContext): List<NativeModule> =
-        listOf(XpengNetModule(ctx))
+        listOf(XpengNetModule(ctx), UpdaterModule(ctx))
 
     override fun createViewManagers(ctx: ReactApplicationContext): List<ViewManager<*, *>> =
         listOf(CaptchaWebViewManager())

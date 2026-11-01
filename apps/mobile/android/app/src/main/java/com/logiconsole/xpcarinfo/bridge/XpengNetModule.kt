@@ -1,4 +1,4 @@
-package com.xpengmobile.bridge
+package com.logiconsole.xpcarinfo.bridge
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -7,8 +7,8 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
-import com.xpengmobile.net.MqttClient
-import com.xpengmobile.net.XpengHttp
+import com.logiconsole.xpcarinfo.net.MqttClient
+import com.logiconsole.xpcarinfo.net.XpengHttp
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 

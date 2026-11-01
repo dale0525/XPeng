@@ -9,6 +9,7 @@ import type { Session } from '@xpeng/protocol/src/session';
 import type { Vehicle } from '@xpeng/protocol/src/vehicles';
 import { Card, InfoRow, PrimaryButton, ScreenScroll } from '../components';
 import type { ThemeMode } from '../../core/theme';
+import type { UpdateState } from '../../core/update';
 import { Icon } from '../icons';
 
 /** 能力位 → 中文名。只列本项目实际会用到的几项。 */
@@ -30,6 +31,10 @@ export function SettingsScreen({
   onThemeChange,
   onReconnect,
   onLogout,
+  versionName,
+  update,
+  onCheckUpdate,
+  onDownload,
   bottomInset,
 }: {
   session: Session;
@@ -41,6 +46,10 @@ export function SettingsScreen({
   onThemeChange: (m: ThemeMode) => void;
   onReconnect: () => void;
   onLogout: () => void;
+  versionName: string;
+  update: UpdateState;
+  onCheckUpdate: () => void;
+  onDownload: () => void;
   bottomInset: number;
 }) {
   const caps = CAPABILITIES.filter((c) => vehicle.function[c.key] !== false);
@@ -204,16 +213,121 @@ export function SettingsScreen({
       <Card>
         <View className="flex-row items-center justify-between">
           <Text className="font-headline font-bold text-sm text-on-surface tracking-tight">关于</Text>
-          <View className="px-2 py-0.5 bg-surface-container-high rounded border border-outline-variant/40">
-            <Text className="font-mono text-xs font-bold text-on-surface-variant">v0.1.0</Text>
-          </View>
+          <Pressable
+            onPress={onCheckUpdate}
+            disabled={update.kind === 'checking' || update.kind === 'downloading'}
+            className="px-2 py-0.5 bg-surface-container-high rounded border border-outline-variant/40 active:scale-95">
+            <Text className="font-mono text-xs font-bold text-on-surface-variant">
+              {update.kind === 'checking' ? '检查中…' : `v${versionName}`}
+            </Text>
+          </Pressable>
         </View>
+
+        {renderUpdateBody(update, onCheckUpdate, onDownload)}
+
         <Text className="mt-2.5 text-xs text-on-surface-variant leading-relaxed">
           登录一次后自动续期，续期失败时会提示重新登录
         </Text>
       </Card>
     </ScreenScroll>
   );
+}
+
+/**
+ * 关于卡片里随更新状态变化的那一块。四种状态各给一行结果 + 一个动作：
+ * 检查中/已最新/有新版（下载按钮）/下载中（进度条）/失败（原因 + 重试）。
+ */
+function renderUpdateBody(update: UpdateState, onCheck: () => void, onDownload: () => void) {
+  if (update.kind === 'idle' || update.kind === 'checking') return null;
+
+  if (update.kind === 'current') {
+    return (
+      <View className="mt-2.5 flex-row items-center gap-1.5">
+        <Text className="text-[14px] font-icon text-success">{Icon.check_circle}</Text>
+        <Text className="text-xs text-on-surface-variant">已是最新版本 v{update.version}</Text>
+      </View>
+    );
+  }
+
+  if (update.kind === 'failed') {
+    return (
+      <View className="mt-2.5">
+        <View className="flex-row items-center gap-1.5">
+          <Text className="text-[14px] font-icon text-error">{Icon.gpp_bad}</Text>
+          <Text className="flex-1 text-xs text-error" numberOfLines={3}>
+            {update.message}
+          </Text>
+        </View>
+        <View className="mt-2">
+          <PrimaryButton label="重试" tone="outline" icon="refresh" onPress={onCheck} />
+        </View>
+      </View>
+    );
+  }
+
+  if (update.kind === 'downloading') {
+    const pct =
+      update.total > 0 ? Math.min(100, Math.round((update.done / update.total) * 100)) : null;
+    return (
+      <View className="mt-2.5">
+        <View className="flex-row items-center justify-between">
+          <Text className="text-xs font-headline font-bold text-on-surface">
+            正在下载 v{update.release.version}
+          </Text>
+          <Text className="font-mono text-xs text-on-surface-variant">
+            {pct === null ? formatBytes(update.done) : `${pct}%`}
+          </Text>
+        </View>
+        <View className="mt-1.5 h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+          <View
+            className="h-full bg-primary rounded-full"
+            style={{ width: pct === null ? '30%' : `${pct}%` }}
+          />
+        </View>
+        <Text className="mt-1 text-[11px] text-outline font-mono">
+          {pct === null
+            ? formatBytes(update.done)
+            : `${formatBytes(update.done)} / ${formatBytes(update.total)}`}
+        </Text>
+      </View>
+    );
+  }
+
+  if (update.kind === 'installing') {
+    return (
+      <View className="mt-2.5 flex-row items-center gap-1.5">
+        <Text className="text-[14px] font-icon text-secondary">{Icon.sync}</Text>
+        <Text className="text-xs text-on-surface-variant">正在唤起系统安装器…</Text>
+      </View>
+    );
+  }
+
+  // available
+  const { release, asset } = update;
+  return (
+    <View className="mt-2.5">
+      <View className="flex-row items-center gap-1.5">
+        <Text className="text-[14px] font-icon text-primary">{Icon.vertical_align_bottom}</Text>
+        <Text className="text-xs font-headline font-bold text-on-surface">
+          发现新版本 v{release.version}
+        </Text>
+        <Text className="text-[11px] font-mono text-outline">{asset.name}</Text>
+      </View>
+      {release.notes ? (
+        <Text className="mt-1 text-[11px] text-on-surface-variant leading-relaxed" numberOfLines={4}>
+          {release.notes}
+        </Text>
+      ) : null}
+      <View className="mt-2">
+        <PrimaryButton label="下载并安装" icon="vertical_align_bottom" onPress={onDownload} />
+      </View>
+    </View>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function maskMobile(mobile: string): string {

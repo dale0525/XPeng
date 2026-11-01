@@ -1,4 +1,4 @@
-package com.xpengmobile
+package com.logiconsole.xpcarinfo
 
 import android.app.Application
 import com.facebook.react.PackageList
@@ -6,7 +6,7 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
-import com.xpengmobile.bridge.XpengNetPackage
+import com.logiconsole.xpcarinfo.bridge.XpengNetPackage
 
 class MainApplication : Application(), ReactApplication {
 

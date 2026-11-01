@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 只暴露 cacheDir/updates：下载好的 APK 交给系统安装器读取时用。 -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

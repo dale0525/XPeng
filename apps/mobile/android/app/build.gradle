@@ -9,7 +9,9 @@ apply plugin: "com.facebook.react"
 react {
     // pnpm 的 hoisted 布局把 hermesc 放在 node_modules/hermes-compiler 下，
     // RN 默认去 node_modules/react-native/sdks/hermesc 找，找不到会直接失败。
-    hermesCommand = file("../../../../node_modules/hermes-compiler/hermesc/osx-bin/hermesc").absolutePath
+    // hermesc 是分平台的预编译二进制，CI 在 Linux 上构建，写死 osx-bin 会直接找不到文件。
+    def hermescOs = System.getProperty("os.name").toLowerCase().contains("mac") ? "osx-bin" : "linux64-bin"
+    hermesCommand = file("../../../../node_modules/hermes-compiler/hermesc/${hermescOs}/hermesc").absolutePath
     /* Folders */
     //   The root of your project, i.e. where "package.json" lives. Default is '../..'
     root = file("../../")
@@ -81,7 +83,7 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.xpengmobile"
+    namespace "com.logiconsole.xpcarinfo"
 
     // 字体不能被压缩：Typeface.createFromAsset 只认 STORED 条目，
     // 打包成 Defl:N 时图标字体静默失效（所有图标渲染成方框）。
@@ -90,11 +92,14 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.xpengmobile"
+        applicationId "com.logiconsole.xpcarinfo"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI 用 tag 推导后经 -P 传进来；本地直接 assembleRelease 时回退到这两个默认值。
+        // 用属性赋值而不是 versionCode(...) 方法调用：AGP 9 的 defaultConfig 上
+        // 这两个是属性，调用式写法会把 getter 的返回值当闭包调，报 "Value is null"。
+        versionCode = (project.findProperty("xpVersionCode") ?: 1).toInteger()
+        versionName = (project.findProperty("xpVersionName") ?: "0.1.0").toString()
     }
     signingConfigs {
         debug {
@@ -103,15 +108,24 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // release 签名密钥不入库：CI 从 GitHub Secrets 解出 keystore 与口令，再经 -P 传进来。
+        // 本地没有这套属性时该 signingConfig 不创建，release 构建会自动退回 debug 签名。
+        if (project.hasProperty("xpReleaseStoreFile")) {
+            release {
+                storeFile file(project.property("xpReleaseStoreFile").toString())
+                storePassword project.property("xpReleaseStorePassword").toString()
+                keyAlias project.property("xpReleaseKeyAlias").toString()
+                keyPassword project.property("xpReleaseKeyPassword").toString()
+            }
+        }
     }
-    // 只出 arm64：2020 年后的安卓手机全部是 arm64，带上 armeabi-v7a/x86/x86_64
-    // 会让 APK 从 ~20 MB 涨到 54 MB，纯粹是白占体积
+    // 分架构出包 + 一个 universal 包：前者给真机省流量，后者兜住架构不在列表里的机器。
     splits {
         abi {
             enable true
             reset()
-            include 'arm64-v8a'
-            universalApk false
+            include 'arm64-v8a', 'armeabi-v7a'
+            universalApk true
         }
     }
 
@@ -120,9 +134,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig project.hasProperty("xpReleaseStoreFile") ? signingConfigs.release : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             shrinkResources enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"

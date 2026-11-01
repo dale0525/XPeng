@@ -1,0 +1,100 @@
+name: release
+
+# 打 tag 触发：v0.2.0 → versionName 0.2.0，产物挂到同名 Release 上。
+# 应用内更新（apps/mobile/src/core/update.ts）拉的就是这个 Release 的 assets，
+# 两边靠文件名约定对接：xpcarinfo-<version>-<abi>.apk 与 xpcarinfo-<version>-universal.apk。
+on:
+  push:
+    tags:
+      - 'v*'
+  # 手动跑一次只为验证流水线，不发布
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # tag 名（如 v0.2.0）；用前会去掉前导 v。手动触发时给一个不会被当成正式版的占位。
+      XP_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-dev' }}
+      # versionCode 必须单调递增，否则覆盖安装会被系统拒绝。
+      # run_number 单调递增，加基数保证第一次发布也大于历史手装的 1。
+      XP_VERSION_CODE: ${{ github.run_number + 1000 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.11.0
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # build.gradle 要求 buildTools 37 / compileSdk 37 / NDK 27.1，runner 自带的版本不够
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager --install "ndk;27.1.12297006" "build-tools;37.0.0" "platforms;android-37.0"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.XP_RELEASE_KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Build release APKs
+        env:
+          XP_RELEASE_STORE_PASSWORD: ${{ secrets.XP_RELEASE_STORE_PASSWORD }}
+          XP_RELEASE_KEY_ALIAS: ${{ secrets.XP_RELEASE_KEY_ALIAS }}
+          XP_RELEASE_KEY_PASSWORD: ${{ secrets.XP_RELEASE_KEY_PASSWORD }}
+        run: |
+          cd apps/mobile/android
+          # versionName 必须与 release 的 tag 去掉 v 后完全一致：应用内更新拿
+          # 安装包的 versionName 和 GitHub 上最新的 tag 比，两边格式不同就会永远报有更新。
+          VERSION="${XP_TAG#v}"
+          ./gradlew assembleRelease --no-daemon \
+            -PxpVersionName="$VERSION" \
+            -PxpVersionCode="$XP_VERSION_CODE" \
+            -PxpReleaseStoreFile="$RUNNER_TEMP/release.keystore" \
+            -PxpReleaseStorePassword="$XP_RELEASE_STORE_PASSWORD" \
+            -PxpReleaseKeyAlias="$XP_RELEASE_KEY_ALIAS" \
+            -PxpReleaseKeyPassword="$XP_RELEASE_KEY_PASSWORD"
+
+      - name: Collect and rename APKs
+        run: |
+          VERSION="${XP_TAG#v}"
+          OUT="$RUNNER_TEMP/out"
+          mkdir -p "$OUT"
+          # AGP 的产物名是 app-<abi>-release.apk / app-universal-release.apk
+          for f in apps/mobile/android/app/build/outputs/apk/release/*.apk; do
+            abi=$(basename "$f" .apk)
+            abi=${abi#app-}
+            abi=${abi%-release}
+            cp "$f" "$OUT/xpcarinfo-$VERSION-$abi.apk"
+          done
+          ls -lh "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: ${{ runner.temp }}/out/*.apk
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/out/*.apk
+          generate_release_notes: true

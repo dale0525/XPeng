@@ -6,12 +6,14 @@
  * 在验证码通过后才出现——与设计稿一致。
  */
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { Image, ScrollView, Text, TextInput, View } from 'react-native';
 import { LoginFlow } from '@xpeng/protocol/src/session';
 import { sessionStore } from '../../core/session';
 import { Banner, PrimaryButton } from '../components';
-import { Icon } from '../icons';
 import { SliderCaptcha } from '../SliderCaptcha';
+
+/** 与桌面图标同一张图（官方图标灰度反相），避免应用内外两个标志。 */
+const BRAND_ICON = require('../../assets/brand/icon.png');
 
 type Stage = 'phone' | 'code' | 'second-slider';
 
@@ -85,10 +87,12 @@ export function LoginScreen() {
         contentContainerClassName="px-margin pt-space-xl pb-32"
         keyboardShouldPersistTaps="handled">
         <View className="items-center mb-space-xl">
-          <View className="w-14 h-14 rounded-2xl bg-primary items-center justify-center mb-space-sm">
-            <Text className="text-on-primary text-[28px] font-icon">{Icon.directions_car}</Text>
-          </View>
-          <Text className="text-[28px] font-semibold text-on-surface tracking-tight">小鹏车控</Text>
+          <Image
+            source={BRAND_ICON}
+            className="w-14 h-14 rounded-2xl mb-space-sm"
+            resizeMode="contain"
+          />
+          <Text className="text-[28px] font-semibold text-on-surface tracking-tight">小鹏友</Text>
           <Text className="text-[14px] text-on-surface-variant mt-1">
             用手机号登录，登录一次后长期有效
           </Text>

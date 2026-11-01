@@ -14,6 +14,7 @@ import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { carLink, type LinkState } from './src/core/car';
 import { sessionStore, type SessionState } from './src/core/session';
 import { themeVars, useThemeMode } from './src/core/theme';
+import { useUpdater } from './src/core/update';
 import { Banner, BottomNav, TopBar, type TabKey } from './src/ui/components';
 import { Icon } from './src/ui/icons';
 import { ControlScreen } from './src/ui/screens/Control';
@@ -38,6 +39,7 @@ function Shell() {
   const [linkReason, setLinkReason] = useState<string | undefined>();
   const [latency, setLatency] = useState<number | null>(null);
   const [theme, setTheme, scheme] = useThemeMode();
+  const updater = useUpdater();
 
   useEffect(() => {
     const unsub = sessionStore.subscribe(setSession);
@@ -122,7 +124,7 @@ function Shell() {
   const title =
     vehicle?.plateNo && vehicle.vehicleTypeName
       ? `${vehicle.plateNo} · ${vehicle.vehicleTypeName}`
-      : '小鹏车控';
+      : '小鹏友';
 
   return (
     <View style={[themed, { flex: 1, paddingTop: insets.top }]} className="bg-background">
@@ -154,6 +156,10 @@ function Shell() {
             onThemeChange={setTheme}
             onReconnect={() => carLink.connect(vehicle.vin, session.session.uid)}
             onLogout={() => sessionStore.logout()}
+            versionName={updater.version?.versionName ?? '—'}
+            update={updater.state}
+            onCheckUpdate={updater.check}
+            onDownload={updater.download}
           />
         )}
       </View>

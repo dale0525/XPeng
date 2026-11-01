@@ -1,4 +1,4 @@
-package com.xpengmobile.net
+package com.logiconsole.xpcarinfo.net
 
 import android.util.Log
 import java.io.InputStream

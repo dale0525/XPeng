@@ -13,8 +13,8 @@
 
 # RN 的 TurboModule / ViewManager 由原生按类名反射注册，R8 改名后会在运行时
 # 找不到模块（表现为 "Could not find generated setter" 或直接红屏）
--keep class com.xpengmobile.bridge.** { *; }
--keep class com.xpengmobile.net.** { *; }
+-keep class com.logiconsole.xpcarinfo.bridge.** { *; }
+-keep class com.logiconsole.xpcarinfo.net.** { *; }
 -keepclassmembers class * extends com.facebook.react.uimanager.ViewManager {
     public <init>(...);
 }

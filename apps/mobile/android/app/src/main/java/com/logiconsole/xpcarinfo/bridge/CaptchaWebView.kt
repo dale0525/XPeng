@@ -1,4 +1,4 @@
-package com.xpengmobile.bridge
+package com.logiconsole.xpcarinfo.bridge
 
 import android.annotation.SuppressLint
 import android.webkit.JavascriptInterface
