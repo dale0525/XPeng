@@ -920,6 +920,12 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 - `msg_type:2` 是请求；`msg_type:4` 是心跳/注册，不带 `msg_content`。
 - **回执机制**：请求带 `msg_id`，回执带 `msg_ref` 与之对应，可直接配对。`msg_type:1` 表示事件/响应。
 
+**下行报文的两种形态**（2026-11-01 自研客户端实测）：
+
+- `st=19` 的回执把整包状态**直接放在 `msg_content` 顶层**（顶层键就是 `msg/code/instant/interval/digital_vehicle`），没有 `status` 之类的包装层。判据取「有没有 `instant`」。
+- 车控指令（`st=12` 等）的回执 `msg_content` 里**只有该动作涉及的字段**，例如开遮阳帘只回 `code` + 四个车窗位置 + `sky_sun_shade_position`，**不含 `instant`**。若把这种回执当状态写入界面，所有未推送的字段会全部变空。
+- **车辆会主动推 `st=19` 增量状态**，`msg_ref` 不一定等于我们发出的 `msg_id`（配对不上）。这类推送只带变化的子域（开遮阳帘时只有 `window`），必须按子域合并进上一份状态，直接替换会清空 `solarRoof` / `trunkPower` / `chargeStatistics` 等没推的域。
+
 ### 5.5 `service_type` 语义表
 
 | service_type | 含义 | 已验证指令 |
@@ -944,7 +950,7 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | 解锁车门 | `{"cmd_type":0}` | 9 | `driver_door_lock_st: 0` |
 | 锁车 | `{"cmd_type":1}` | 9 | `driver_door_lock_st: 1` |
 | 闪灯 | `{"cmd_type":1,"cmd_value":1}` | 5 | `dipped_headlight_status: 1` |
-| 遮阳帘开/关 | `{"cmd_type":4,"cmd_value":1/0}` | 12 | `sky_sun_shade_position: 1/0` |
+| 遮阳帘开/关 | `{"cmd_type":4,"cmd_value":1/0}` | 12 | `sky_sun_shade_position`，**0–100 百分比** |
 | 空调开/关 | `{"cmd_type":1,"cmd_value":1/0}` | 3 | `hvac_on: 1/0` |
 | 设温度 | `{"cmd_type":2,"cmd_value":<整数℃>}` | 3 | `hvac_temp: N` |
 | 全车车窗降/升 | `{"cmd_type":1,"cmd_value":2/1}` | 12 | 四个 `*_window_position` 100↔91 |
