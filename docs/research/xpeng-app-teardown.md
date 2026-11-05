@@ -1,9 +1,11 @@
 # 小鹏 App（com.xiaopeng.mycarinfo）逆向调研
 
 目的：为「自研 App 替代官方」评估技术成本与卡点。结论按「自研 + 钥匙从官方服务端接口获取」这条路线组织。
-调研对象：国内版 5.19.0（`versionCode 10639`，265 MB）为主，4.2.0（`versionCode` 未记，120 MB）作对照。
+调研对象：国内版 5.19.0（`versionCode 10639`，265 MB）为主，4.2.0 作对照，5.23.6（303 MB）用于真机取证。
 
-> 本文档只保留**当前成立**的结论。已被实测推翻的判断集中在附录 A，仅供避免重走弯路。
+> 本文档只保留**当前成立**的结论。已被推翻的判断与排查过程不再收录。
+> 附录 A 保留了无法重新获取的实测数据（native 偏移、真实抓包样本、设备拓扑、明文帧），是唯一的副本。
+
 
 ---
 
@@ -11,11 +13,15 @@
 
 **客户端身份层已全部闭环**：签名、appId、secret、密钥池、本地密钥、信封格式、MQTT 凭据全部打通并线上验证。
 
-**续期已闭环**：一次登录 + refresh 循环即可长期免重登。连续 5 次续期全部成功，每次 `keyIndex` 轮换。**注意**：重新登录后若解出的 token 尾部不变，说明 `mmkv_read` 读到了 MMKV 里的历史值，见 §4.9。
+**续期已闭环**：一次登录 + refresh 循环即可长期免重登。连续 5 次续期全部成功，每次 `keyIndex` 轮换。注意：重新登录后若解出的 token 尾部不变，说明 `mmkv_read` 读到了 MMKV 里的历史值，见 §4.8。
 
-**车控已打通 13 条**：解锁、锁车、闪灯、遮阳帘开关、空调开关、设温度、全车车窗升降、极速降温、极速升温、高温抑菌、鸣笛、哨兵开关、哨兵灵敏度。均实测成功并有 `code:200` 回执。
+**登录已端到端打通**（2026-11-01）：发码 → 验证码 → 第二道滑块 `drag/validate{sceneType:"LGN"}` → `smsLogin` 200 → 解 `sData` 拿到 AT/RT → 带 `Xp-Uid=<uid>` 打业务接口 200。三个必要条件：第二道滑块场景是 `LGN`（不是发码用的 `SMS`）、换 token 打 `v5/smsLogin`、解 `sData` 必须用同一次请求的服务端密钥池。
 
-**未打通**：单扇车窗、除霜、内外循环、座椅加热通风、智能清洁/除味/香氛（风量官方 App 无此功能，不需打通）。**后备箱开关不在 MQTT**（走 BLE，用户 10-31 确认，见 §5.6）。**「解锁并启动」的启动那一步不在 MQTT**（走 BLE，见 §5.6）。**远程查看**只读可用，开流与视角切换本车无环视硬件（`avm_exist=0`）无法实测。**鸣笛**按用户要求不再排查。剩余项原因统一为「App 实际发的请求报文抓不到」——报文在内存中存活极短，Frida 被易盾反调试阻断，且 App `flags=0x0` 不可调试（`am instrument` 反射枚举方案不成立）。
+**MQTT 车控已打通 13 条**：解锁、锁车、闪灯、遮阳帘开关、空调开关、设温度、全车车窗升降、极速降温、极速升温、高温抑菌、鸣笛、哨兵开关、哨兵灵敏度。均实测成功并有 `code:200` 回执。未打通的是单扇车窗、除霜、内外循环、座椅加热通风、智能清洁/除味/香氛（风量官方 App 无此功能）。**后备箱开关与「解锁并启动」的启动那一步都不在 MQTT**，走 BLE（§5.6）。**远程查看**只读可用，开流与视角切换本车无环视硬件（`avm_exist=0`）。
+
+**BLE 链路：P5V2 目标发送路径与 V3 native 必须区分。** 握手第二步 `ef0110` 的 KDF 已完全解出（§6.13）：`HMAC-MD5(MD5(hexIncrement(keyString[-10:][:8])), app_n‖car_n)`，188/188 组真实样本命中，Python 与 TS 双实现。`keyString` 是**当前 GATT 连接对端模块自己的 MAC**（§6.13）。命令帧此前被车端静默丢弃的真因是 CRC 覆盖范围算错（只覆盖 payload、不含 type 字节，§6.15），不是抓不到报文。
+
+**P5V2 的 `ed1118` verifyKey 已找到并与历史样本独立匹配**：目标发送路径是 Java `CarCtrlVerifyPackager` 的 AES-CBC/零 IV/NoPadding；本地 `tee` 缓存 phone key 解开 31 条不同历史密文，31/31 的末 12 字节全零，watch key 为 0/31（§6.14）。V3 native 的 XOR/TLV 与 sessionKey 派生另属一条路径，仍有未知量，不能套用到本车 P5V2。隔离验收入口使用本地注入的一次性材料已在本车实跑三段握手、严格挑战校验及解锁/锁车写入，用户现场确认车门解锁和锁上（§6.14、附录 §6.92）。自研生产包随后在**已有登录态**下完成 P5/DF 的 BLE-only 解锁/锁车真车验收：登录后自动准备钥匙物料、Control 页按钮路由到 `autoConnect=true` 的 GATT 连接，各只发一次，用户现场确认车门解锁和锁上；两份日志均无 MQTT 车控发布。该验收仍不等于无钥匙账号激活、其余 5 个命令、标准命令回执或车况 UI 刷新已闭环。§6.35e 的坏帧实验不能证明握手是硬前置（§6.21）。
 
 | 子问题 | 状态 |
 | --- | --- |
@@ -24,12 +30,17 @@
 | 客户端证书 | ✅ 可提取，国内主机不要求 |
 | 钥匙物料链（tenant → 密钥池 → 本地密钥） | ✅ 闭环 |
 | `Xp-Authorization` 信封 | ✅ 闭环（分版本，见 §3.3） |
-| 登录 | ✅ 端到端闭环：发码 → 验证码 → 第二道滑块(`LGN`) → `smsLogin` 200 → 解 `sData` 拿 AT/RT → 带 `Xp-Uid=<uid>` 打业务接口 **200**（§4.2） |
+| 登录 | ✅ 端到端闭环（§4.2） |
 | 令牌续期 | ✅ 闭环 |
 | MQTT 连接与凭据 | ✅ 闭环 |
-| 车控指令 | 🟡 13/15（解锁/锁车/闪灯/遮阳帘/空调开关/设温度/全车车窗/极速降温/极速升温/高温抑菌/鸣笛/哨兵开关/哨兵灵敏度） |
+| MQTT 车控指令 | 🟡 13 条已打通，余项见 §5.7 |
 | 远程查看 | 🟡 只读可，开流未打通且本车无环视硬件 |
-| BLE 离线解锁 | 🟡 native 层可复用，未编译验证 |
+| BLE 帧格式与指令码 | ✅ 闭环（§6.7、§6.15） |
+| BLE 握手 `ef0110` | ✅ KDF 解出，188/188（§6.13） |
+| BLE 握手 `ed1118` | ✅ P5V2 隔离验收入口已在本车完成严格挑战校验；V3 另有未知（§6.14） |
+| BLE 车控帧下发 | ✅ 隔离入口与生产登录态下的 BLE-only 解锁/锁车均已各一次并由用户现场确认；其余命令未验（§6.14、附录 §6.92、§6.93） |
+| 自研端 BLE 代码 | 🟡 DF 的 7 个有抓包实证动作已接 P5V2 路由（`Control.tsx` / `ble-v2-routing.ts`），失败不回退 MQTT；其余走 MQTT。生产登录态的解锁/锁车已实车验收，新增动作的材料绑定、无钥匙账号激活和车况 UI 刷新仍待验 |
+
 
 ---
 
@@ -41,7 +52,8 @@
 - 5.19.0 的 `classes.dex`（120,255,620 B）头部声明 1547 个字符串、30 个类，全部是 `com.netease.nis.wrapper.*`；`file_size` 与整文件长度一致、adler32 校验和正确，即 **dex 头本身未被破坏**，但字节码被整体加密。
 - 5.19.0 额外带 `libNetHTProtect.so`（3771960 B）与 `libijiami_H5SDK.so`；**4.2.0 没有这两个库**，只有易盾的 `libnesec.so`/`assets/libnesec64`。两者加固层级不同，但 dex 都被加密到只剩 30 个壳类（4.2.0 的 dex 为 40,395,592 B，反编译同样只出 30 类）。
 
-### 1.1.1 4.2.0 与 5.19.0 的协议差异（2026-10-31 静态对比）
+
+### 1.2 4.2.0 与 5.19.0 的协议差异
 
 两个版本的 dex 都能搜到 `LoginSmsPresenter`/`RiskService`/`LoginVerifyActivity`，但**协议层已经换代**：
 
@@ -60,7 +72,8 @@
 
 **v3 端点仍然在线**（2026-10-31 实测）：`v3/sms/code` 对假号返回 `12040101`（与 v5 一致），`v3/drag/validate` 返回 `200`。所以 4.2.0 的链路今天仍能打通到服务端——但 v3 与 v5 行为一致，**不能指望 v3 天然没有第二道滑块**。
 
-### 1.2 静态分析为何不可行
+
+### 1.3 静态分析为何不可行
 
 ```
 classes.dex 大小 : 120,255,620 B
@@ -81,7 +94,8 @@ class_defs 区    : 0x557c 起，30 × 32 = 960 B
 - 没有任何 `.so` 引用这些键（100+ 个 arm64 库逐个 grep `XmartV1|XTee|tee_id` 全 0）。`liball_in_one.so` 里的 `LocalKeySet` 属阿里播放器 DRM，无关。
 - `jadx` 只能产出 30 个空壳类。**不动壳就拿不到信封解包逻辑。**
 
-### 1.3 版本对比与选型
+
+### 1.5 版本对比与选型
 
 | 项目 | 4.2.0 | 5.19.0 | 5.23.5 |
 | --- | --- | --- | --- |
@@ -96,6 +110,23 @@ class_defs 区    : 0x557c 起，30 × 32 = 960 B
 **5.23.5 在本机模拟器上启动即崩**：`libbulk.so` 加载后 `Fatal signal 11`，pid 启动 2 秒即死。加载序列 `libDexHelper.so` → `libmmkv.so` → `libc++_shared.so` → `libmarsxlog_16kb.so` → `libbulk.so` → 崩溃。`libmarsxlog_16kb.so` 的 `16kb` 后缀暗示按 16 KB 页对齐编译，而模拟器是 4 KB 页。**未进一步验证。**
 
 **选型：用 5.19.0**。国内版可运行、UI 有遮阳帘入口、车控指令集完整。4.2.0 保留作信封格式对照（它是唯一无 `tee_id` 的版本）。
+
+---
+
+
+### 1.4 5.19.0 的 dex 是空壳：类名全是诱饵，代码只在运行时内存
+`work/apk/XP_MobileAPP_Android_gw.apk` 里只有一个 `classes.dex`，120 MB。它的头部字段：
+
+```
+class_defs_size = 30
+string_ids_size = 1547
+```
+
+而 `strings` 里能搜到 **1571 处** `com/didi/davinci/digitalkey`。**类名全部存在于字符串池，但 dex 里只有 30 个真正的类定义。**
+
+jadx 对这个 dex 报 `Input class not found: com.didi.davinci.digitalkey.ble.encrypt.MonaBleKey`——名字在、类不在。
+
+**结论：这个 dex 是诱饵。** 360 壳（`com.secneo.apkwrapper`）把真实字节码搬走，只在字符串池留下名字，静态反编译拿不到任何业务逻辑。此前所有「在 dex 里搜到类名/方法名」的结论都只能当字符串证据，不能当实现证据。
 
 ---
 
@@ -120,6 +151,7 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 
 **踩过的坑**：内层 canonical 漏掉 `XP-TEE-ID` 时报 `12110005`（看似 appId 错），补上后立刻变成 `12010103`（登录态问题）——两者差别只有这一个头。
 
+
 ### 2.2 appId 与 secret
 
 **国内 appId = `xp_xmart_android`，secret 见 `work/local.env` 的 `XP_SECRET`。**
@@ -129,6 +161,7 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 取得方式：模拟器 `userdebug` + `adb root`，装 App 点「同意」进登录页，输入任意手机号点「获取验证码」触发一次签名请求，dump Dalvik main space（`/proc/<pid>/mem` 的 `0x02000000` 起 576 MB）。堆里直接躺着完整 canonical 串，从中读出 appId；同一次 dump 里的 66 个 16 位小写字母数字串逐个当 secret 试，命中唯一值。
 
 **注意**：内存 dump 不注入进程，因此不触发运行时反调试。这是目前唯一可复现的取证方式。
+
 
 ### 2.3 客户端证书
 
@@ -140,6 +173,7 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 - `assets/client.bks`（810 B）用 14 个候选口令都打不开，判断为旧版残留。
 
 **mTLS 是真的且校验证书身份**（仅海外主机）：`apps-global.xiaopeng.com` 不带证书 → `400 No required SSL certificate was sent`；带自签伪证书 → `400 The SSL certificate error`。
+
 
 ### 2.4 国内与海外是两套身份
 
@@ -153,6 +187,7 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 
 海外链路：`POST /gateway/v1/secure/teeIndiv4OverseaApp`，`Xp-Appid: xp_app_norway_android` + 对应 secret → `{"code":200,"data":{"secreteKey":…,"teeId":…,"version":2}}`；secret 或 appId 任一错 → `11031000`。
 
+
 ### 2.5 钥匙物料链
 
 国内链路完整链条（每步实测）：
@@ -160,6 +195,7 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 1. `POST /biz/v5/secure/teeIndiv4App` 返回 `secreteKey`。国内版**只**返回这一个字段；`teeId` 由客户端自己生成并持久化，同设备跨请求恒定。
 2. `secreteKey` 用 AES-ECB 解，密钥是 `md5(device_id)` 的 16 字节原始摘要；去 PKCS7 后得到 `N:{"index":i,"key":"…"}`，解析出 **10 个 16 字节 AES 密钥**。`Xp-Client` 里的 `di` 必须与解密用的设备号一致。
 3. 这 10 把密钥只是中转。它们经 `XTeeEncryptAesKey` 再解一层才得到真正用于 `Xp-Authorization` 的密钥。
+
 
 ### 2.6 本地密钥存储
 
@@ -197,7 +233,8 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 
 **恢复失败教训**：把原 `tee` 写回后 App 仍未登录，因为 MMKV 有配套的 `tee.crc` 校验文件而当时删过它。**不要在生产取证时改动 `tee` 或 `tee.crc`。**
 
-### 2.6b 不要复用 App 的 `tee`：自研客户端应独立注册（2026-10-30 18:30）
+
+### 2.7 不要复用 App 的 `tee`：自研客户端应独立注册
 
 **问题**：`tee` 里的 `XmartV1LocalKey0..9` 是**登录时服务端下发**的，App 在后台每约 3 小时换一次。复用它的 tee 会被轮换打断——表现为 refresh 返回 `200` 但 WEEB 用本地 10 把密钥全部解不开（`InvalidTag`），而此时官方 App 完全正常（它一直持有效 AT，不需要解 WEEB）。
 
@@ -220,7 +257,8 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 
 **仍未变**：登录仍是单会话约束，自研客户端登录会把官方 App 踢下线。这一条独立注册解决不了。
 
-### 2.7 没有证书 pin，但有私有 CA 信任锚
+
+### 2.8 没有证书 pin，但有私有 CA 信任锚
 
 - 四份网络配置（`network.xml`、`jz_network_security_config.xml`、`network_security_config.xml`、`network_security_config_2.xml`）只有 `<base-config>` / `<domain-config>` 的 `cleartextTrafficPermitted`，**无 `<trust-anchors>`、无 `<pin-set>`**；dex 内无 `sha256/` 形式 pin 常量。
 - `res/raw/my_ca.pem` 是一张 Charles Proxy CA，但四份配置都没引用它，dex 内 `raw/my_ca` 命中 0，属开发期遗留。
@@ -229,9 +267,10 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 
 ---
 
-## 3. 信封体系
 
-`Xp-Authorization`（客户端→服务端）与 WEEB（服务端→客户端）**是同一套信封格式的两个变体**，差别只在版本号、`tee_id` 段的有无。
+---
+
+## 3. 信封体系
 
 ### 3.1 XA 信封（客户端 → 服务端）
 
@@ -263,6 +302,7 @@ canonical 构造：`{METHOD}&{头按名排序、全大写、k=v 以 & 连接}&{m
 
 **注意这里的「本地 Key7」指的是当次从 `teeIndiv4App` 取回的池的第 7 槽，不是 `tee` 文件里的 `XmartV1LocalKey7`**（2026-11-01 澄清）。两者不是一回事：同一时刻对比可见 10 个槽全部不同，用 `tee` 文件里的密钥签名恒 `12110009`。上表三行的结论（XA 标记正确、内层签名会被校验、信封解不开是 `12110009`）不受影响。
 
+
 ### 3.2 WEEB 信封（服务端 → 客户端）
 
 base64 解码后 1075 B：
@@ -282,9 +322,10 @@ base64 解码后 1075 B：
 
 **明文 1000 B = 32 B 随机前缀 + 968 B JWT**，AAD 为空。
 
-`WEEB` 前缀**不能剥掉**：整串直接 base64 解码得 1075 B，开头正好是 `58 41 01` = `XA` + `ver=1`。曾误判「`WEEB` 是 4 字符明文前缀，剥掉后得 1072 B」，已推翻。
+`WEEB` 前缀**不能剥掉**：整串直接 base64 解码得 1075 B，开头正好是 `58 41 01` = `XA` + `ver=1`。
 
-### 3.3 版本差异：`tee_id` 必须分版本处理（2026-10-30 修正）
+
+### 3.3 版本差异：`tee_id` 必须分版本处理
 
 这是最容易踩的坑，两个方向都实测过：
 
@@ -301,235 +342,88 @@ base64 解码后 1075 B：
 
 ---
 
+
+---
+
 ## 4. 登录与会话
 
-### 4.1 登录
+登录链路（`/sso`、`/verification`）走 `apps-uc.xiaopeng.com`，该主机强制 mTLS（`work/certs/client-cert-0.pem`），且要求完整 `Xp-Authorization` 信封——只用外层签名得 `12110002`。业务接口在 `apps.xiaopeng.com` / `dragon.xiaopeng.com` / `chargegateway.xiaopeng.com`；uc 主机上没有业务路由（业务路径返回非 JSON 的 404），不能拿登录通道代替业务通道。
 
-正确路径是 `POST /sso/app/v5/smsLogin`（主机 `apps-uc.xiaopeng.com`），不是 `getSmsCode`。
+### 4.1 链路总览
 
-**存在第二条登录入口 `/sso/app/v5/login`**（2026-10-31 定位）：接受 `{mobile, password, smsCode}`。**该端点是否需要滑块取决于手机号**（2026-10-31 修正，原记录「不需要滑块票据」只对当时用的编造号码成立）：
+官方登录是**两道滑块**夹三步接口：滑块(发码) → 发码 → 验证码 → 滑块(换 token) → 换 token。
 
-| 手机号 | `v5/login` 返回 |
-| --- | --- |
-| 真实在网号 | `12040102 输入短信验证码`（不要求滑块） |
-| 编造号码（7 个样本全部） | `12040101 拖动滑块验证码` |
+| 步 | 端点 | 职责 |
+| --- | --- | --- |
+| 1 | `POST /verification/app/v5/sms/code` | 发短信；响应 `Set-Cookie: XP-Xid=<uuid>` |
+| 2 | `POST /verification/app/v3/sms/validate` | 校验短信验证码，把通过状态写入会话 |
+| 3 | `POST /sso/app/v5/smsLogin` | 只带 `mobile`，从会话取状态换 token |
 
-即原记录「全程不出现 `12040101`」是**编造号码下的观测，不可外推**；换真实号后该端点在**未发码阶段**确实不再要滑块。但它同样绕不开发码：`v5/login` 只校验、不下发，必须先有一次成功的 `sms/code`。
+**三个必要条件，缺一即失败**：
 
-**但真实号验证码通过后，`v5/login` 同样返回 `12040101`**（2026-10-31 真号实测，与该会话的 `smsLogin` 一致）——即 `v5/login` **不是绕开第二道滑块的旁路**，它和 `smsLogin` 共用同一道滑块闸门。
+| 条件 | 错的样子 | 后果 |
+| --- | --- | --- |
+| 第二道滑块场景用 `LGN` | 用 `SMS`（发码那道） | `smsLogin` 恒 `12040101` |
+| 换 token 打 `v5` | 只试 `v3` | `12040101`（`v3` 仍要滑块，非旁路） |
+| 解 `sData` 用**同次请求的密钥池** | 用本地 tee / 事后重取 | `InvalidTag` |
 
-`v5/login` 的三个实测特性：
+换到 token 后打业务接口必须带 `Xp-Uid` = `sData.uid`（见 §4.7），否则恒 `12010101`。
 
-| 观察 | 含义 |
-| --- | --- |
-| `password` 填 `x`、`wrongpwd123`、32 个 `a` 结果完全一致 | **密码在服务端未被真正校验**，非空即可 |
-| 无 `XP-Xid` 时报 `12040102 输入短信验证码`；有会话仍报 `12040102` | 它要求的是「该手机号已有一条成功下发的短信」，不是任意会话 |
-| 同会话内无关字段仍 `12040102`、`smsCode` 变 `12040107` | 字段名确认是 **`smsCode`** |
+实现见 `scripts/login.py`、`scripts/login-ui.py`。
 
-**`smsCode` 的判定方法有坑**：必须先发一条无关字段确认基线仍是 `12040102`，再发 `smsCode`。因为一次失败的 `v5/login` 会消耗会话状态，之后所有字段名都会「变成」`12040107`，看起来像随便什么字段名都能命中——2026-10-31 就因此误判过一轮。
+### 4.2 会话钥匙 `Xp-Xid`
 
-**`qrcode/*` 与 `authToken/code` 不是登录入口**：空 body 调 `/sso/app/v3/{authToken/code,getWidgetToken,qrcode/permissionInfo,qrcode/validate}` 全部返回 `12010103 登录状态已过期`，而登录类端点在空 body 下会报具体字段缺失（`12001101 mobile不能为空`）。前者是登录后的功能接口。
-
-**`Xp-Xid` 是会话钥匙**。`/verification/app/v5/sms/code` 首次响应会下发 `Set-Cookie: XP-Xid=<uuid>`；后续请求把这个 uuid 放进 **`Xp-Xid` 请求头**，服务端才进入「校验票据」模式：
+`sms/code` 首次响应下发 `Set-Cookie: XP-Xid=<uuid>`；后续请求把这个 uuid 放进 **`Xp-Xid` 请求头**，服务端才进入「校验票据」模式。放 Cookie 而非请求头会退回 `12040101`。
 
 | 请求形态 | 响应 |
 | --- | --- |
 | 无 `Xp-Xid` 头，body 带任意 `validate` | `12040101 请验证滑块验证码` |
-| 有 `Xp-Xid` 头，body 带 `validate`（**含垃圾值 `zzz`、空串、已用过的票据**） | `12040106 滑块验证码校验不通过` |
+| 有 `Xp-Xid` 头，body 带 `validate`（含垃圾值、空串、已用过的票据） | `12040106 滑块验证码校验不通过` |
 | 有 `Xp-Xid` 头，body 不带 `validate` | `12040106` |
 
-即：带 `Xp-Xid` 只是把错误码从「要求滑块」变成「滑块不通过」，**并不代表票据被真正校验过**——垃圾票据与真票据返回同一个码。所以 `12040106` 不能用作票据是否有效的判据。
+带 `Xp-Xid` 只把错误码从「要求滑块」翻成「滑块不通过」，**不表示票据被真正校验过**——所以 `12040106` 不能用作票据有效性判据。
 
-`/verification/app/v3/drag/validate` 需要 `{validate, captchaId, type, sceneType}` 四字段才通过反序列化（少 `type`/`sceneType` 报 `12051101 请求参数异常`；四字段齐全但票据无效报 `12051100 操作失败`）；但真票据与垃圾票据在此同样都是 `12051100`，**无法用它验证票据**。
+**发码必须两步**：服务端只在已有会话的请求里校验票据。首个请求没有 `XP-Xid`，无论票据真假一律 `12040101`，但该响应照样下发 cookie。因此先发一次无票据请求拿 xid，再带 xid + 票据重试。已实现于 `scripts/login.py:send_code`。
 
-**独立解出的易盾票据不被接受**。用 Chrome + CDP 驱动易盾官方 H5（`cstaticdun.126.net/api/v2/mobile.v2.8.1.html`，`captchaId=f6c14777879d4a75b683b29be6709db6`），按缺口位置拖动、客户端回调 `result=true` 并拿到 531 B 的 `validate`，服务端仍判失败。易盾 check 接口（`c.dun.163.com/api/v1/check`）需要私有密钥才能自验，无法从客户端侧确认票据真伪。结论：**票据绑定服务端会话与轨迹风控，纯脚本生成的轨迹过不了。**
+### 4.3 滑块通道：`drag/validate`
 
-**接口直连下发短信**对任何号码（含真实号码）统一返回 `12051401 短信发送失败`，而 App 界面路径成功——UI 走的是官方 SDK 生成的票据，纯 API 调用无法复现。**自研客户端应复用官方滑块或改用其他登录方式，不要试图绕开。**
+`POST /verification/app/v3/drag/validate`，body 为明文 JSON（非加密）：
 
-**登录是三步，不是一步**。dex 里同时存在 `/verification/app/v5/sms/code`、`/verification/app/v3/sms/validate` 与 `/sso/app/v5/smsLogin`，实测这三步各司其职：
-
-| 步骤 | 端点 | 职责 |
-| --- | --- | --- |
-| 1 | `POST /verification/app/v5/sms/code` | 发短信，响应 `Set-Cookie: XP-Xid=<uuid>` |
-| 2 | `POST /verification/app/v3/sms/validate` | 校验验证码，把通过状态写进会话 |
-| 3 | `POST /sso/app/v5/smsLogin` | **只带 `mobile`**，从会话取状态换 token |
-
-**`smsLogin` 不从 body 读验证码**。证据是服务端的字段校验报错：只传 `mobile` 时返回 `12001402 短信验证码错误`（不是「code 不能为空」）；而 `sms/validate` 缺字段会明确报 `code不能为空`、`smsType不能为空`。换 `code`/`smsCode`/`verifyCode` 三种字段名喂给 `smsLogin` 结果完全一致——它根本没看这些字段。
-
-这解释了 2026-10-31 那次失败：App 内发码拿到真码 `1532`，直接喂 `smsLogin` 一律 `12001402`，因为**从未在同一个会话里调过 `sms/validate`**。
-
-`sms/validate` 的必填字段是 `{mobile, smsType, code}`。`smsType` 只要非空即可，`1`/`2`/`11`/`21`/`31` 返回一致（都用假码，统一 `12051403 短信验证码已过期`，说明服务端确实在校验码而非忽略）。会话缺失或过期返回 `12051102 session会话过期`。
-
-`/sso/app/v5/login` 是**密码**登录（缺 `password` 报 `12001101 password不能为空`），不要与短信登录混用。
-
-实现见 `scripts/login.py`。
-
-### 4.2 滑块：两道，一道卡发码、一道卡换 token
-
-**滑块有两道**，此前「滑块只在发码时强制」的结论**已被真号实测推翻**（2026-10-31，见本节末）：第一道卡发码，第二道卡 `smsLogin`。
-
-**发码必须两步**，这是最容易踩的坑：服务端只在**已有会话**的请求里才校验票据。首个请求没有 `XP-Xid`，无论票据真假一律 `12040101 拖动滑块验证码`；但该响应照样下发 cookie，所以要先发一次无票据请求拿到 xid，再带 xid + 票据重试。`scripts/login.py` 的 `send_code()` 已按此实现。
-
-**`12040106` 与票据内容无关**（2026-10-31 实测，**但适用条件有限，见下方警告**）：拿到 xid 后带票据重试，返回 `12040106 滑块验证码校验不通过`。但把这个码与票据内容做交叉验证，发现**换任何值结果都一样**——垃圾值 `zzz`、空串、已用过的票据、刚由真人在浏览器里拖出的 531 B 票据，全部 `12040106`；`captchaId` 传对的、传空的、传 `0000` 也一样；票据放进 `ptoken`/`ticket`/`token` 字段仍一样。
-
-> ⚠️ **警告：上述全部实验都是在「验证码未通过」的会话上做的**（真号实测 2026-10-31 揭示）。这种会话里 `smsLogin` 恒为 `12001402`，服务端**在字段校验之前就返回**，所以任何 body 字段/票据的差异都被掩盖了——「换什么值都一样」是这种掩盖的产物，**不是「服务端不比对票据」的证据**。同理，本节下方「`12040106` 与票据内容无关」的结论**只适用于发码阶段**，不能外推到第二道滑块。
-
-**真人拖的票据同样被拒**（2026-10-31）：`scripts/login-ui.py` 起一个本地页面加载易盾官方 H5 SDK（`cstaticdun.126.net/load.min.js`，`captchaId=f6c14777879d4a75b683b29be6709db6`），由用户在浏览器里亲手拖动，客户端回调 `result=true`、拿到 531 B `CN31_…` 票据，服务端仍判 `12040106`。所以问题不是轨迹风控——**真人轨迹也过不了**。
-
-票据是易盾加密串（`CN31_` 前缀 + base64 变体，解出 381 B 密文），客户端无法自验；易盾 check 接口（`c.dun.163.com/api/v1/check`）需要私有密钥。**目前无法从客户端侧确认票据真伪，也无法解释服务端为何一律拒绝。**
-
-**已排除的可能**：不是会话绑定（同一 xid 内立即用、换新 xid 再用，都是 `12040106`）；不是票据过期（刚拖完立刻用）；不是字段名（三种字段名、加 `captchaId`/`type`/`sceneType` 全试过）；不是 App 用原生 SDK（dex 里只有 `ye.dun.163.com` 的 H5 方案）。
-
-**链路其余部分已验证可达**：`sms/validate` 用假码返回 `12051403 短信验证码已过期`（业务层），`smsLogin` 只带 `mobile` 返回 `12001402 短信验证码错误`（业务层），`v5/login` 返回 `12040107`（业务层）。即只有发码这一处卡住。
-
-**抓 App 真实发码请求的三条路全部失败**（2026-10-31 实测，不要重复尝试）：
-
-| 路径 | 失败原因 |
-| --- | --- |
-| Frida hook | 易盾反调试在注入后约 15 秒杀掉 App 进程，并连带搞崩过一次模拟器。`spawn` 抢跑能绕过 8 个 `TrustManager` 实现，但 `CertificatePinner` 在握手后另做证书链校验，TLS 仍被拒；且 `okio`/`okhttp3` 类在 App 网络栈初始化后才加载，hook 时机赶不上 |
-| mitmproxy | App 自带网络栈，不读系统 `http_proxy`。设代理后 mitm 日志 0 行，App 不发请求；反而因系统代理影响其他组件导致 ANR |
-| 读内存/缓存 | `/proc/PID/mem` 被 SELinux 挡住；`http-cache` 里没有易盾配置 |
-
-**结论**：App 用的就是 `cstaticdun.126.net/api/v2/mobile.v2.8.1.html`，与本地页面加载的是同一个 H5，差异不在 SDK 版本。抓真实请求这条路已封死。
-
-#### 易盾官方文档给出的规则（2026-10-31 查证）
-
-二次校验接口是 `POST http://c.dun.163.com/api/v2/verify`（`application/x-www-form-urlencoded`），私有参数 `captchaId`、`validate`、`user`，另有公用签名参数 `version=v2`/`nonce`/`timestamp`/`secretId`/`signature`。
-
-三条关键规则：
-
-1. **`validate` 只能校验成功一次，重复校验返回校验不通过**；有效期默认 20 分钟（可配 1~20 分钟）。——这条对排查极其重要：同一张票据反复试，第二次起必然失败，会把人误导成「票据格式不对」。
-2. **`user` 字段必传**，可填空值。
-3. `verify` 的错误描述直接指明失败原因：`WRONG_DATA`（过期）、`SDK UNAVAILABLE`（降级票据）、**`ID_NOT_MATCHED`（服务端与客户端 captchaId 不一致）**、`TOKEN DECRYPT ERROR`（validate 不合法）。
-
-客户端错误码表里，`200` 是「校验未通过，业务错误含超限」，`300` 是「校验未通过，含轨迹错误」——**轨迹错误与业务错误是分开的两类**。
-
-**已排除 `ID_NOT_MATCHED`**：全量搜 App 数据目录，`captchaId=` 只出现过 `f6c14777879d4a75b683b29be6709db6` 一个值，与本地页面用的相同。
-
-#### 根因：票据发错了端点（2026-10-31 已解决）
-
-长期卡在 `12040106` 的真正原因不是票据无效，也不是字段名写错，而是**票据被发给了不读它的端点**。
-
-在 `apps.xiaopeng.com` 的 `sms/code` 上，只要 `mobile` + `smsType` 齐全，`validate` 取任何值结果都一样：
-
-| `validate` 取值 | 长度 | 返回 |
-| --- | --- | --- |
-| 空串 / 空格 / 单字符 | 0~1 | `12040106` |
-| 32 位 hex / `CN31_`+假串 | 32 / 105 | `12040106` |
-| 真人拖出的真票据 | 531 | `12040106` |
-| 5000 字符垃圾 | 5000 | `12040106` |
-
-body 本身是被解析的——乱码 body 报 `12051101 smsType不能为空`，只带 `validate` 报 `12051101 mobile不能为空`。所以服务端读 body，**但 `sms/code` 这个端点根本不看 `validate` 字段**。
-
-#### App 的真实报文（堆快照取证）
-
-用 `am dumpheap` 抓 App 拖完滑块后的堆，直接读到它构造的两个 body：
-
-```
-POST https://apps-uc.xiaopeng.com/verification/app/v3/drag/validate
-{"sceneType":"SMS","mobile":"…","captchaId":"f6c14777…","validate":"CN31_…"}
-
-POST https://apps-uc.xiaopeng.com/verification/app/v5/sms/code
-{"mobile":"…","smsType":"11"}
+```json
+{"sceneType":"LGN","mobile":"…",
+ "captchaId":"f6c14777879d4a75b683b29be6709db6","validate":"CN31_…"}
 ```
 
-三处关键差异，全是此前没猜到的：
+- 成功返回 `{"code":200,"data":{"valid":true}}`；票据无效是同一个 code 但 `valid:false`——**200 只代表请求成功，判定看 `data.valid`**。
+- 缺 `type`/`sceneType` 报 `12051101 请求参数异常`；四字段齐全但票据无效报 `12051100 操作失败`（与垃圾票据同码，**无法用它验票据**）。
+- `captchaId` 必须带，服务端靠它定位验证码实例；全量搜 App 数据目录只有 `f6c14777…` 一个值，来自运行时内存的 `NetEaseCaptchaId`，与易盾 H5（`cstaticdun.126.net/api/v2/mobile.v2.8.1.html`）一致。
+- **票据一次性**：`drag/validate` 成功即消费，重复提交返回 `valid:false`。每张票据只能测一次。
 
-1. **票据走 `drag/validate`，不走 `sms/code`**。后者 body 里没有 `validate` 字段。
-2. **滑块场景的字段是 `sceneType:"SMS"`**（字符串枚举），不是 `smsType:"11"`。`smsType` 只属于发码接口。
-3. **必须带 `captchaId`**，服务端靠它定位是哪个验证码实例。值 `f6c14777…` 来自 App 运行时内存里的 `NetEaseCaptchaId`，与 H5 页面用的是同一个。
+**`sceneType` 白名单（6 个）**：`LGN` / `SMS` / `RESET` / `REG` / `RESET_PASSWORD` / `CANCEL_ACCOUNT` 返回 `200`（`data.valid` 为判定值），其余全部（含 `LOGIN`、`SMS_LOGIN`、`REGISTER`、`BIND`）返回 `12051100`。`SMS` 是发码前那道滑块，**`LGN` 是 `smsLogin` 前那道**。用垃圾票据即可枚举场景，不消耗票据、不影响会话。
 
-`drag/validate` 成功返回 `{"code":200,"data":{"valid":true}}`；票据无效时是同一个 code 但 `valid:false`——**200 只代表请求成功，判定看 `data.valid`**。这一点曾误导过一次：`code:200` 被当成"通过"。
+**票据生成机制**：易盾滑块是 App 的普通依赖库 `com.netease.nis.captcha`（与加固壳 `com.netease.nis.wrapper` 是两个独立包），运行在独立 WebView 沙箱进程（`com.google.android.webview:sandboxed_process0`）。票据是 `CN31_` 前缀的加密串，客户端无法自验（易盾 check 接口需私有密钥），只能靠小鹏的 `drag/validate` 判定。
 
-#### 正确链路（已实现于 `scripts/login.py:send_code`）
+**纯脚本过不了**：用 Chrome + CDP 驱动同一份易盾 H5、按缺口拖动、客户端回调 `result=true` 拿到 531 B `validate`，服务端仍判失败；接口直连下发短信对任何号码（含真实号）统一 `12051401 短信发送失败`，而 App 界面路径成功。自研客户端必须由人在本地页面拖一次滑块（`scripts/login-ui.py`），不要试图绕开。
 
-1. 建会话：不带票据调 `sms/code`，预期 `12040101`，响应下发 `XP-Xid` cookie。
-2. 校验滑块：`drag/validate` 带票据，`data.valid` 为 true 才继续。
-3. 发码：同一会话（`Xp-Xid` 请求头）再调 `sms/code`，返回 `200`。
-
-实测：新票据 → `valid:true` → `sms/code` 返回 `200`，短信真实下发。
-
-**票据一次性**：`drag/validate` 成功即消费，重复提交返回 `valid:false`。所以调试时每张票据只能测一次，这也解释了为什么"同一张票据反复试"永远失败。
-
-#### 此前误判的排查记录（供参考）
-
-- 补 `Xp-SDK`/`Xp-DEPENDENCE`/`Xp-Ptoken`/`Xp-PtokenType` 四个头无效。
-- xid 放 Cookie 而非请求头会退回 `12040101`（请求头才是正确方式）。
-- `smsType` 1~199 扫描：58 个走滑块分支、141 个返回 `12051401 短信发送失败`（连 `abc` 这种非法号码同样报错，是未知场景兜底）。
-- `apps-uc` 必须 mTLS（`work/certs/client-cert-0.pem`），且需要完整 `Xp-Authorization` 信封，只用 `probe.signed()` 的外层签名会得到 `12110002`。
-- `ID_NOT_MATCHED` 已排除：全量搜 App 数据目录，`captchaId=` 只出现 `f6c14777…` 一个值。
-
-#### 社区与同类项目
-
-- 易盾二次校验必须用 `secretId`+`signature` 走服务端签名，**客户端无法自验票据真伪**。所以本地判断票据是否有效只能靠小鹏的 `drag/validate`。
-- XPENG 海外版（`com.xiaopeng.globalcarinfo`）的 Homey 插件用户遇到同样报错「Please verify the slider verification code」，其解法是改用 Google 登录绕开短信滑块。国内版没有这个入口，但绕开滑块的思路与 `v5/login` 的发现方向一致。
-
-**取 token 的现状**：自研侧已可独立发码（滑块由人在本地页面拖一次），后续 `sms/validate` → `smsLogin` 换 token 全程自动。
-
-#### `drag/validate` 的 `sceneType` 白名单与错误码衰减（2026-10-31 静态+探测）
-
-`drag/validate` 对 `sceneType` 做**白名单校验**，且这个校验可以用垃圾票据当探针零成本枚举（未知场景返回 `12051100 操作失败`，已知场景返回 `200` 且 `data.valid=false`，**不消耗票据、不影响会话**）：
-
-| `sceneType` | 结果 |
-| --- | --- |
-| `LGN` / `SMS` / `RESET` / `REG` / `RESET_PASSWORD` / `CANCEL_ACCOUNT` | `200`，`data.valid` 为判定值 |
-| 其余全部（含 `LOGIN`、`SMS_LOGIN`、`REGISTER`、`LOGIN_BY_PWD`、`WECHAT`、`BIND` 等） | `12051100` |
-
-服务端认这 **6** 个场景。`LGN` 是 2026-11-01 从 4.2.0 真实登录流量里补上的——**它就是第二道滑块（`smsLogin` 那道）的场景**，`SMS` 是发码前那道。此前枚举漏了 `LGN`，据此得出的「没有登录专用场景」是错的（见 §4.2「票据通道就是 `drag/validate`，场景必须是 `LGN`」）。
-
-**`12040101 → 12040106` 是调用次数衰减，不是「退化成要滑块」**（对照实验，2026-10-31）：同一会话内**不做任何 drag**，连续调 `v5/login` 三次，结果依次是 `12040101`、`12040106`、`12040106`；先做一次 `drag/validate` 再调，首次仍是 `12040101`。所以 §4.2 此前「反复试探后退化为 `12040106`」的描述方向对，但**归因错了**——它与 `drag` 无关，纯属同一会话内重复调用 `v5/login` 的副作用。这也意味着 `12040106` 依旧不能当票据有效性的判据。
-
-**`v5/login` 的 `12040101` 与 `drag/validate` 无关**：用 5 个白名单场景各开新会话、各拖一次垃圾票，`v5/login` 首调**一律** `12040101`。`v5/login` 既不读 `validate` 字段，也不读 `drag/validate` 写的状态。
-
-**`smsLogin` 同样不读 `validate`**：body 加 `validate`、或加全套 `sceneType`+`captchaId`+`validate`，返回码与只带 `mobile` 完全一致（`12001402`）。
-
-#### 第二道滑块：`smsLogin` 前的独立闸门（2026-10-31 确认存在；**2026-11-01 攻克**）
-
-官方登录是**两道滑块**：滑块 → 短信验证码 → **再滑块**。第一道只管发码，第二道挡在 `smsLogin` 前。
-
-logcat 的调用栈给出确切分工（两轮成功登录均一致）：
-
-| 滑块 | 触发栈 | 说明 |
-| --- | --- | --- |
-| 第一道 | `LoginBySmsActivity.showDragVerifyCode` ← `LoginSmsPresenter.lambda$sendLoginSms$1` ← `f` | 发码方法 |
-| 第二道 | `LoginVerifyActivity.showDragVerifyCode` ← `LoginSmsPresenter.lambda$loginOrRegister$9` ← `h` | 登录/注册方法 |
-
-即 `smsLogin` 返回 `12040101` 后弹滑块，拖完重试 `smsLogin`。会话状态判据（2026-10-31 真号实测确认，三阶段状态机）：
+### 4.4 `smsLogin` 前的状态机与三个错误码
 
 | `smsLogin` 返回 | 会话阶段 | 含义 |
 | --- | --- | --- |
-| `12001402` | 验证码未过 | 还没调过 `sms/validate`，或验证码错 |
-| `12040101` | 验证码已过、待滑块 | 第二道滑块窗口已开，须提交票据 |
-| `12040106` | 滑块尝试已消耗 | 未提交票据却重复调用，或票据无效 |
+| `12001402 短信验证码错误` | 验证码未过 | 没调过 `sms/validate`，或验证码错 |
+| `12040101 拖动滑块验证码` | 验证码已过、待滑块 | 第二道滑块窗口已开，须提交 `LGN` 票据 |
+| `12040106 滑块验证码校验不通过` | 滑块尝试已消耗 | 未提交票据却重复调用，或票据无效 |
 
-**每调一次 `smsLogin` 就消耗一次滑块尝试机会**，所以同一会话内反复试探会从 `12040101` 退化到 `12040106`——这与 `drag/validate` 无关，纯属调用次数副作用。
+**每调一次 `smsLogin` 就消耗一次滑块尝试机会**，同一会话内反复试探会从 `12040101` 衰减到 `12040106`；这与 `drag/validate` 无关，纯属调用次数副作用。`v5/login` 同样如此（三次连调：`12040101`、`12040106`、`12040106`）。
 
-##### 票据通道就是 `drag/validate`，场景必须是 `LGN`（2026-11-01 定论）
+`smsLogin` **不读任何票据字段**：body 加 `validate`，或加全套 `sceneType`+`captchaId`+`validate`，或改用 `code`/`smsCode`/`verifyCode`，返回码与只带 `mobile` 完全一致（`12001402`）。`XP-Ptoken`/`XP-PtokenType` 请求头同样无效。
 
-**上一版「`drag/validate` 不写会话状态、换个 `sceneType` 可彻底排除」的结论被推翻。** 根因是枚举白名单时漏掉了 `LGN`：第二道滑块用的场景是 `LGN`，不是第一道的 `SMS`。
+### 4.5 验证码校验 `sms/validate`
 
-4.2.0（versionCode 8916）真号登录的完整 HTTP/2 流量取证（`SSL_write` + `SSL_read` 双向 hook + HPACK 解码）：
+必填 `{mobile, smsType, code}`。`smsType` 只要非空即可（`1`/`2`/`11`/`21`/`31` 结果一致）；假码统一 `12051403 短信验证码已过期`（说明服务端确实在校验码）；会话缺失或过期返回 `12051102 session会话过期`。缺字段会明确报 `code不能为空`、`smsType不能为空`。
 
-```
-[237] POST /sso/app/v3/smsLogin            → {"code":12040101}
-[240] POST /verification/app/v3/drag/validate → {"code":200,"data":{"valid":true}}
-[246] POST /sso/app/v3/smsLogin            → {"code":200,"data":{"sData":"WEEB…"}}
-```
+### 4.6 换 token：`v5/smsLogin` 与 `sData`
 
-第二道滑块的请求体（明文，非加密）：
-
-```json
-{"sceneType":"LGN","mobile":"13000000000",
- "captchaId":"f6c14777879d4a75b683b29be6709db6","validate":"CN31_ciA3VObsg5GyNSVnqOxXaJw*0lia…"}
-```
-
-`LGN` 的合法性用垃圾票据零成本复核：`LGN`/`SMS` 返 `200 {"valid":false}`，`LOGIN`/`PWD` 返 `12051100`。**白名单实际是 6 个：`LGN`/`SMS`/`RESET`/`REG`/`RESET_PASSWORD`/`CANCEL_ACCOUNT`。**
-
-上一版实验之所以得出「`drag/validate` 只判定不写会话」，是因为全程用 `sceneType:"SMS"` 提交第二道票据——那是发码前那道滑块的场景，用它提交不会解锁 `smsLogin`。**结论本身没错，但归因错了**：不是端点不写会话，是场景传错。
-
-##### 4.2.0 与 5.19.0 在登录返回上的协议差异
-
-4.2.0 的 `smsLogin` 成功时返回 `{"data":{"sData":"…"}}`，5.19.0 的 `token/refresh` 返回 `accessToken`/`refreshToken` 字段。**但自研侧打 `v5/smsLogin` 同样收到 `sData`**（2026-11-01 实测 `data_keys=['sData']`），说明 `sData` 是**服务端按请求特征下发的**，不是按端点版本区分。
+`smsLogin` 成功返回 `{"code":200,"data":{"sData":"…"}}`。自研侧打 `v5/smsLogin` 同样收到 `sData`（`data_keys=['sData']`），说明 `sData` 是**服务端按请求特征下发**的，不是按端点版本区分。
 
 `sData` 结构（3414 B，`XA` 标记、keyIndex=0，与 WEEB 同一套外层布局）：
 
@@ -543,209 +437,109 @@ XA | ver | keyIndex@3 | … | iv@47..59 | ct@59..
    "lastDeviceUserName":"", "mqttAccount":"{…clientId: xmart:app:<uid>:<di>…}"}
 ```
 
-内层 JSON 的字段集合与 5.19.0 `token/refresh` 的返回一致，`accessToken` 再解一次才是 968 B JWT。
+内层 JSON 字段集合与 5.19.0 `token/refresh` 的返回一致；`accessToken` 再解一次才是 968 B JWT。
 
-**`token/refresh` 的返回同样只能用同次请求的池解开**（2026-11-01 实测）：refresh 返回的 `accessToken`（idx=7）与 `refreshToken`（idx=5）用**本次请求**的池能解出 968 B JWT，事后重新取一套池则 `InvalidTag`。所以 `renew.py` 必须把「请求所用的池」和响应一起带出来，不能事后再取。这与 `sData` 的规则是同一条。
+**解密密钥必须来自当次请求的服务端密钥池，不是本地 tee**：
 
-**`mqttAccount` 为空不影响 MQTT**（2026-11-01 实测）：它只是登录响应里附带的参考值，真正的 MQTT 凭据由独立接口 `POST /biz/v5/mqtt/createMqttAccount/app` 签发（§5.2），与 `sData` 里这个字段无关。用自研登录拿到的 token + `Xp-Uid` 调该接口返回 `200`，`clientId` 为 `xmart:app:10000000:00000000…`、`serverSsl` 为 `iot-app.xiaopeng.com:8883`。所以自研登录链路对 MQTT 车控同样可用，不需要额外补 `mqttAccount`。
+- `selfclient.keys()` 每次调 `/biz/v5/secure/teeIndiv4App` 取一套 10 槽密钥池，请求信封用的就是这套，服务端加密 `sData` 用的也是同一套；连续两次调用 10 槽全不同。
+- 本地 `tee` 里的 `XmartV1LocalKey*` 是设备自己存的另一份，与服务端按 deviceId 下发的不保证同步——用它解报 `InvalidTag`。
+- 4.2.0 与 5.19.0 的 `XTeeSecurityAlias` RSA 私钥不同（keystore 里只有当前安装那一把），跨版本解也失败。
 
-**解 `sData` 的密钥必须来自服务端当次下发的密钥池，不是本地 tee**（2026-11-01 实测，两次 `InvalidTag` 的根因）：
+因此「发 `smsLogin` 那次的池」必须与响应绑定保存，事后重取一定解不开；`unwrap_sdata` 以服务端密钥池为主、tee 仅兜底。`token/refresh` 的返回同样只能用同次请求的池解开（AT idx=7、RT idx=5），所以 `renew.py` 必须把「请求所用的池」和响应一起带出。
 
-- `selfclient.keys()` 每次调 `/biz/v5/secure/teeIndiv4App` 取一套密钥池，**请求信封用的就是这套**；
-- 服务端加密 `sData` 用的也是同一套；
-- 本地 `tee` 里的 `XmartV1LocalKey*` 是设备自己存的另一份，与服务端按 deviceId 下发的不保证同步——用它解就 `InvalidTag`。
+`mqttAccount` 为空不影响 MQTT：它只是登录响应里的参考值，真正的 MQTT 凭据由 `POST /biz/v5/mqtt/createMqttAccount/app` 独立签发（§5.2）。
 
-另外 4.2.0 与 5.19.0 的 `XTeeSecurityAlias` **RSA 私钥不同**（同一个 keystore 里只有当前安装那一把），拿 4.2.0 安装的 tee 去解 5.19.0 时期的信封同样失败。`unwrap_sdata` 因此以服务端密钥池为主、tee 仅兜底。
+### 4.7 业务请求的 `Xp-Uid`
 
-##### 端到端打通实录（2026-11-01 01:38，真号）
-
-自研侧完整跑通，一次成功：
-
-```
-drag/validate{sceneType:"LGN"} → 200 {"valid":true}
-v3/smsLogin                    → 12040101   （v3 仍要滑块，非旁路）
-v5/smsLogin                    → 200 {"sData":"…"}   ← 换到 token
-sData 解开（用同次密钥池）      → uid=10000000, accessToken/refreshToken 各 1436 字符
-AT 再解                         → 968 B JWT
-落盘                            → work/live/access_token.txt（1436 字符）
-```
-
-**必须同时满足三个条件**，缺一即失败（这正是此前反复卡住的原因）：
-
-| 条件 | 错的样子 | 后果 |
-| --- | --- | --- |
-| `sceneType` 用 `LGN` | 用 `SMS`（发码那道） | `smsLogin` 恒 `12040101` |
-| 换 token 打 `v5`（`v3` 仍要滑块） | 只试 `v3` | `12040101` |
-| 解 `sData` 用**同次请求的密钥池** | 用本地 tee / 事后重取 | `InvalidTag` |
-
-**密钥池每次请求都变**（实测连续两次 `teeIndiv4App` 返回的 10 槽全不同），所以「发 `smsLogin` 那次的池」必须与响应绑定保存，事后重取一定解不开。已用「同一 `sData` + 正确池能解开、换一套池报 `InvalidTag`」做了决定性对照。为此 `_call` 全程把 `{请求体, 密钥池, 原始响应}` 落盘到 `work/live/trace/`，`login-ui.py` 另存 `/tmp/last_smslogin.json`。
-
-##### 业务请求的 `Xp-Uid` 必须等于 token 所属账号（2026-11-01 攻克）
-
-换到的 token 打业务接口曾**恒 `12010101 登录状态已过期`**。根因只有一个：**请求头没带 `Xp-Uid`**（或带错）。`Xp-Uid` 参与内层 `xpSign` 计算，必须在算签名**之前**设好。
-
-决定性对照（同一 AT、同一密钥池，只改 `Xp-Uid`）：
+`Xp-Uid` 参与内层 `xpSign` 计算，必须在算签名**之前**设好，且等于 `sData.uid`：
 
 | `Xp-Uid` | 返回 |
 | --- | --- |
-| 不设（`base_headers` 默认 `0`） | `12010101` |
-| `10000000`（`sData.uid`） | **`200`**，列出 `L1NSPGH91NA000000 沪A00000 D55` |
+| 不设（`base_headers` 默认 `0`） | `12010101 登录状态已过期` |
+| `10000000`（`sData.uid`） | `200`，列出车辆 |
 
-所以自研登录链路是**完整可用**的：发码 → 验证码 → 第二道滑块(`LGN`) → `smsLogin` 200 → 解 `sData` → 用 `uid` 打业务接口 200。
+错误码分界：`Xp-Uid` 设了值但与签名不一致，服务端报 `12110009 服务器开小差`（信封解不开）；没设或设错但签名自洽，报 `12010101`。
 
-**排查过程中被推翻的假设**（都做过对照，别重复）：
+内层明文只需 `{"xpSign":…}&accessToken=<JWT>` 就够。真机业务请求内层约 2111 B，是因为它多塞了 `refreshToken`，长度吻合不是必要条件。
 
-1. ~~deviceId 不一致~~：改成与 App 同身份后仍 `12010101`。此改动保留（登录与业务用同一身份更正确），但不是根因。
-2. ~~token 没绑设备~~：`smsLogin` 补 `deviceModel`/`deviceBrand` 后 `sData.lastDeviceModel/lastDeviceBrand` 确实回填为 `sdk_gphone64_arm64`/`google`，但当时仍失败。此改动保留（与真机请求体一致），不是根因。
-3. ~~内层明文缺字段~~：真机业务请求内层约 2111 B、自研只塞「签名+token」约 1121 B，曾据此判断「缺一批字段」。**实测推翻**——内层只放 `{"xpSign":…}&accessToken=<JWT>` 就够，2111 B 只是真机多塞了 `refreshToken`（两个 968 B JWT 相加 1936 B，加 UUID 与签名正好约 2103 B，长度吻合纯属巧合，不是必要条件）。
-4. ~~过期/密钥代际~~：AT 信封时间戳就是请求当时，同次池能解出 1000 B 明文。
+密钥池必须每次请求现取，复用上一次的池会 `12110009`。
 
-**踩坑记录（会直接导致 `12110009`）**：
+### 4.8 令牌结构与真实寿命
 
-- `Xp-Uid` 一旦设了值却参与签名不一致，服务端报 `12110009 服务器开小差`（信封解不开），而不是 `12010101`。两种错误码的分界要看 `Xp-Uid` 是否在算 `xpSign` 前设好。
-- 密钥池必须**每次请求现取**（`selfclient.keys()`），不能复用上一次的池——池每次调用都变，复用会 `12110009`。
+登录成功后 token **不在 HTTP 头里**，而在内层明文末尾：
 
-**已确认的其它事实**：
+```
+UUID + base64({"xpSign":"…"}) + "&accessToken=" + JWT(968 B)
+```
 
-- 登录走 `apps-uc.xiaopeng.com`（要 mTLS），业务接口在 `apps.xiaopeng.com`、`dragon.xiaopeng.com`、`chargegateway.xiaopeng.com`；uc 主机上业务路径直接 404（返回非 JSON），不能用登录通道绕开。
-- 4.2.0 登录后实际调的是 `dragon.xiaopeng.com/xp-app/…`（`im/account/init`、`im/famous/list`、`open/get-team-ext`、`open/get-user-lead-status`）与 `chargegateway.xiaopeng.com/v5/charge/private-pile/query`，**没有调过 `myVehicles`**。
-- 真机业务请求头带 `XP-Ptoken`（恒定值 `9ca17ae2…`，跨请求不变，与登录阶段逐请求变化不同）。
+post-login 的 canonical 头集合与登录前不同：出现 `XP-UID`，`appVersion`/`brand`/`deviceModel`/`osVersion`/`versionCode` 改为小写形式，另加 `XP-OTA-DATA-WITH-OBJECT-VALUE=1`、`XP-OTA-DATA-WITH-VERSION=1`；`XP-TEE-ID`、`XP-PTOKEN` 不再作为独立头出现（TEE 值仍嵌在 `Xp-Authorization` blob 内）。
 
-##### 已排除的假设（2026-11-01 复核后仍成立的部分）
+JWT 三段：
 
-**`xp-ptoken` 不是滑块票据**：同一次会话内每个请求的 `xp-ptoken` 都不同（长度 172/174 浮动、尾部变化），是**逐请求重新生成**的设备指纹类头，不是一次性获取后复用的票据。`drag/validate` 与它前一个 `smsLogin` 的 ptoken 恰好相同（同一请求批次的复用），但下一个 `smsLogin` 又变了。
-
-**`com.netease.nis.wrapper.o` 不是滑块 SDK，是壳的 so 加载器**（2026-10-31 静态复核）：该类全文只有 `System.loadLibrary` / `System.load` + 从 APK 里解 `lib/<abi>/` 落盘再加载的逻辑，与验证码无关。堆快照里它出现，只说明当时触发了某个 native 库的加载（易盾壳自身行为），**不能作为「第二道滑块走 native SDK」的证据**。
-
-**第二道滑块的真实实现仍未知**：既没有证据表明它用 native SDK，也没有证据排除它用 H5。§4.2 上文「App 用的就是 `cstaticdun.126.net/api/v2/mobile.v2.8.1.html`」是全量搜 App 数据目录得到的唯一 captcha H5 地址，两道滑块共用同一份 SDK 仍是更简约的解释——那么第二道失败的原因就落在**票据与场景/会话的绑定方式**上，而不是票据生成机制。
-
-**但滑块 SDK 本身是独立的 `com.netease.nis.captcha` 包，不是壳**（2026-10-31 静态确认，此前文档从未记录）：dex 字符串池里有完整的 `com.netease.nis.captcha.Captcha` / `CaptchaListener` / `Captcha$LangType` 及其内部类 `a`~`d`，配套 `captcha_progress_dialog_layout` 布局、`Captcha Progress Dialog show/dismiss Error`、`Captcha SDK Validate Error`、`Captcha Tip Dialog show Error` 日志串，以及 `onVerifySuccess` / `onVerifyFailed` 回调方法名。
-
-这一点很重要：它说明**易盾滑块是 App 的一个普通依赖库，与加固壳（`com.netease.nis.wrapper`）是两个独立包**。`wrapper` 包是壳（so 加载、`a.auu.a.c` 字符串解密），`captcha` 包才是滑块。两者同属易盾产品线，此前把堆里出现的 `wrapper` 类误读成「第二道滑块用 native SDK」，是把壳当成了滑块。
-
-**`v5/login` 绕不过去**（此前记录的"不需要滑块"结论不足以利用）：它确实从不返回 `12040101`，但要求「该手机号已有成功下发的短信」，且**不认 `verification` 主机的发码**——用 `drag/validate` + `sms/code` 真实发出的短信，`v5/login` 仍返回 `12040102 请输入正确的验证码`。字段分层已确认：缺 `password` → `12001100/12001101`，有 `password` → `12040102`，与 `smsType`（1/2/11/21/31/41）无关。
-
-**`/sso/app/v3/sms/codeForApp` 不可用**：空 body、`mobile`、`mobile+smsType`、加 `captchaId`/`validate`/`sceneType` 全字段，一律 `12001100`，两个主机（`apps` / `apps-uc`）相同。错误码不随字段变化，说明在字段校验之前就失败，该端点当前不接受这些形状的请求。
-
-**堆快照对第二道滑块无效**（重要，别再重复）：请求体与票据都是短命局部变量。`LoginVerifyActivity` 暂停在第二道滑块弹出态时 dump 75 MB，里面**既没有 `CN31_` 票据、也没有任何请求体或 `12040101` 响应**；连拍 12 个快照（主进程 + WebView 各 6 轮，覆盖整个拖动过程）同样一张票据都没抓到。第一道能抓到纯属票据恰好在 dump 时刻尚未提交。
-
-**易盾运行在独立 WebView 沙箱进程**（`com.google.android.webview:sandboxed_process0`），不在 App 主进程堆里。此前「第二道滑块的 native SDK 痕迹在主进程」的说法依赖 `com.netease.nis.wrapper.o`，该依据已作废（见上），故「第二道在主进程」无证据。
-
-**已攻克（2026-11-01）**：第二道滑块的票据通道就是 `drag/validate` + `sceneType:"LGN"`，详见 §4.2。上面这些 2026-10-31 的排查之所以结论为「票据通道未知」，根因是当时只枚举了 5 个场景、漏了 `LGN`，且全程用 `SMS` 提交。堆快照抓不到票据这个观察本身仍成立（票据是短命局部变量），但它不是阻塞点。
-
-#### 第二道滑块的候选通道（2026-10-31 排除法结论）
-
-已知「不是」的：
-
-| 通道 | 排除依据 |
-| --- | --- |
-| `drag/validate` + 任一 `sceneType`（垃圾票） | 5 个白名单场景全试，`smsLogin` 恒 `12001402`，不写会话 |
-| **`drag/validate` + 真票据（`valid=true`）** | **2026-10-31 真号实测：`SMS` 场景返回 `code=200 valid=true`，`smsLogin` 仍 `12040101`，会话未前进。这是最强的一次否定证据——票据真实有效也不够。** |
-| `smsLogin` body 里的 `validate`/`sceneType`/`captchaId` | 加上与不加返回码完全一致 |
-| `XP-Ptoken` / `XP-PtokenType` 请求头 | 加上与不加返回码完全一致 |
-| `sms/validate` 通过后自然放行 | 真号实测：验证码通过后 `smsLogin` 仍返回 `12040101`（见下节） |
-
-**`drag/validate` 已被彻底排除**：它在「验证码已通过」的会话上、用真人拖出的真票据、返回 `valid=true` 之后，`smsLogin` 依然是 `12040101`。所以这个端点**只判定票据、从不写会话状态**，与第二道滑块的票据通道无关。此前所有基于「往 `drag/validate` 提交票据」的尝试可以永久放弃。
-
-由此**尚不能**推出 `12040101` 的成因——但 2026-10-31 的真号实测给出了定论（见下节）。
-
-#### 真号实测：第二道滑块确实存在，且是 `smsLogin` 的强制闸门（2026-10-31 定论）
-
-**实测过程**（真实在网号 `130****36`，`scripts/login-ui.py`，一次完整流程）：
-
-1. 第一道滑块人工拖过 → `drag/validate` 返回 `data.valid=true` → `sms/code` 返回 `200`，短信真实下发（xid=`be3b086c…`）
-2. 真实验证码经 `sms/validate` **校验通过**
-3. `smsLogin` 返回 **`12040101 拖动滑块验证码`**
-4. 未拖第二道滑块、再点一次 → `sms/validate` 返回 `12051403 短信验证码已过期`（一次性验证码已被消费）
-
-**结论：H2 成立，H1 被推翻。** 第二道滑块不是「号码状态异常才出现」的风控分支，而是**验证码通过后 `smsLogin` 的必经闸门**。此前「`12040101` 按号码判定、真实号可绕过」的推论**错误**，作废。
-
-**为什么之前的号码对照实验误导了判断**：那次实验在**未发码**的会话上观测 `v5/login`，编造号码返回 `12040101`、真实号码返回 `12040102`。现在回看，这个差异反映的是「该号码能否进入验证码环节」，**不是**「验证码通过后是否需要滑块」。两者是不同阶段的两个闸门，混为一谈才得出「真实号不需滑块」的错误结论。
-
-**`12040106` 的真实含义（修正）**：此前记为「与票据内容无关、缺前置条件直接判失败」。真号实测显示，`12040106` 出现在**验证码已通过、但第二道滑块未提交**的会话上（第 4 步之后该会话的 `smsLogin`/`v5/login` 均返回 `12040106`）。即：`12001402` = 验证码未过；`12040101` = 验证码已过、待滑块；`12040106` = 滑块窗口已开但票据未通过/已失效。**三个码是同一状态机的三个阶段**，这解释了此前「同一会话内重复调用就退化」的现象——每调一次就消耗一次滑块尝试机会。
-
-**对自研客户端的直接影响**：登录链路在 `smsLogin` 前**必须**提交第二道滑块的票据，且该票据：
-- ~~不是 `drag/validate` 的返回~~ **此条已推翻**：当时用 `sceneType:"SMS"` 提交，场景传错。改用 `LGN` 后 `drag/validate` 返回 `valid:true` 即解锁 `smsLogin`（§4.2）。
-- 不接受 `smsLogin` body 里的 `validate`/`sceneType`/`captchaId`（已实测，返回码不变）——仍成立
-- 不接受 `XP-Ptoken` 请求头（已实测，返回码不变）——仍成立
-
-第二道滑块已于 2026-11-01 攻克，通道是 `drag/validate{sceneType:"LGN"}`。
-
-#### 票据通道的排除法已到尽头（2026-10-31 静态收敛）
-
-本轮把「客户端能提交什么」穷举完了，结论是**第二道滑块的票据不是通过任何独立端点或明文字段提交的**：
-
-**证据一：`/verification/` 下只有 7 个端点，全在 dex 里，全部已试过。**
-
-| 端点 | 状态 |
-| --- | --- |
-| `/verification/app/v5/sms/code` | 已用（第一道滑块后的发码） |
-| `/verification/app/v3/drag/validate` | 已用（只判定，不写会话，真票据 `valid=true` 也不推进） |
-| `/verification/app/v3/sms/validate` | 已用（校验验证码） |
-| `/verification/app/v3/sms/validateByUid` | 需登录态，返回 `12010103` |
-| `/verification/app/v3/sms/validateByUidAndMobile` | 同上 |
-| `/verification/app/v5/sms/codeByUid` | 同上 |
-| `/verification/app/v5/sms/codeByUidAndMobile` | 同上 |
-
-**不存在第二个滑块验证端点**。所以第二道滑块的票据不可能通过独立端点提交。
-
-**证据二：`smsLogin` 不读任何票据字段。** 穷举 20 个候选字段名（`validate`/`ptoken`/`token`/`ticket`/`riskToken`/`captchaValidate`/`dragValidate`/`validateToken`/`captchaToken`/`slideToken`/`verifyToken`/`sceneType`/`captchaId`/`smsCode`/`code`/`sign`/`risk`/`riskControlInfo`/`validateResult`/`dragResult`），**全部返回 `12001402`，无一差异**。
-
-这个探测的有效性已单独验证，不是被掩盖：
-- 故意破坏信封密钥 → 返回 `12110009`（信封层校验先于业务层，说明信封层是通的）
-- body 缺 `mobile` → 返回 `12001101 mobile不能为空`（**字段探测能穿透到业务层**）
-- 所以 `12001402` 是真正的业务判断，不是掩盖
-
-**证据三：`XP-Ptoken`/`XP-PtokenType` 等请求头无效**（`12001402` 不变）。
-
-~~**由此收敛出的唯一可能**：第二道滑块的票据由 native 层加密后塞进 `Xp-Authorization` 信封本体……~~ **此推断已推翻（2026-11-01）**：票据就是易盾 H5 的 `validate` 字符串，明文 JSON 提交给 `drag/validate` 即可，场景必须是 `LGN`（§4.2）。当时代码里没有 native 加密这一环，缺的只是正确场景。
-
-**尚未排除的两个客户端可控通道**（都不需要重新实现 native 加密）：
-
-**(a) 旧版本 `smsLogin` 端点。** 全版本扫描发现 v3/v4 的 `smsLogin` **仍然可用**：
-
-| 端点 | 返回 | 判断 |
+| 段 | 内容 | 长度 |
 | --- | --- | --- |
-| `/sso/app/v3/smsLogin` | `12001402 短信验证码错误` | 可用，要求 `mobile` |
-| `/sso/app/v4/smsLogin` | `12001402 短信验证码错误` | 可用，要求 `mobile` |
-| `/sso/app/v5/smsLogin` | `12001402 短信验证码错误` | 可用，当前 App 在用 |
-| `/sso/app/v1|v2|v6|v7/smsLogin` | `12001100 操作失败` | 不存在 |
+| header | `{"type":1,"version":"1.0.0","alg":"HS256"}` | 42 B |
+| payload | `{"sub":"<650 B 密文>"}`——**只有 `sub`，没有 `exp`/`iat`/`nbf`** | 650 B |
+| sig | — | 32 B |
 
-关键佐证：**dex 字符串池里只有 `v5/smsLogin`**，说明 v3/v4 是服务端保留的旧路由、App 从不调用。旧版实现**可能没有第二道滑块**——若成立，直接就是绕行入口。
+「2 小时」完全来自响应里的 `expiresIn=7200`，是给客户端的建议值，不是服务端强制失效点。实测（签发 10-29 22:29:06，打 `/biz/v5/vehicle/v2/myVehicles`）：
 
-**(b) 信封内层明文。** 已知 `accessToken`/`refreshToken` 就是以 `&accessToken=…` / `&refreshToken=…` 追加在信封内层明文末尾的（§4.4、§4.6），票据可能是同样形式。已验证该通道技术上可用（内层追加任意字段后信封仍正常解开，返回 `12001402` 而非 `12110009`）。
-
-这两条都**未在「验证码已通过」的会话上试过**——那是唯一还有信息量的实验，成本一条短信。
-
-**下一轮按优先级**：
-1. 在「验证码已通过」的会话上，依次试 v3/v4 端点与内层明文字段。**最后一个低成本假设，一次短信可测完两个。**
-2. 从 native 层 hook 第二道滑块提交时的出站请求（需对抗易盾反调试，§6.3 记录 Frida 约 15 秒被杀）。
-3. 脱壳后读 `LoginSmsPresenter.loginOrRegister` 与 `RiskService.verifyDragValidate` 的字节码。
-
-若第 1 条也失败，即可判定票据完全在 native 层，只有 2、3 两条路。
-
-**第 1 条已实现待跑**（2026-10-31）：`scripts/login.py` 的 `try_second_drag()` 现在按序试 **v3 端点 → v4 端点 → 内层 `validate`/`ptoken`/`captchaValidate`**，一命中即返回 `(trials, data)`；`_call()` 新增 `inner_extra` 参数用于追加内层明文。已离线验证：内层追加字段不破坏信封（返 `12001402` 而非 `12110009`），且整条探测链路在真实会话上跑通（5 次尝试全执行，返回结构正确）。`scripts/login-ui.py` 的第二道滑块步骤直接调用它，**下一轮只需一条真实短信即可判定两个假设**。
-
-#### 另一条独立入口：运营商一键登录 `oneclickLogin`（2026-10-31 新发现）
-
-dex 里存在完整的运营商一键登录栈与端点，**完全不经短信、不经任何滑块**：
-
-| 项 | 值 |
+| 年龄 | 结果 |
 | --- | --- |
-| 端点 | `POST /sso/app/v3/oneclickLogin`、`/sso/app/v4/oneclickLogin` |
-| 必填字段 | `accessCode`、`token`（缺任一报 `12001101 xxx不能为空`） |
-| 业务层返回 | 垃圾值 → `12001283 一键登录操作已过期，请重试` |
-| 客户端来源 | `com.cmic.gen.sdk`（移动）、`com.unicom.online.account.kernel`（联通）、`ctGetToken`（电信）；取号方法 `cmGetToken`/`cuGetToken`/`ctGetToken`，`*PrefetchMobileNumber` |
+| 2.00 h | `200`（声明值刚到期） |
+| 2.53 h | `200`（最后一次有效采样） |
+| 2.57 h | `12010101 登录状态已过期` |
 
-**关键点**：`accessCode`/`token` 由运营商 SDK 在**本机 SIM 卡**上换取（运营商网关侧鉴权），与易盾、与小鹏的风控画像都无关。若该入口对小鹏侧开放，则它绕开了短信验证码与两道滑块——**是比攻克第二道滑块更短的一条路**。
+**真实寿命 2.53–2.58 h，比声明值宽约 33 分钟（≈1.28×）**。失效是硬边界：跨过后所有业务接口统一 `12010101`，没有降级、没有只读，宽限期不能当余量用。
 
-**待验**：`12001283` 对任意非空值恒定，说明服务端在**验签/解密前**就按「取号会话不存在」失败，无法从错误码判断格式。真正的判别需要一次真实取号：在有 SIM 卡的设备上跑运营商 SDK 拿 `accessCode`+`token`，再打该端点。**这条需要真机 + 真实 SIM，不能在模拟器上做**（模拟器无运营商网关鉴权能力）。
+### 4.9 续期
 
-**风险**：单会话约束同样适用——若该入口可用，自研客户端一键登录会把官方 App 踢下线。
+`POST /sso/app/v3/token/refresh`，`refreshToken` 放在**内层明文**里（`…&refreshToken=<值>`）；放 body 无效，报 `12010203`。
 
-#### 端点版本矩阵（2026-10-31 全版本扫描，只读、编造号码）
+| 字段 | 值 | 含义 |
+| --- | --- | --- |
+| `expiresIn` | 7200 | accessToken 2 小时（建议值） |
+| `refreshExpiresIn` | 7776000 | refreshToken 90 天，**滑动续期** |
 
-对两个关键端点扫 v1~v7，确认只有 v3 是 `drag/validate` 的真实入口，`smsLogin` 只有 v3/v4/v5 存在：
+一次登录后只要 RT 不过期即可无限续期，不再需要人工登录。端到端验证连续 5 次：refresh `200` → AT/RT 各 1436 字符 WEEB → 各解出 968 B JWT → 业务请求 `200`。
+
+两个硬约束：
+
+1. **输入必须用 `eyJ…`，返回的 `WEEB…` 不能回灌**：同一 `eyJ` RT 可反复使用，把响应的 `WEEB` 当下次输入立刻 `12010204`。
+2. **高频调用会废链**：十几次后返回 `12010202`，该 RT 永久失效——反复调 refresh 会把整条令牌链作废。
+
+实现：`scripts/renew.py`（`status` / `renew` / `auto`）。token 落 `work/live/{access,refresh}_token.txt`（0600），不进版本库。
+
+### 4.10 token 与 deviceId 绑定
+
+`deviceId` 存在 `shared_prefs/device_id.xml.xml`（键 `device_id`），**App 每重装一次就换一个**。签名用的 DI 与之不一致时，真实有效 token 也会被拒：
+
+| 来源 | 错误码 |
+| --- | --- |
+| 空 token | `12010103` |
+| 真 token 但 DI 不匹配 | `12010104 登录状态已过期，请重新登录` |
+
+**两者不同即证明信封解开了、token 被读到了**，问题在身份层，不是签名/信封格式/过期。同步 DI 后错误码从 `12010104` 变为 `12010101`（继续走正常过期判定）。
+
+`unseal-token.py` 的 `sync_device_id()` 每次解 token 前从模拟器读当前 deviceId 并写回 `work/local.env`；读取失败时会静默沿用旧值，那正是 `12010104` 的直接来源。
+
+排查顺序：先比空 token 与真 token 的错误码——不同则查 deviceId，相同才是 token 本身的问题。
+
+### 4.11 单会话约束
+
+同一账号同时只允许一个有效会话，自研客户端登录会把官方 App 踢下线，**尚无共存办法**。`12010101` 同时表示「过期」与「被新登录顶掉」，两者错误码相同、文案无法区分，只能靠本地记录的签发时刻判断。
+
+### 4.12 MMKV 追加写陷阱
+
+`tee` 文件里 `accessToken` 出现 4 次（offset 1177 / 4428 / 7742 / 7835），`refreshToken` 同样 4 次。MMKV 是**追加写**，同一个键保留多份历史值，**最新的在最后**。
+
+`unseal-token.py` 的 `mmkv_read` 必须用 `buf.rfind(name)` 取最后一次出现；用 `buf.find()` 会读到登录前那份已失效的旧 token（现象：解出的 token 尾部不随重新登录变化，`renew.py status` 返回 `12010101`、`renew` 返回 `12010201`，而 App 自身工作正常）。
+
+**判据**：解出的 token 尾部是否随重新登录变化——不变即读到了历史值。
+
+### 4.13 端点版本矩阵与不可用端点
+
+对两个关键端点扫 v1~v7（只读、编造号码）：
 
 | 版本 | `drag/validate` | `smsLogin` |
 | --- | --- | --- |
@@ -756,119 +550,43 @@ dex 里存在完整的运营商一键登录栈与端点，**完全不经短信�
 | v5 | `12051100` | **`12001402`**（业务层） |
 | v6 / v7 | `12051100` | `12001100` |
 
-判据：`12001100 操作失败` 与 `12051100 操作失败` 是「路由未命中」兜底，业务层错误码（`12001402`）才表示端点真实存在并进入逻辑。**结论：不存在更高版本的无滑块登录入口**，v4/v5 的 `smsLogin` 行为与 v3 完全一致，版本矩阵这条路已穷尽。
+`12001100` / `12051100 操作失败` 是「路由未命中」兜底，业务层错误码才表示端点真实存在。**不存在更高版本的无滑块登录入口**；dex 字符串池里只有 `v5/smsLogin`，v3/v4 是服务端保留的旧路由。
 
-`drag/validate` 的 `sceneType` 白名单为 `{LGN, SMS, RESET, REG, RESET_PASSWORD, CANCEL_ACCOUNT}`（垃圾票据即可枚举）。**`LGN` 就是第二道滑块（`smsLogin` 那道）的场景**，2026-11-01 从 4.2.0 真机流量补上；此前枚举漏了它，据此得出的「没有登录专用场景」是错的。
+其余端点结论：
 
-### 4.3 为什么 MITM 抓不到 `apps*.xiaopeng.com`
+| 端点 | 结论 |
+| --- | --- |
+| `POST /sso/app/v5/login` | 密码登录，见下 |
+| `/sso/app/v3/sms/codeForApp` | 不可用：任何 body 形状（含全字段）在两个主机上一律 `12001100`，字段校验之前就失败 |
+| `qrcode/*`、`authToken/code`、`getWidgetToken` | 非登录入口：空 body 全部 `12010103 登录状态已过期`（登录类端点会报具体字段缺失），是登录后的功能接口 |
+| `/verification/app/v3/{sms/validateByUid,sms/validateByUidAndMobile}`、`v5/{sms/codeByUid,sms/codeByUidAndMobile}` | 需登录态，`12010103` |
+| `/sso/app/v3/smsLogin` | 可用，但**仍要第二道滑块**（`12040101`），不是旁路 |
 
-**不是证书固定，是私有 CA 信任锚**。`apps*.xiaopeng.com` 的证书由 `CN=Xiaopeng Motors Intermediate CA`（`O=XiaopengMotors Ltd`）签发，而 `collect.xiaopeng.com`、`sentry.xiaopeng.com` 用 DigiCert RapidSSL。
+`v5/login` 的实测特性：
 
-模拟器系统 CA 装好后（`scripts/emu-ca.sh`，tmpfs 挂载进 `/apex/com.android.conscrypt/cacerts`），实测 `collect`/`sentry` 能正常解密，`apps*` 一律 `Client TLS handshake failed ... does not trust the proxy's certificate`。系统信任库对 DigiCert 主机生效，说明 CA 安装本身没问题；App 对 API 主机另有一套信任锚，指向自家私有 CA。
+| 观察 | 含义 |
+| --- | --- |
+| `password` 填 `x` / `wrongpwd123` / 32 个 `a` 结果一致 | 密码在服务端未被真正校验，非空即可 |
+| 缺 `password` 报 `12001101`，有 `password` 报 `12040102` | 字段分层；与 `smsType`（1/2/11/21/31/41）无关 |
+| 它不认 `verification` 主机的发码 | 真实发出的短信，`v5/login` 仍 `12040102 请输入正确的验证码` |
+| 真实号验证码通过后仍返回 `12040101` | 与 `smsLogin` 共用同一道滑块闸门 |
 
-这也修正了 §2.7 的旧结论：当时看到 `network_security_config` 里没有 `<pin-set>` 就判定「没有 pin」，但私有 CA 信任锚不需要写 pin-set，照样让系统 CA 失效。
+`v5/login` 只校验、不下发，必须先有一次成功的 `sms/code`，因此它不是可用的登录入口。
 
-### 4.4 令牌结构
+### 4.14 `oneclickLogin`（存在，未验证）
 
-登录成功后，token **不在 HTTP 头里**，而在内层明文末尾：
+dex 里存在完整的运营商一键登录栈，不经短信、不经任何滑块：
 
-```
-UUID + base64({"xpSign":"…"}) + "&accessToken=" + JWT(968 B)
-```
+| 项 | 值 |
+| --- | --- |
+| 端点 | `POST /sso/app/v3/oneclickLogin`、`/sso/app/v4/oneclickLogin` |
+| 必填字段 | `accessCode`、`token`（缺任一报 `12001101 xxx不能为空`） |
+| 垃圾值返回 | `12001283 一键登录操作已过期，请重试`（对任意非空值恒定） |
+| 客户端来源 | `com.cmic.gen.sdk`（移动）、`com.unicom.online.account.kernel`（联通）、`ctGetToken`（电信） |
 
-post-login 的 canonical 头集合与登录前不同：出现 `XP-UID`，且 `appVersion`/`brand`/`deviceModel`/`osVersion`/`versionCode` 改为小写形式，另加 `XP-OTA-DATA-WITH-OBJECT-VALUE=1`、`XP-OTA-DATA-WITH-VERSION=1`；`XP-TEE-ID`、`XP-PTOKEN` 不再作为独立头出现（TEE 值仍嵌在 `Xp-Authorization` blob 内）。
+`accessCode`/`token` 由运营商 SDK 在**本机 SIM 卡**上换取，与易盾、与小鹏的风控画像无关；若该入口对小鹏侧开放，将绕开短信验证码与两道滑块。
 
-### 4.5 令牌寿命
-
-JWT 解三段：
-
-```
-段0 header : {"type":1,"version":"1.0.0","alg":"HS256"}   42 B
-段1 payload: {"sub":"VHtIXjG5...（650 B 密文）"}          650 B
-段2 sig    : 32 B
-```
-
-**payload 里只有 `sub`，没有 `exp`/`iat`/`nbf`。** 所以「2 小时」完全来自响应里的 `expiresIn=7200`，是给客户端用的建议值，不是服务端强制的失效点。
-
-实测（签发时刻 10-29 22:29:06）：
-
-| 时刻 | 年龄 | `/biz/v5/vehicle/v2/myVehicles` |
-| --- | --- | --- |
-| 00:29 | 2.00 h | 200（声明值刚到期） |
-| 01:00:54 | 2.53 h | 200（最后一次有效采样） |
-| 01:03:20 | 2.57 h | `12010101 登录状态已过期` |
-
-**真实寿命 2.53 ~ 2.58 小时，比声明值宽约 33 分钟，倍率约 1.28×。**
-
-失效是**硬边界**：跨过之后所有业务接口统一返回 `12010101`，没有降级、没有只读。宽限期不能当余量用。
-
-**一个必须记住的坑**：`12010101` 同时表示「过期」与「被新登录顶掉」（单会话约束）。两者错误码相同，靠文案无法区分，只能靠本地记录的签发时刻判断。
-
-### 4.6 续期（已闭环）
-
-`POST /sso/app/v3/token/refresh`，`refreshToken` 放在**内层明文**里（`…&refreshToken=<值>`），放 body 无效（报 `12010203`）。
-
-| 字段 | 值 | 含义 |
-| --- | --- | --- |
-| `expiresIn` | 7200 | accessToken 2 小时（建议值） |
-| `refreshExpiresIn` | 7776000 | refreshToken 90 天，**滑动续期** |
-
-**端到端验证（连续 5 次）**：
-
-```
-refresh  → code 200，accessToken/refreshToken 均为 1436 字符 WEEB
-解开     → 各得 968 B JWT（keyIndex 直接索引 XmartV1LocalKey*）
-业务请求 → /biz/v5/vehicle/v2/myVehicles 返回 200
-```
-
-**结论：一次登录后，只要 refreshToken 不过期（90 天滑动），就能无限续期，不再需要人工登录。**
-
-**两个硬约束**：
-
-1. **输入必须用 eyJ，返回的 WEEB 不能回灌**：同一个 `eyJ…` refreshToken 可反复使用；但响应里返回的 `WEEB…` 若当作下一次输入会立刻 `12010204`。
-2. **高频调用会废链**：十几次后返回 `12010202`，该 RT 永久失效。**这是最容易犯的错——反复调 refresh 会把整条令牌链作废。**
-
-**实现**：`scripts/renew.py`
-
-```
-pixi run -e rev python scripts/renew.py status   # 查当前 token 是否可用
-pixi run -e rev python scripts/renew.py renew    # 续期并保存
-pixi run -e rev python scripts/renew.py auto     # 快过期才续期
-```
-
-token 落在 `work/live/{access,refresh}_token.txt`（0600），不进版本库。
-
-### 4.7 token 与 deviceId 绑定（2026-10-31 实测）
-
-**现象**：App 内登录成功、界面显示已登录（车主「杰尼」/ G6），`unseal-token.py` 解出 968 B token，但 `renew.py status` 返回 `12010104 登录状态已过期，请重新登录`，`renew.py renew` 返回 `12010204`。
-
-**诊断**：空 token 返回 `12010103`，真 token 返回 `12010104`。**两者不同就证明信封解开了、token 被读到了**，纯粹是身份对不上——不是签名问题、不是信封格式问题、不是 token 过期。
-
-**根因**：`deviceId` 存在 `shared_prefs/device_id.xml.xml`（键 `device_id`），**App 每重装一次就换一个**。`work/local.env` 里的 `XP_DI` 还是上一次的 `00000000…`，而当前是 `00000000…`。用旧 DI 签名，服务端认为这份 token 不属于该设备。
-
-**修复**：`unseal-token.py` 增加 `sync_device_id()`，每次解 token 前从模拟器读当前 deviceId 并写回 `work/local.env`。修复后 `renew.py status` 直接 `code:200` 并列出车辆。
-
-**排查顺序**（下次遇到「token 解出来却失效」按此走）：先比空 token 与真 token 的错误码——不同则查 deviceId，相同才是 token 本身的问题。
-
-### 4.8 单会话约束
-
-同一账号同时只允许一个有效会话，自研 App 登录会把官方 App 踢下线。已在真实账号上触发过一次，**尚未找到共存办法**。
-
-### 4.9 重新登录后解出的 token 仍失效——MMKV 追加写陷阱（2026-10-30 定位并修复）
-
-**现象**：用户退出并重新登录后，`unseal-token.py` 解出的 accessToken 尾部不变（`ou-tBUvxONOK0SaI`），`renew.py status` 返回 `12010101 登录状态已过期`，`renew.py renew` 返回 `12010201`。App 自身却工作正常。
-
-**误判过程（本应避免）**：一度怀疑 token 存在别处、试图从 `/proc/PID/mem` 捞明文（读 `I/O error`，SELinux `u:r:su:s0` 下受限）、试了 `vehicle/list`、`queryList` 等错误路径。文档 §4.6 已写明续期闭环，正确做法是先读文档再排查。
-
-**真正根因**：`tee` 文件里 `accessToken` 出现 **4 次**（offset 1177 / 4428 / 7742 / 7835），`refreshToken` 也 4 次。MMKV 是**追加写**，同一个键会留下多份历史值，**最新的在最后**。而 `unseal-token.py` 的 `mmkv_read` 用 `buf.find(name)` 取**第一次**出现，读到的是登录前那份已失效的旧 token。
-
-**修复**：`mmkv_read` 改用 `buf.rfind(name)`。修复后 `unseal-token.py --save` 直接解出可用 token（尾部 `krpa3tcNOoNt89Bo`），`renew.py status` 返回 `code:200` 并正确列出车辆 `<VIN> <车牌> D55`。
-
-**判据**：判断解出的 token 是否最新，看 `unseal-token.py` 输出的 token 尾部是否随重新登录而变化。不变即说明读到的是历史值。
-
-**教训**：MMKV 读取必须按「最后一次出现」取值；任何基于 `find()` 的 MMKV 解析都存在读旧值的风险。
-
----
+**未验证**：`12001283` 恒定说明服务端在验签/解密前就按「取号会话不存在」失败，错误码无法判断格式。真正判别需要真机 + 真实 SIM 跑运营商 SDK 取号，模拟器无网关鉴权能力。若可用，单会话约束同样适用（会把官方 App 踢下线）。
 
 ## 5. 车控通道（MQTT）
 
@@ -879,6 +597,7 @@ dex 里有 50 个 `/sp-vowner-mapp/p/api/rvc|ac|charge|bt|nfc/*` 路径，但对
 真正的通道在运行时堆里：`com.xiaopeng.link.mqtt.MqttClient`、`MqttConstant`、`sendVehicleMsgAsync`、`cmdId:1793275968829-11`、`cmdQueue.size:0`。点「闪灯」后堆里新增的正是 MQTT 报文，而不是任何 HTTP 请求。
 
 **60+ REST 路径组合全部 `Handler Not Found`；全内存扫描只有 11 条 `/biz/` 路径且无车控相关。车控不走 REST。**
+
 
 ### 5.2 连接与凭据
 
@@ -898,6 +617,7 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 
 **`expireTime` 的 7 天是假的**：AT 失效后立即用同一份凭据（`expireTime` 还剩 7 天）连接，返回 `connack rc=Not authorized`。`expireTime` 只是上限，服务端在 AT 会话失效时连带作废 MQTT 凭据。**每次调用该接口会作废旧凭据。**
 
+
 ### 5.3 主题
 
 | 方向 | 主题 |
@@ -906,6 +626,7 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | 下行（车→App） | `Xmart/Msg/User/<uid>` |
 | DiDi 通道 | `Mona/Send/User/<uid>`、`Mona/Msg/User/<uid>` |
 | 推送 | `Xp/Msg/Push/<deviceId>` |
+
 
 ### 5.4 报文格式
 
@@ -926,6 +647,7 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 - 车控指令（`st=12` 等）的回执 `msg_content` 里**只有该动作涉及的字段**，例如开遮阳帘只回 `code` + 四个车窗位置 + `sky_sun_shade_position`，**不含 `instant`**。若把这种回执当状态写入界面，所有未推送的字段会全部变空。
 - **车辆会主动推 `st=19` 增量状态**，`msg_ref` 不一定等于我们发出的 `msg_id`（配对不上）。这类推送只带变化的子域（开遮阳帘时只有 `window`），必须按子域合并进上一份状态，直接替换会清空 `solarRoof` / `trunkPower` / `chargeStatistics` 等没推的域。
 
+
 ### 5.5 `service_type` 语义表
 
 | service_type | 含义 | 已验证指令 |
@@ -942,6 +664,7 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | 29 | 未知，仅回 `code:200` 空体 | ⚠️ 无数据 |
 | 26/28 | 驻车、哨兵状态 | ⚠️ 主动请求无响应 |
 | 31–70 | 全部不支持 | — |
+
 
 ### 5.6 已打通的十三条指令
 
@@ -1031,6 +754,7 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 
 **遮阳帘的 `cmd_value` 是二值开关**（0/1），不是位置百分比。`cmd_value:99/100` 均返回 `code:8`。
 
+
 ### 5.7 未打通的通道
 
 **远程查看（实时视频 + 视角切换，`service_type:11`）**：只读可用，控制未打通。
@@ -1044,7 +768,7 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 
 排查过程中 `cmd_type:3 cv=1/0` 曾返回过 `code:15003`/`15004`（vdex 字符串池里没有，属服务端动态码），但复测变为无回执、车窗不动，**未确认语义**，判定为无效组合。
 
-四个车窗**同值联动**，说明云端入口只有「一键全车车窗」。单扇控制若要实现，需走 BLE 通道的 `PositionDef$Windows` + `BCM_WINDOW_TYPE_*`（见 §5.7b）。
+四个车窗**同值联动**，说明云端入口只有「一键全车车窗」。单扇控制若要实现，需走 BLE 通道的 `PositionDef$Windows` + `BCM_WINDOW_TYPE_*`（见 §5.12）。
 
 **空调其余能力**：`hvac_quick_warm_mode`、`hvac_quick_cool_mode`、`hvac_high_temp_mode`、`hvac_defrost`、`hvac_wind_speed`、`hvac_auto` 这些字段能读到，App 侧操作与回执变化对照：
 
@@ -1061,7 +785,67 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 
 **鸣笛**：能力表有 `BLE_FLASH_LIGHT_HORN`，闪灯已确认（`st=5 ct=1 cv=1`），鸣笛是否同通道的 `cmd_value:2` 或其他值**未测**。
 
-### 5.7b 从 vdex 挖到的名称清单（未映射到数值）
+
+### 5.8 全车状态字段清单
+
+`service_type:19 / cmd_type:2` 一次返回 80+ 字段，`instant` 下 14 个子域，只读可得、无需车辆上电：
+
+| 子域 | 字段 |
+| --- | --- |
+| `door` | `temp_lock_st`、`driver_door_lock_st`、四个 `*_door_ajar_st`、`trunk_ajar_st` |
+| `window` | `front_left/right_window_position`、`rear_left/right_window_position` |
+| `hvac` | `hvac_on`、`hvac_temp`、`hvac_inner_temp`、`hvac_wind_speed`、`hvac_auto`、`hvac_defrost`、`hvac_quick_warm_mode`、`hvac_quick_cool_mode`、`hvac_high_temp_mode` |
+| `charge` | `battery_soc`、`charging_state`、`charge_gun_status`、`charge_gun_lock_status`、`fast/slow_charge_port_status`、`max_range_charge`、`reserve_charge_start_time`、`time_to_complete_charge(_min)`、`battery_keep_warm_status`、`repeat_type`、`charge_connector_status` |
+| `odometer` | `total_mileage`、`avalible_driving_distance`、`range_type` |
+| `tpms` | 四轮 `tpms_pressure_*` 与 `*_warn` |
+| `seat` | 主副驾与后排的 `*_seat_heat` / `*_seat_ventilation`、`driver_seat_state` |
+| `solarRoof` | `solarWorkStatus`、`solarFaultStatus`、`solarVentilateStatus`、`solarVentilateToday`、`solarVentilateLengthToday` |
+| `trunkPower` | `powerSwitch`、`timeToPowerOffInMin` |
+| `power` / `drive` | 见 `digital_vehicle` 同名域 |
+| `ext` | `sentinel_mode_sensitivity`、`soldier_camera_status`、`sentinel_mode_video_enable`、`repairMode` |
+| `chargeStatistics` | `usageElectricity`、`chargeTime`、`completeTime`、`addedRange` |
+| `equipment` | `avm_exist` |
+
+另有两个顶层域：`interval`（`drive` 定位/速度/角度 + `charge` 电压电流，约 3 s 一帧推送）、`digital_vehicle`（`parking`/`sentinel`/`charge`/`drive`/`ota`）。
+
+
+### 5.9 探测的边界（重要）
+
+**`service_type` 是否认某个字段名，无法靠猜测判定**：不认识的组合统一返回 `{"code":8,"msg":"当前车辆不支持此操作"}`，与「通道存在但字段名不对」的表现完全相同。因此**枚举只能拿到「有效」的信号，拿不到「存在但未猜中」的通道**。
+
+`msg_type` 探路同样无效：`msg_type:4` 只对 `st=29` 有回 `code:200`，`msg_type:1` 对 `st=1` 和 `st=29` 有响应，其余一律 `code:8`。
+
+**为什么控制指令抓不到**：App 发的请求报文在内存中存活极短，写完立刻释放。扫过 7 个含 `protocol_ver` 的区域（共 300+ MB），`msg_type:2` 的 st=3 和 st=12 报文零命中。Frida hook Paho 被易盾检测（`frida-server` 存在即杀进程）；tcpdump 抓 8883 零包（模拟器网络被代理接管）。
+
+**未解释的现象**：一次 `cv=94` 被拒后，遮阳帘位置从 99 跳到 48，而我没有发过 48。可能是 `cv=0` 查询触发了某种滑动，也可能是车辆侧状态机。**待查。**
+
+
+### 5.10 已确认可用的业务接口
+
+均需有效 accessToken：
+
+| 接口 | 用途 |
+| --- | --- |
+| `/biz/v5/vehicle/v2/myVehicles` | 车辆列表：VIN、车牌、车型代码、里程、`relationType`、`permissions.remoteControl` |
+| `/biz/v5/widget/vehicle/state` | 需 `vin` + `vehicleTypeCode`；电量、续航、车窗、`driver_door_lock_st` |
+| `/biz/v5/vehicle/remoteCapabilities` | 需 `vin`；返回 19 项车控能力 |
+| `/biz/v5/remoteControl/activityList` | 需 body 带 `vin` |
+| `/biz/v5/mqtt/createMqttAccount/app` | MQTT 凭据 |
+| `/sso/app/v5/keyAuth/getKeyAuthSwitch` | 钥匙授权开关（本账号 `switchStatus:null`） |
+
+**权限与钥匙激活无关**：本账号对这台车的 `permissions.remoteControl` 为 `isPermanent:true`、`expireTime:null`，服务端照常返回 19 项车控能力。数字钥匙未激活只影响 BLE 本地解锁，不影响云端车控。
+
+`remoteCapabilities` 返回的能力表含 `SUN_SHADE_SOFTWARE`、`BLE_FLASH_LIGHT_HORN`、`REMOTE_START_4G`、`AUTO_PARK`、`SENTINEL_MODE` 等 19 项。该接口只说明支持，**不给出指令码**。
+
+
+### 5.11 车型能力配置
+
+`assets/vehicle/config/<车型代码>VehicleAbilityConfig.json` 是静态可读的车型能力表。本车 `DFVehicleAbilityConfig.json`（P5 / `D55`）关键项：`isSupportCarControl:true`、`isSupportBleKey:true`、`bleKeyVersion:2`、`isSupportPollingV1:true`（V2/V3 为 false）、`isSupportRemoteCamera:true`、`isSupportRemoteStart:false`。**写自研客户端时以这份表决定 UI 该显示哪些控件，不要硬编码。**
+
+---
+
+
+### 5.12 从 vdex 挖到的名称清单（未映射到数值）
 
 `base.vdex` 的字符串池里有 144 万条，其中车控相关名称已全部提取。它们给出了语义，但**不含数值**（vdex 只有名称池，字节码仍在 Yidun 加密区）：
 
@@ -1105,117 +889,668 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 
 **为什么这些名称拿不到数值**：vdex 只保存名称池与类型池，字节码在 `classes.dex` 的 120 MB 加密区里。内存中也没有解密后的标准 dex（Yidun 直接解释执行，不落地）。`/data/app/.../oat/arm64/base.vdex` 只有 120,256,660 B 的原始加密 dex 加名称池，`Anonymous-DexFile@*.vdex` 只有 92 B。
 
-### 5.8 全车状态字段清单
-
-`service_type:19 / cmd_type:2` 一次返回 80+ 字段，`instant` 下 14 个子域，只读可得、无需车辆上电：
-
-| 子域 | 字段 |
-| --- | --- |
-| `door` | `temp_lock_st`、`driver_door_lock_st`、四个 `*_door_ajar_st`、`trunk_ajar_st` |
-| `window` | `front_left/right_window_position`、`rear_left/right_window_position` |
-| `hvac` | `hvac_on`、`hvac_temp`、`hvac_inner_temp`、`hvac_wind_speed`、`hvac_auto`、`hvac_defrost`、`hvac_quick_warm_mode`、`hvac_quick_cool_mode`、`hvac_high_temp_mode` |
-| `charge` | `battery_soc`、`charging_state`、`charge_gun_status`、`charge_gun_lock_status`、`fast/slow_charge_port_status`、`max_range_charge`、`reserve_charge_start_time`、`time_to_complete_charge(_min)`、`battery_keep_warm_status`、`repeat_type`、`charge_connector_status` |
-| `odometer` | `total_mileage`、`avalible_driving_distance`、`range_type` |
-| `tpms` | 四轮 `tpms_pressure_*` 与 `*_warn` |
-| `seat` | 主副驾与后排的 `*_seat_heat` / `*_seat_ventilation`、`driver_seat_state` |
-| `solarRoof` | `solarWorkStatus`、`solarFaultStatus`、`solarVentilateStatus`、`solarVentilateToday`、`solarVentilateLengthToday` |
-| `trunkPower` | `powerSwitch`、`timeToPowerOffInMin` |
-| `power` / `drive` | 见 `digital_vehicle` 同名域 |
-| `ext` | `sentinel_mode_sensitivity`、`soldier_camera_status`、`sentinel_mode_video_enable`、`repairMode` |
-| `chargeStatistics` | `usageElectricity`、`chargeTime`、`completeTime`、`addedRange` |
-| `equipment` | `avm_exist` |
-
-另有两个顶层域：`interval`（`drive` 定位/速度/角度 + `charge` 电压电流，约 3 s 一帧推送）、`digital_vehicle`（`parking`/`sentinel`/`charge`/`drive`/`ota`）。
-
-### 5.9 探测的边界（重要）
-
-**`service_type` 是否认某个字段名，无法靠猜测判定**：不认识的组合统一返回 `{"code":8,"msg":"当前车辆不支持此操作"}`，与「通道存在但字段名不对」的表现完全相同。因此**枚举只能拿到「有效」的信号，拿不到「存在但未猜中」的通道**。
-
-`msg_type` 探路同样无效：`msg_type:4` 只对 `st=29` 有回 `code:200`，`msg_type:1` 对 `st=1` 和 `st=29` 有响应，其余一律 `code:8`。
-
-**为什么控制指令抓不到**：App 发的请求报文在内存中存活极短，写完立刻释放。扫过 7 个含 `protocol_ver` 的区域（共 300+ MB），`msg_type:2` 的 st=3 和 st=12 报文零命中。Frida hook Paho 被易盾检测（`frida-server` 存在即杀进程）；tcpdump 抓 8883 零包（模拟器网络被代理接管）。
-
-**未解释的现象**：一次 `cv=94` 被拒后，遮阳帘位置从 99 跳到 48，而我没有发过 48。可能是 `cv=0` 查询触发了某种滑动，也可能是车辆侧状态机。**待查。**
-
-### 5.10 已确认可用的业务接口
-
-均需有效 accessToken：
-
-| 接口 | 用途 |
-| --- | --- |
-| `/biz/v5/vehicle/v2/myVehicles` | 车辆列表：VIN、车牌、车型代码、里程、`relationType`、`permissions.remoteControl` |
-| `/biz/v5/widget/vehicle/state` | 需 `vin` + `vehicleTypeCode`；电量、续航、车窗、`driver_door_lock_st` |
-| `/biz/v5/vehicle/remoteCapabilities` | 需 `vin`；返回 19 项车控能力 |
-| `/biz/v5/remoteControl/activityList` | 需 body 带 `vin` |
-| `/biz/v5/mqtt/createMqttAccount/app` | MQTT 凭据 |
-| `/sso/app/v5/keyAuth/getKeyAuthSwitch` | 钥匙授权开关（本账号 `switchStatus:null`） |
-
-**权限与钥匙激活无关**：本账号对这台车的 `permissions.remoteControl` 为 `isPermanent:true`、`expireTime:null`，服务端照常返回 19 项车控能力。数字钥匙未激活只影响 BLE 本地解锁，不影响云端车控。
-
-`remoteCapabilities` 返回的能力表含 `SUN_SHADE_SOFTWARE`、`BLE_FLASH_LIGHT_HORN`、`REMOTE_START_4G`、`AUTO_PARK`、`SENTINEL_MODE` 等 19 项。该接口只说明支持，**不给出指令码**。
-
-### 5.11 车型能力配置
-
-`assets/vehicle/config/<车型代码>VehicleAbilityConfig.json` 是静态可读的车型能力表。本车 `DFVehicleAbilityConfig.json`（P5 / `D55`）关键项：`isSupportCarControl:true`、`isSupportBleKey:true`、`bleKeyVersion:2`、`isSupportPollingV1:true`（V2/V3 为 false）、`isSupportRemoteCamera:true`、`isSupportRemoteStart:false`。**写自研客户端时以这份表决定 UI 该显示哪些控件，不要硬编码。**
 
 ---
 
 ## 6. 蓝牙钥匙栈
 
 ### 6.1 Java 侧（在加密 dex 内，需脱壳）
-
-- `com.xiaopeng.blekey.polling.*` 217 个类，分 `manager`(79)、`distance`(44)、`config`(25)、`rx`(18)、`defaultconst`(8) 等；`locksource` 定义 `LockSource`/`UnlockSource`/`LockSourceLevel`。
-- `com.xiaopeng.common.car.digitalkey.*` 1206 个类，覆盖 ICCoA、ICCE、CCC 三套标准，以及华为/小米/vivo/三星/荣耀钱包 SDK 接入。
+- `com.xiaopeng.blekey.polling.*` 217 个类：`manager`(79)、`distance`(44)、`config`(25)、`rx`(18)、`defaultconst`(8)；`locksource` 定义 `LockSource`/`UnlockSource`/`LockSourceLevel`。
+- `com.xiaopeng.common.car.digitalkey.*` 1206 个类，覆盖 ICCoA、ICCE、CCC 三套标准与华为/小米/vivo/三星/荣耀钱包 SDK。
 - 按车型分协议实现：`D22BleProtocol`、`D55BleProtocol`、`E28ABleProtocol`、`E28BleProtocol`、`E38BleProtocol`、`F30BleProtocol`、`H93BleProtocol`、`XpBleProtocolV1V2`、`XpBleProtocolV3`、`XpNativeBleProtocol`。
-- 第三方数字钥匙引擎 DiDi Davinci SDK（`com/didi/davinci` 1,571 处引用、1,489 个类）：`MonaBleService`、`MonaBleCommunication`、`BleCommandQueueManager`、`ble/encrypt/AesUtils`、`mona/carserviceimpl/{MnaAcCtrlImpl,MnaCarManagerImpl,MnaCarStatusImpl,MnaChargeImpl,MnaNfcImpl}`。即数字钥匙本身已是第三方代码，小鹏只做集成。
-- 进程模型：`com.xiaopeng.common.car.ble.ipc.BleService` 与 `com.xiaopeng.link.bleenv.BleService` 均在 `:BLE` 进程，`android:exported="true"` 且**未声明 `android:permission`**。跨进程调用受 `com.xiaopeng.lib.xipc` 约束，框架内含 `RESULT_CALLER_SIGNATURE_CHECK_FAIL`，按调用方签名拦截。
+- 第三方数字钥匙引擎 DiDi Davinci SDK（`com/didi/davinci` 1,571 处引用、1,489 个类）：`MonaBleService`、`MonaBleCommunication`、`BleCommandQueueManager`、`ble/encrypt/AesUtils`、`mona/carserviceimpl/{MnaAcCtrlImpl,MnaCarManagerImpl,MnaCarStatusImpl,MnaChargeImpl,MnaNfcImpl}`。数字钥匙本身即第三方代码，小鹏只做集成。
+- 进程模型：`com.xiaopeng.common.car.ble.ipc.BleService` 与 `com.xiaopeng.link.bleenv.BleService` 均在 `:BLE` 进程，`android:exported="true"` 且未声明 `android:permission`；跨进程调用受 `com.xiaopeng.lib.xipc` 约束，框架内含 `RESULT_CALLER_SIGNATURE_CHECK_FAIL`，按调用方签名拦截。
 - 本地钥匙存储：SQLCipher（`net.zetetic.database.sqlcipher`）+ `KeyTokenDao`（`XpKeyTokenEntity`、`VehicleCertKeyTokenInfo`、`VehicleXpKeyTokenInfo`、`VehicleMacInfo`）。
 
 ### 6.2 Native 侧（未加固，可直接复用）
+`lib/arm64-v8a/libbledata.so`（1.18 MB）是蓝牙钥匙的协议与密码学实现。普通 ELF，无壳、无混淆调用链；`.text` 615 KB，`.rodata` 32 KB（可打印率 75%）。
 
-`lib/arm64-v8a/libbledata.so`（1.18 MB）是蓝牙钥匙的协议与密码学实现：
+- `JNI_OnLoad`（`0xa31f0`）：先 `FindClass("com/xiaopeng/ble_data_processor/BLEDataProcessor")` + `RegisterNatives`（29 项，表在 `0x127838`），返回 `0x10006`；随后 `FindClass(".../AlgorithmUtils")`，`GetMethodID` 取回 4 个 Java 方法句柄存全局：`hkdfSha256 ([B[B[BI)[B`、`hmacSha256 ([B[B)[B`、`encryptCbc ([B[B[B)[B`、`decryptCbc ([B[B[B)[B`。
+- 静态无签名校验、无包名校验：`frida`/`ptrace`/`magisk`/`xposed`/`/proc/self/maps` 检索命中 0；128 个导入符号里与自检沾边的只有 `__system_property_get` 与 `dl_iterate_phdr`。
+- 通过 RELA 重定位还原出完整 JNI 方法表 `0x127838–0x127ad8`，29 项签名齐全。核心几项：`native_generateAuth0DataV3 (J[B[BIJZIIII[B[B[B[B)[B`、`native_generateAuth1DataV3 (I[B[B)[B`、`native_generateSessionKey ([B[BII)[B`、`native_generateHmacKey ([BII)[B`、`native_parseBleV3Data (Ljava/lang/String;[B[B[BZ)Ljava/lang/String;`、`native_generateTboxMessageV3 (I[BBI)Lcom/xiaopeng/ble_data_processor/BleByteMatrix;`。
 
-- 普通 ELF，无壳、无混淆调用链。`.text` 615 KB，`.rodata` 32 KB 可打印率 75%。
-- `JNI_OnLoad`（`0xa31f0`）已完整反汇编：先 `FindClass("com/xiaopeng/ble_data_processor/BLEDataProcessor")` + `RegisterNatives`（29 项，表在 `0x127838`），成功返回 `0x10006`。随后再 `FindClass(".../AlgorithmUtils")`，用 `GetMethodID` 取回 4 个 Java 方法句柄存进全局变量：`hkdfSha256 ([B[B[BI)[B`、`hmacSha256 ([B[B)[B`、`encryptCbc ([B[B[B)[B`、`decryptCbc ([B[B[B)[B`。
-- **静态无签名校验、无包名校验**：`frida`/`ptrace`/`magisk`/`xposed`/`/proc/self/maps` 检索全部命中 0；128 个导入符号里与自检沾边的只有 `__system_property_get` 与 `dl_iterate_phdr`。
-- 通过 RELA 重定位还原出完整 JNI 方法表 `0x127838–0x127ad8`，29 项签名齐全。核心几项：
+- 导出符号含完整密码学原语：`SDKBleKeyV3::getSessionKey`、`hmac_sha256`、`hkdf_sha256`、`calculateAuth1SessionKey`、`generateAuth0Packet`/`generateAuth1Packet`、`decodePackage`、`createSendData`，以及 TLV 编解码与轮询配置（实体见 §6.17）。BLE UUID 只在 Java 层（native 内 `ED28`/`FF001`/`ABAB` 命中 0），全集见 §6.10。
 
-| 方法 | 签名 |
-| --- | --- |
-| `native_generateAuth0DataV3` | `(J[B[BIJZIIII[B[B[B[B)[B` |
-| `native_generateAuth1DataV3` | `(I[B[B)[B` |
-| `native_generateSessionKey` | `([B[BII)[B` |
-| `native_generateHmacKey` | `([BII)[B` |
-| `native_parseBleV3Data` | `(Ljava/lang/String;[B[B[BZ)Ljava/lang/String;` |
-| `native_generateTboxMessageV3` | `(I[BBI)Lcom/xiaopeng/ble_data_processor/BleByteMatrix;` |
+**复用路径**：自研 App 自建 `BLEDataProcessor`（29 个 native 声明）与 `BleByteMatrix`，`System.loadLibrary("bledata")` 即可复用协议与密码学；额外负担是实现 `AlgorithmUtils` 的 4 个方法（JNI 会回调）。JNI 层无调用方约束。未编译验证。
 
-- 导出符号含完整密码学原语：`SDKBleKeyV3::getSessionKey`、`hmac_sha256`、`hkdf_sha256`、`calculateAuth1SessionKey`、`generateAuth0Packet`/`generateAuth1Packet`、`decodePackage`、`createSendData`，以及 TLV 编解码与轮询配置。
-- BLE UUID 只在 Java 层（native 内 `ED28`/`FF001`/`ABAB` 命中 0），大写形式：`0000ED28-ABAB-9C8C-2801-B1A015E46D6C`（服务）、`...6D6E`（特征值）、`0000ED28-ABAB-9C8C-2802-D3DF573FF530`、`000FF001-ABAB-9C8C-2801-B1A015E46D6C`/`...6D6F`、`0000ED28-ABAB-406D-832D-7AD799B479F7`。
-
-**推论**：自研 App 可自建 `BLEDataProcessor`（29 个 native 声明）与 `BleByteMatrix`，`System.loadLibrary("bledata")` 复用这套协议与密码学；额外负担只是实现 `AlgorithmUtils` 的 4 个方法（JNI 会回调）。JNI 层没有任何调用方约束。**未编译验证。**
-
-### 6.3 运行时反调试（推翻静态结论）
-
-静态检索不到任何反调试痕迹，但**运行时存在**。Frida 17.24.3 实测（5.19.0）：
-
-- attach 已运行进程报 `Failed to attach: process not found`（尽管 `pidof` 有值、`/proc/<pid>` 可读）。
-- spawn 注入后 JS 运行时被冻结——顶层 `send()` 能执行，但 `setTimeout` 与 `Java.perform` 回调全部不触发（不是报错，是停止执行）。
-- 同期 `libnesec.so` 在 10 秒内被 5 个不同 PID 加载（8801→8897→8920→9199→9224），是检测到注入后重启进程。
-- 检测逻辑为运行时动态生成或藏在加密 dex 内，静态检索不到。
-
-**结论：不要指望 Frida 做动态分析。** 4.2.0 上 Frida 可注入且进程不重启，但注入 Java 桥后 App 仍会崩溃；5.19.0 上 `frida-server` 存在即触发检测。
-
-**内存 dump 是唯一可行的动态手段**——它不注入进程。
+### 6.3 运行时反调试
+静态检索不到反调试痕迹，但运行时存在（Frida 17.24.3，App 5.19.0）：attach 已运行进程报 `process not found`；spawn 注入后 JS 运行时冻结（顶层 `send()` 执行，`setTimeout` 与 `Java.perform` 回调全部不触发）；`libnesec.so` 在 10 秒内被 5 个不同 PID 加载，即检测到注入后重启进程。检测逻辑为运行时生成或藏在加密 dex 内。**结论：不要指望 Frida 做动态分析**（4.2.0 上注入 Java 桥后 App 仍崩溃；5.19.0 上 `frida-server` 存在即触发检测），**内存 dump 是唯一可行的动态手段**（不注入进程）。
 
 ### 6.4 钥匙物料来源
+物料服务端签发、非本地派生：`/api/bt/v2/get/key`、`/api/bt/v2/create` 挂在 §2 的会话之上，本地以 SQLCipher 存 `XpKeyTokenEntity` 等。提示串 `seed_due_error_info` =「本地密钥已过期，请用户联网进行更新」，即物料有有效期、过期需联网续期。因此 §6.2 可复用的是**协议实现**，输入走 §2.5 的服务端链路。本机 TEE 快照内存在 `XmartV1LocalKey0`–`9` 十个密钥槽位、`IndivKeySet`、`XTeeSecurityIv`、`XTeeEncryptAesKey`、`tee_id`；`XmartV1LocalKey*` 是一次性批量下发的十个槽位，`IndivKeySet` 记录当前用哪个索引（轮换周期未验，§9）。槽位取值属真密钥，不入文档。
 
-- 服务端签发，非本地派生。`/api/bt/v2/get/key`、`/api/bt/v2/create` 挂在 §2 的会话之上，本地以 SQLCipher 存 `XpKeyTokenEntity` 等。
-- 提示串 `seed_due_error_info` = 「本地密钥已过期，请用户联网进行更新」——物料有有效期，过期需联网续期。
-- 因此 §6.2 可复用的是**协议实现**，输入（物料）走 §2.5 的服务端链路。
+**鉴权会话在 App 侧的持久化键**（`classes.dex` 连续字符串块，`53300283` 附近）：
 
----
+```
+KEY_AUTH1_REQ_SESSION_KEY      KEY_AUTH1_REQ_SESSION_KEY#    ← # 后缀是加密版
+KEY_AUTHO_RSP_R01              KEY_AUTHO_RSP_R01#            ← 注意是 AUTHO（字母 O），不是 AUTH0
+KEY_AUTHO_RSP_R12              KEY_AUTHO_RSP_R12#
+KEY_BLE_KEY_STATUS             KEY_BTKEY_ENABLE
+KEY_ALIAS                      KEY_AT
+```
+
+由此可读出的结构：① 鉴权两轮，`AUTH1_REQ_SESSION_KEY` 是 Auth1 阶段请求的会话密钥，`R01`/`R12` 缓存车端两次响应，命名规则为「R + 请求轮次 + 响应轮次」，`R01` 对应 Auth0 回合、`R12` 对应 Auth1 回合。② 每个键都有普通版与 `#` 版两份，同一份数据存明文与加密副本，或按安全等级择一。③ **`AUTHO` 是代码里的拼写错误**（应为 `AUTH0`），按 `AUTH0` 搜不到，须搜 `AUTHO`。④ `KEY_BLE_KEY_STATUS` 与 `KEY_BTKEY_ENABLE` 分开存：「钥匙已激活」与「蓝牙钥匙开关已开」是两个独立状态。
+
+### 6.5 三条 BLE 栈与下行链路
+App 内有**三条互不相干的 BLE 栈**，协议与用途都不同：
+
+| | 数字钥匙（车控） | 车机大屏（VCI） | CarIoT（配件） |
+| --- | --- | --- | --- |
+| 用途 | 门锁、后备箱、启动、充电口、车窗、寻车、RPA | 座椅、媒体、氛围灯、投影、座舱空调微调 | 充电桩 / 地锁等外设，含即插即充 |
+| 传输 | 原生 `libbledata.so` + TBox 帧 | Protobuf `ServiceReq`，Java 侧分片 | `CarIoTDataFrame` + `CarIoTProtocol`（纯 Java） |
+| 进程 | `:BLE`（`com.xiaopeng.link.bleenv.BleService`） | 主进程（`VciBleManager`） | `:BLE`（同进程不同 Biz） |
+| 鉴权 | Auth0/Auth1 双向挑战，派生会话密钥 | `AuthPackage` 配对（含大屏 PIN 确认） | `CarIoTAuthPackage` |
+| 关键类 | `BleSendHandler`、`AuthPeripheral`、`BleBusiness`、`BleConnector`、`XpBleProtocolV3` | `BleConnector`（`com.xiaopeng.link.vci.logic.ble.impl`）、`CmdSelectChannel` | `CarIoTBleBiz`、`CarIoTDataParser`、`CarIoTProtocol$BizId` |
+| UUID | `0000ED28-ABAB-…` | 未取到 | `000FF001-ABAB-…` |
+
+CarIoT 由 `com.xiaopeng.link.ble.business.cariot.*` 一整套类证实（`linkble.txt:64–79`），含 `CarIoTProtocol$ChargerAuto$Type`（即插即充）与 `CarIoTDataParser$ChargeAutoResult`；native 内 `iot`/`charger`/`bizid` 命中 0，不走 `libbledata.so`。该链路与车控无关。
+
+**数字钥匙下行链路**（第 3、5、6 段为实证；第 1、2、4 段方法体在加密 dex 内，属推论）：
+
+1. **业务层**：`com.xiaopeng.link.vehicle.common.cmd.CmdExecutor` 把命令排进 `cmdQueue`，`runningCmd` 保证同一时刻只跑一条；命令实例由 `XpCarCmdFactory` / `MonaCmdFactory` 造出。
+2. **选路**：命令子类用「实现了哪个 `executeByXxx`」声明能力（`work/ble_analysis/channel_table.txt`）。该表混了两个包的类，必须连包名一起读。数字钥匙栈（`com.xiaopeng.link.vehicle.{xpcar,mona}.cmd.*`）：`XpCarCmd` = `executeByBleWithResult` + `executeByNetWithResult`；`TrunkCmd`/`WindowCmd`/`BonnetCmd`/`SuperLockCmd`/`RoofWindowCmd`/快慢充口/`TrailerHookCmd` = `executeByBle` + `executeByMqtt`；空调各 `Ac*Cmd` 与 `SentinelCmd`/`CarStatusCmd`/`LockCmd` 只有 `executeByMqtt`。车机大屏栈（`com.xiaopeng.link.vci.logic.vehicle.cmd.impl.*`）：`AcRtAutoSwitchCmd`、`AcRtSoftBreezeSwitchCmd`、`AcRtWindFaceSwitchCmd`、`AcRtWindFootSwitchCmd`、`AcSwitchCmd`、`MediaSongSwitchCmd`、`MediaStateCmd`、`ReadingLightSwitchCmd`、`SubscribeVehicleStateCmd` 是 `executeByBle`，走 VCI 的 Protobuf BLE，**不是数字钥匙**。`AcSwitchCmd` 同名存在于 `vci`、`xpcar`、`mona` 三个包，vci 版走 BLE、另两个走 MQTT——只看简单名会得出「空调能走数字钥匙 BLE」的错误结论。判定由 `CmdSelectChannel` 结合运行时状态做。
+   **策略枚举实际成员**（`classes.dex` 字符串表连续段，`73497467` 与 `73498554`）：`SINGLE`、`SINGLE_BLE`、`SINGLE_BLE_FIRST`、`SINGLE_NET`、`SERIAL_BLE_FIRST`。没有 `SERIAL_NET`/`SINGLE_MQTT`/`SERIAL_MQTT`/`NET_FIRST`/`BLE_FIRST`。即「BLE 优先，网络兜底」的单向枚举：`SINGLE_*` 单通道单次，`*_FIRST` 先 BLE 再退网络，`SERIAL_BLE_FIRST` 串行重试版。`BLE_ONLY` 在另一处（`36206335`，与 `BLE_CAR_KEY_SERVICE`、`BLE_STATE_*` 相邻），属连接层不属选路层。RSSI 阈值、超时、退避曲线在加密 dex 内，取不到（§9）。
+3. **跨进程**：`XpBleSendHandlerOnMain` → `com.xiaopeng.lib.xipc` → `:BLE` 进程。IPC 消息类型是一组 15 个 `TYPE_BLE_*` 常量（`TYPE_BLE_SEND_CONTROL_CMD`、`TYPE_BLE_CONTROL_WRITE_RESULT`、`TYPE_BLE_CONTROL_RESULT`、`TYPE_BLE_STATE_CHANGE` 等）。
+4. **连接与鉴权**：`BleBusiness` 持有 `allMacList` / `connectedAuthPeripheralMap`；`BleConnector` 持有 `connectQueue` / `keepConnectSet` / `autoConnectList` / `sendQueue` / `scanResultList`。`BleConnector.connect()` 走 `connectSingle` → 服务发现 → `AuthPeripheral.checkSendNextAuthData` 逐轮推鉴权，`notifyAuthResult` 收口。连接态枚举 `BLE_STATE_DEFAULT/CONNECTING/CONNECTED/CONNECT_FAILED/CONNECT_TIMEOUT`（数值未取到）。
+5. **组包与写**：`BleSendHandler.sendCmd` → 具体 Packager（`CarCtrlAuthPackager` / `ECDataPackager` / `EADataBleConfigPackager` / `CarCtrlAuthPackagerV3`）→ native `createSendData` → `BleByteMatrix`（Java 侧 `byte[][]`）→ `BleConnector.sendDataToQueue` 按 `onCharacteristicWrite` 串行出队。
+6. **回执**：V3 车型走 native `parseBleV3Data` / `nextBleKeyV3Message` 解出 `BleKeyV3OutputMessage`，按 TLV tag 分派（§6.8）；V1/V2 车型（含本车 D55）走 `DataParser::parse` 的定长 10 字节记录 + `specificityMessage` 分派（§6.11）。两条路最终都汇到 `BleCarStatusParse`（车态）、`BleCarCmdSendStatusParse`（指令 ACK）、`BleNotifyAppOperateParse`（车端主动事件）、`BleRpaStatusParse`（泊车）、`BleLoginInfoParse`（登录会话）。错误码经 `XpErrorCodeHandler` 查 `vsdk_ble_msg_<code>` 资源，兜底 `vsdk_ble_msg_0` / `400`。
+
+### 6.6 下行帧：分片头与 TBox 外层
+`BleSendData::sendData`（`0x8af84`）产出最终写入 GATT 的字节，对每个分片输出：
+
+```
+[0] channel            // = createSendData 的 BLEKeyMessageType 实参
+[1] (i+1) | (n<<4)     // i=分片序号(0基)，n=分片总数；仅 channel ∈ {0xEC,0xED}
+[2] chunkLen           // 本分片长度，1 字节
+[3..] chunkData
+```
+
+`channel == 0xEF` 时第 2 字节取对象 `[+0x1c]`，不是序号位域；其余 channel（`0xEA`/`0xEB` 等）第 2 字节取 `[+0x20]`，只有 1 字节头。分片在 Java 侧完成——`createSendData` 的矩阵重载收到的已是切好的 `vector<vector<uint8_t>>`，native 只给每片加头；切分长度应由 `BleByteMatrix` 的 MTU 决定，D55 能力表报 160（§5.11），native 内无 MTU 常量，未在汇编层证实。
+
+`TBoxMessage::bleTboxMessage`（`0x8b8c0`）在分片**之前**再包一层：
+
+```
+[len: 2B Big-Endian][crc32: 4B Big-Endian][type: 1B][payload...]
+```
+
+- `len` 是 payload 长度（`rev` + `lsr #16` 后按半字存，即大端）。`type` 取自对象 `+0x18`，在 `createCommandParameters` 里是调用方传入的指令码字节。校验失败无重传，靠上层 `checkResult` 超时兜底。
+- CRC32 用 `0x50260` 的 `CRCTABLE`（反射式，多项式 `0xEDB88320`），**只覆盖 payload**，`rev` 后大端写入。**初值为 0，不是标准 CRC-32 的 `0xFFFFFFFF`，无最终异或**；`zlib.crc32` 对不上（实车两帧验证）。
+
+`createSendData` 调用点（channel 实参 / headerType 实参）：
+
+| 构造器 | channel | headerType | TBox `type` 来源 | 用途 |
+| --- | --- | --- | --- | --- |
+| `createAuthFrameData` | `0xED` | 0 | 对象 `+0x18`（帧内实测 `0x00`） | 鉴权帧 |
+| `createCommandParameters` | `0xED` | 0 | 第 1 实参（指令码） | 车控指令 |
+| `createCommandParametersWithDecodeToken` | `0xED` | 0 | 第 1 实参（指令码） | 带解令牌的车控 |
+| `createLoginUidParameters` | `0xEC` | 0 | 第 2 实参（`w21`） | 登录 UID |
+| `createLoginCodeParameters` | `0xEC` | 0 | 第 2 实参（`w21`） | 登录验证码 |
+| `createParkingHeartbeatMessage` | `0xEF` | **3** | 不写 type（首两字节由两个实参直接拼成） | 泊车心跳 |
+
+`createParkingHeartbeatMessage` 是唯一把 `headerType` 传 `3` 的调用点（`mov w2, #3` @`0x8d388`），且 `malloc(2)` 后直接 `strb w19` / `strb w20` 写满两字节（`0x8d2e4–0x8d2f4`），**没有 TBox 那层 `[len][crc32][type]`**。`0xEF` 不是泊车心跳专用：实车握手的前两帧就是 `0xEF`，两帧第 2 字节都是 `0x01`（对应 `[+0x1c]` 该值为 1），不能据此认定是分片序号。
+
+`createCommandParameters(uint8 cmdCode, const char* b64Payload, uint16 b64Len, uint8 something)`（`0x8bbf0`）：① `strlen(b64Payload)` → `malloc` → `base64_decode`（`0x113ed0`）得二进制 payload；② `malloc(decodedLen + 1)`，拷入 payload，`strb w0`（cmdCode）写在**最后一个字节**；③ 「payload + cmdCode」整体交给 `bleTboxMessage`。所以 **payload 在 Java 侧是 Base64 字符串**，native 负责解码；**TBox 的 `type` 字节就是业务指令码本身**（写在尾部，由 `bleTboxMessage` 挪到 `[len][crc32]` 之后）。`createAuthFrameData` 则把 `0xE0` 写进 payload 尾部（`mov w8, #0xe0` @`0x8b73c`），该帧 payload 末字节确实是 `0xE0`，而 `type` 读出来是 `0x00`。**抓到的明文 payload 是已解码的二进制，不是 Base64。**
+
+`0xEC`/`0xED` 是 native 的 `BLEKeyMessageType`，与 Java 侧 `BleCmdDefine$CmdType` 是两个不同枚举。`BleCmdDefine$CmdType`、`$DataType`、`$BleConfigType`、`$BleEAChannelPayloadType` 四个内部枚举的名字在 dex 里确认存在（`work/ble_analysis/linkble.txt:20–23`），**取值全部在加密 dex 内**。
+
+### 6.7 车控内层明文：`XPBKTH`
+V1/V2 车型（含 D55）的车控内层是明文结构，魔数 `XPBKTH` 可直接搜。132 字节布局：
+
+```
+偏移  长度  内容
+  0    6B   "XPBKTH"                       魔数
+  6    9B   01 00 00 83 6a 7b 5f e0 00     头部，两帧逐字节相同
+ 15    1B   0x53 'S'（解锁）/ 0x54 'T'（上锁）  标志字节
+ 16    4B   "KI" + len(00 10)               TLV：密钥标识
+ 20   16B   <KI 值>
+ 36    4B   "ED" + len(00 10)               TLV：待签名块
+ 40   16B   <ED 值>
+ 56    4B   "SN" + len(00 47)               TLV：签名
+ 60   71B   DER ECDSA 签名
+131    1B   指令码（0x01 解锁 / 0x02 上锁）
+```
+
+**TLV 编码**：tag 是 **2 字节 ASCII**（`KI`=`4b49`、`ED`=`4544`、`SN`=`534e`），length 是 **2 字节大端**。与 §6.8 的 V3 TLV（二进制 tag、DER 式长度）是两套规则。**tag 宽度是穷举唯一解**：以「末尾 1 字节是指令码」为约束，对 `start ∈ [6,22)`、`taglen ∈ {1,2,3,4}`、`lenbytes ∈ {1,2}` 全排列，只有 `start=16, taglen=2, lenbytes=2` 能让解析恰好闭合到偏移 131。故 tag 是 `KI`/`ED`/`SN`，偏移 15 的 `S`/`T` 是独立标志字节，不是 tag 首字母。99 条服务端帧逐条解析均恰好闭合到帧尾，无剩余字节。
+
+头部 9 字节中 `6a 7b 5f e0` 作 BE 是 1786470368 = 2026-08-11 17:46 UTC（早于抓包 82 天），作 LE 是 2089 年，含义未定。`header[3]` 是**开关方向标志**，七帧里只取三个值：`0x82` = 开后备箱；`0x83` = 上锁、关后备箱、闪灯、关车窗；`0x84` = 开车窗。
+
+**开/关后备箱共用同一个 `cmd = 0x04`**，唯一区别是 `header[3]`（`0x82` vs `0x83`）与 `flag`（`U` vs `V`）。只看 `cmd` 会把两条指令当成同一条——这是最容易踩的坑。
+
+**实测指令码**（7 条帧，同一次抓包）：
+
+| 操作 | `type` | `flag` | `cmd` | 帧长 |
+| --- | --- | --- | --- | --- |
+| 解锁 | `0x01` | `S`(0x53) | `0x01` | 132 |
+| 上锁 | `0x02` | `T`(0x54) | `0x02` | 132 |
+| 开后备箱 | `0x03` | `U`(0x55) | `0x04` | 131 |
+| 关后备箱 | `0x04` | `V`(0x56) | `0x04` | 132 |
+| 闪灯 | `0x05` | `W`(0x57) | `0x26` | 132 |
+| 开车窗 | `0x06` | `X`(0x58) | `0x0c` | 133 |
+| 关车窗 | `0x07` | `Y`(0x59) | `0x0d` | 132 |
+
+`type` 是操作序号，1–7 连续递增，与用户操作顺序一致。`flag = 0x52 + type`（`S`–`Y` 连续），**与 `cmd` 无关**。`cmd` 是业务指令码，与 `type` 无固定关系（`0x04`/`0x26`/`0x0c`/`0x0d`）。
+
+### 6.8 V3 的 TLV 编码规则（`encodeTlvMessage`）
+规则由 `SDKBleKeyV3::encodeTlvMessage(uint16 tag, size_t len, const void* value)` 完全确定：**tag** 按需 1 或 2 字节、**大端**（`tag <= 0xFF` 时 1 字节，否则 2 字节，故 `0xa0` 1 字节、`0x7f50`/`0x7f51` 2 字节）；**len** 用 DER 式确定长度（`len < 0x80` 时 1 字节写值，`len >= 0x80` 时首字节 `0x80 | (后续字节数-1)`，后续字节大端）；**value** 原样追加。总长 = tagBytes + lenBytes + len，一次 `malloc` 后按「tag → len → value」回填。
+
+已定位的 tag（调用点反查）：`0x0a`、`0xb0`（RKE 双层）、`0xa0`（Auth0 请求）、`0x7f50`/`0x7f52`/`0x7f53`（Auth0/Auth1/轮询配置容器）、`0xc0`（泊车心跳）、`0xc4`（自校准）、`0xc5`（轮询自定义）、`0xc6`（RSSI 采集）、`0xc7`（设备型号）、`0xc8`（泊车限距，V1/V2 两版）、`0xc9`（轮询开关，V1/V2 两版）。
+
+**解析侧**：`handleXPBleKeyV3Content`（`0x8e634`）先看 `msgType`，等于 2 时把 `tag` 与 `0x7f51`/`0x7f6f` 比对（分别取 0x12 / 0x24 字节定长子结构）；否则按 `tag & 0xf0 == 0xd0` 分流到 `handleSpecialLargeContentData`（长内容、带 subType）与 `handleSingleTlvNormalData`。越界打印 `Malformed TLV data: value length exceeds available data`。
+
+**响应侧子 tag 是另一套编号**（各 `handle*ResponseTlvData` 的 `cmp` 立即数）：
+
+| 处理函数 | 地址 | 接受的子 tag | 落点 |
+| --- | --- | --- | --- |
+| `handleAuth0ResponseTlvData` | `0x8e4b0` | `0x01`、`0x02` | `0x01` → `[+0]`；`0x02` → `[+9]`，值按 `len` 拷入 |
+| `handleRkeResponseTlvData` | `0x8e3d0` | `0x0a`、`0x10`、`0x11`、`0x12` | `0x0a` → `[+1]`（1B）；`0x10` → `[+9]`；`0x11` → `[+0x12]`；`0x12` → `[+0x1b]` 存长度 + `[+0x1c]` 存堆指针（`calloc`） |
+
+`0x0a` 在请求侧是 RKE 外层 tag、在响应侧仍是子 tag 但落点不同；`0x01`/`0x02` 在 Auth0 请求里是信封首字节类型、在响应里是子 tag——**同一数字在不同层含义不同**。`handleAuth0ResponseTlvData` 末尾有 `little_endian_to_host` 转 8 字节（`mov w1,#8`），即 Auth0 响应含一个 **8 字节小端数值字段**（大概率是车端随机数）。
+
+### 6.9 V3 信封与鉴权三帧
+V3 车型的车控先拼 `BLEKeyV3Message` 信封再交给 `createSendData`。`createBleKeyV3RkeRequestWithInput(BleKeyV3RkeParams*, int, uint8_t* out, size_t* outLen)`（`0x8f610`）：
+
+1. 取 `rkeType`（`[+0]` 半字）、`subType`（`[+2]`）、`keyId`（`[+3]` 起 8 字节）、`keyIdLen`（`[+0xb]`），调 `getRKEDataWithRkeType` 拼内层 RKE TLV：`inner = TLV(0x0a, [subType]) ‖ TLV(0xb0, data)`，`out = TLV(rkeType, inner)`。`rkeType` 是最外层 tag，`0x0a`/`0xb0` 是内层两个 tag（`0x0a` 包的是 `subType`，不是 `rkeType`）。
+2. `authFlag` 非 0 时取 `sessionKey`（`[+0xc]`）、`sessionKeyLen`（`[+0x14]`）、`hmacKey`（`[+0x18]`）、`hmacKeyLen`（`[+0x20]`）：`getXorResult(uint32_t* outLen, uint8_t* a, size_t aLen, uint8_t* b, size_t bLen)` 把两段按较短者截齐逐字节 XOR，输出长度写回 `outLen`——用它从 `hmacKey` 与 `keyId` 派生 IV；再用 `hmac_sha256(hmacKey, hmacKeyLen, RKE 明文, 明文长度, &outLen)` 对 RKE 明文签名，得 32 字节 MAC。
+3. 把 `RKE 明文 ‖ MAC` 拼进输出缓冲。`calc_crc16_ccitt(buf, len)` 算 CRC16-CCITT，`host_int16_to_little_endian` 后**小端**存进 `[+0xa]`。结构体 `{ [0]=0x03, [1]=len, [+2]=payload 指针, [+0xa]=crc16 }` 由 `copyBleV3MessageRawData`（`0x90c9c`）摊平；`sizeOfBLEKeyV3Message` = `4 + len`。
+
+```
+[0]        0x03                 // 固定类型
+[1]        len                  // payload 长度，1 字节
+[2..2+len) payload              // RKE 明文 ‖ HMAC-SHA256(32B)
+[2+len]    crc16 low            // CRC16-CCITT，小端
+[3+len]    crc16 high
+```
+
+错误码：参数空 → 7；`keyId` 或 `keyIdLen` 为 0 → 8；`sessionKey`/`hmacKey` 缺失 → 9/10。合法性由 `isEffectiveBLEKeyV3MessageData`（`0x90c60`）判定：首字节减 1 后 ≤ 4（**type 取值 1–5**）且 `[1] + 4 == 缓冲区总长`——抓包可用这两条快速判断帧是否完整。
+
+**三层嵌套**：`TBox 外层 → 0x03 内层信封 → TLV 体`。D55 走 V1/V2，不用这层，内层是 `createCommandParameters` 的「payload + 指令码」。CRC 有两套：链路层 `xp_getCrc32`（CRC-32，大端）、V3 业务层 `calc_crc16_ccitt`（CRC-16-CCITT，小端），不要混用。
+
+**鉴权三帧**：三个构造函数把同一结构体摊平，唯一区别是首字节类型值：
+
+| 构造函数 | 地址 | 信封首字节 | 是否 AES |
+| --- | --- | --- | --- |
+| `createBleKeyV3Auth0RequestWithInput` | `0x8f284` | `0x01`（`mov w8,#1` @`0x8f43c`） | 是 |
+| `createBleKeyV3Auth1RequestWithInput` | `0x8f4c4` | `0x02`（`mov w8,#2` @`0x8f580`） | 可见调用集里没有 |
+| `createBleKeyV3RkeRequestWithInput` | `0x8f610` | `0x03`（`mov w8,#3` @`0x8f740`） | 是 |
+
+与 `isEffectiveBLEKeyV3MessageData` 的「首字节 1–5」吻合：1=Auth0、2=Auth1、3=RKE 车控，4/5 未在本库内出现（可能是轮询与泊车）。**适用范围限 V3 协议**：实车抓包（§6.12）里该车握手帧首字节是 `0xd4`/`0x92`/`0xdb`，不是 1/2/3，走的是非 V3 协议。
+
+**Auth0 用硬编码 IV**（`0x8f3a0–0x8f3e8`）：`.rodata:0x50020` 的 16 字节常量 `cc f3 e8 34 2b d6 07 1f de 72 70 df a0 87 6b b8`，固定不变。旁边 `0x50010` 是 `0123456789abcdeffedcba9876543210`（教科书 IV），别混。key 指针 `params+0x45`、长度 `params+0x4d`——**会话密钥由上层算好传入，native 只做 AES**；复算必须先拿到这一步的输入。
+
+**Auth1 的可见调用集**（`0x8f4c4` 全部 `bl`）：`getAuth1FactorTlvData` → `getTlvTotalSize` → `getXorResult` → `calc_crc16_ccitt` → `copyBleV3MessageRawData` → `sizeOfBLEKeyV3Message`，**没有 `aes_256_cbc_encrypt`**。不能据此断言 Auth1 明文传输——`getXorResult` 可能就是混淆手段，或加密在别处。待验：需对真实 Auth1 帧做熵分析。
+
+### 6.10 GATT 绑定与 UUID
+实车服务发现结果（`READ_BY_GROUP_RSP` / `READ_BY_TYPE_RSP` 解出）：
+
+| 角色 | 属性 | UUID | 声明 handle | 值 handle |
+| --- | --- | --- | --- | --- |
+| 主服务 | — | `0000ED28-ABAB-406D-832D-7AD799B479F7` | `0x000a` | — |
+| App 写入 | `WRITE \| WRITE_NO_RSP` | `0000ED28-ABAB-9C8C-2801-B1A015E46D6C` | `0x000b` | `0x000c` |
+| 车端推送 | `INDICATE` | `0000ED28-ABAB-9C8C-2802-D3DF573FF530` | `0x000e` | `0x000f` |
+
+另有 `0x1800`（Generic Access）、`0x1808`（Glucose）、`0x180a`（Device Information）三个标准服务，与车控无关。CCCD 在 `0x0010`，App 连上后先写 `0x0010 = 0200` 才开始握手。`…6D6E` 在实车会话中未出现。`classes.dex` 里所有 `*-ABAB-*` 形态 UUID（10 个）：
+
+| UUID | 分组 | 说明 |
+| --- | --- | --- |
+| `0000ED28-ABAB-9C8C-2801-B1A015E46D6C` | 2801 | 写特征（实车证实） |
+| `0000ED28-ABAB-9C8C-2801-B1A015E46D6E` | 2801 | 未在实车出现 |
+| `0000ED28-ABAB-9C8C-2802-D3DF573FF530` | 2802 | 推送侧，属性 `INDICATE`（实车证实） |
+| `0000ED28-ABAB-9C8C-3205-B1A015E46D6C` | 3205 | 早期车型主服务（推论） |
+| `0000ED28-ABAB-9C8C-3206-D3DF573FF530` | 3206 | 早期车型推送（推论） |
+| `0000ED28-ABAB-406D-832D-7AD799B479F7` | 406D | 主服务（实车证实） |
+| `0000ED28-ABAB-406D-832D-7AD799B00000` | 406D | 扫描掩码（尾部补 0，非真实 UUID） |
+| `000FF001-ABAB-9C8C-2801-B1A015E46D6C` | FF001 | CarIoT 服务 |
+| `000FF001-ABAB-9C8C-2801-B1A015E46D6F` | FF001 | CarIoT 特征 |
+| `000FF001-ABAB-406D-832D-7AD799B479F7` | FF001/406D | CarIoT 406D 形态 |
+
+`DEF_UUID_SERVICE`/`DEF_UUID_WRITE`/`DEF_UUID_RECEIVE` 三个**字段名**在 dex 字符串表确认存在（`full_strings.txt:44171–44173`），与 `DEF_MTU`、`DEF_AUTH_TIMEOUT` 同段；字段值在加密 dex 内。2801/3205/3206 组的角色分配属结构推断：`…6D6C` 与 `…6D6E` 只差最后一字节，`…2802-…573FF530` 与 `…2801-…E46D6C` 第 3、4 段不同——靠「成对」推角色会被这种相似性误导。`-9C8C-` 与 `-406D-` 的取舍（量产车 vs 工程/OTA）同为推论。native 内 `ED28`/`FF001`/`ABAB` 命中 0，UUID 不进 native。
+
+### 6.11 入站帧与 msgId 分派
+上行（车 → 手机）不走 TLV，走**定长 10 字节记录**。`DataParser::parse(buf, len)`（`0x97d60`）分两种情形：**`len == 4`** 时整段当一个短包，取 `*(uint32*)buf` 塞进 `Auth0ResponseMessage`，随后 `parserEnd()`（鉴权早期的极简回应）；**`len >= 10`** 时按 10 字节一条循环切分（`subdata(buf, off, 10)`），每条为 `[0..1] msgId`（2 字节大端，`rev` + `lsr #16`）+ `[2..9] payload`（8 字节大端，raw 与 byteswap 两份都存进对象 `+0x28`/`+0x30`）。每条处理完 `parseSingleMessage()` 再 `freeSubdata()`，一条 BLE 通知里可串多条记录。
+
+`parseSingleMessage`（`0x97c3c`）按 `msgId` 分派，未命中走虚函数 `specificityMessage()`：`0x82` → `buildBleDoubleAuthMessage`（仅当 payload 低字节 == 2，再拆 bit8–11、bit12–15 与高 48 位）；`0x800` → `buildAuthResultMessage`（取 bit 0x3a，与 `0x0100_0000_0000_0000` 比较得出标志位）；`0x92` → `buildRkeControlMessage`（bit56 作首字节，bit24 起作后 4 字节）。
+
+`D55DataParser::specificityMessage`（`0x96b70`）承接其余 msgId：
+
+| msgId | 处理 |
+| --- | --- |
+| `0x55` | `buildBleRequestLoactionMessage`（`[+0x31] & 3`） |
+| `0x5d` | `buildCdcuLoginMessage` |
+| `0x70` | `parseControlResult()` → `buildRkeControlMessage`——**车控回执走这条**。旧抓包标注 `payload[0]`=cmdCode、`payload[4:6]` 小端 16 位=结果码 |
+| `0x225` | `buildChargePortMessage`（bit0x23、bit0x2f） |
+| `0x281` | `buildPollingMessage`（bit0x31） |
+| `0x2d5` | `buildParkingEventMessage` + `buildParkingStateMessage` |
+| `0x2fc` | `buildDriveMessage` + `buildPollingMessage` |
+| `0x318` | `buildParkingEventMessage` + `buildParkingStateMessage` |
+
+`msgId` 是 16 位，`0x225`/`0x281`/`0x2d5`/`0x2fc`/`0x318` 都是 16 位取值，不是两字节拼的。上表来自 D55 实现，其他车型的 `specificityMessage` 各自不同，msgId 表不通用。
+
+**`0x70` 标注更正（P5 实车）**：`payload[0]=cmdCode` 只是早期抓包的经验标注，已被同一锁车动作的官方/自研回执取值不一致否定，不能作为命令回显判据；`payload[4:6]` 的 `200` 是已知成功码之一。锁车实车另观察到结果码 `163` 且车门确实锁上，但官方结果码表/资源串未定义 `163`，`parseControlResult`/`checkResult`/`successPrediction` 方法体不可读，因此 `163` 是成功、中间态还是失败**无法判定**；同帧 `payload` 中的 `0x2a` 语义也待取证。不得据此把 `163` 写成成功或失败码，也不改变代码已知的 `code===200` 成功判据（附录 §6.92）。
+
+**解析器家族**（9 个类，继承关系由 `_ZTI*` 的 parent 指针逐条解析得出，不是按名字猜）：
+
+```
+BaseDataParser                    ← 根
+├── DataParser
+│   ├── D55DataParser
+│   │   └── D22DataParser         ← D22 继承 D55，不是并列
+│   ├── E28aDataParser
+│   ├── E38DataParser
+│   └── F30DataParser
+├── BleKeyV3DataParser            ← V3 协议，走 TLV（§6.8）
+└── E28DataParser                 ← 直挂根上，跳过 DataParser
+```
+
+- `BleKeyV3DataParser` 与 `DataParser` 是并列的两个分支，都直连 `BaseDataParser`，印证 V3 与 V1/V2 两套回执解析。`D22DataParser` 只重写 `parseIBCMFirst`（`0x9660c`）与 `parseAppMsgSecond`（`0x96578`），其余从 D55 继承。`E28DataParser` 直接继承 `BaseDataParser`，**不共用** 10 字节切分逻辑，自带 `parseStateaMessage`/`parseIbcm`/`parseIbcmSysSt3`。
+- vtable 大小印证分层：`BaseDataParser`/`BleKeyV3DataParser` 32 字节，`DataParser`/`E28a`/`E38`/`E28`/`F30` 40 字节，`D55`/`D22` 56 字节。
+- **接新车型的路径**：在 `DataParser` 下加子类实现 `specificityMessage()` 并补 msgId 表，即可复用 10 字节切分；车型差异大到连切分都不同（如 E28）才直挂 `BaseDataParser`。
+
+D55 自己实现的解析方法（`.dynsym`）：`parseIBCMFirst`（`0x96740`）、`parseIBCMSecond`（`0x9682c`）、`parseIBCMPepsReq`（`0x96a3c`）、`parseAppMsg1`（`0x96af0`）、`parseAppMsgSecond`（`0x96890`）、`parseXpuBleRemotePk`（`0x96984`，184 字节）、`specificityMessage`（`0x96b70`）。`parseXpuBleRemotePk` 在 `E28aDataParser`/`E38DataParser`/`F30DataParser` 也各有实现（280/280/264 字节），D55 版更短，可能只解析部分字段。
+
+### 6.12 握手流程与 msgId 序列
+**每条车控命令前都严格走这五步，缺任一步车端回 `0800 06`**：
+
+```
+写 0x0010 = 0200            CCCD，开启 indicate
+写 ef0104 <4B app_n>    ->  车回 4B car_n
+写 ef0110 <16B>         ->  车回 0800 01 44463030482e32   (成功，版本 DF00H.2)
+写 ed1118 <24B>         ->  车回 150B 能力表
+   （车推 3 组状态 0281/0082/0231）
+写 ed118b <命令帧>      ->  车回 0318 系列 + 0225 回执
+```
+
+**握手次数与命令次数一一对应**：App 每发一条车控命令都重新走完整握手，`ef0110` 每轮重算，不存在「握手一次复用整段会话」的捷径。
+
+**车端挑战窗口约 2.0–2.5 秒**（收到 `car_n` 后延迟再发 `ef0110`）：延迟 0.2 / 1.0 / 2.0 s 均回 `08000e00000000000000`（result `0x0e`，认证失败，密钥/挑战不匹配）；2.5 s 与 3.0 s 回 `08000600000000000000`（result `0x06`，超时/拒绝）。**窗口边界在 2.0 s 与 2.5 s 之间。**
+
+一轮握手的完整 msgId 序列（31 轮完全同构）：
+
+```
+App 写 0xEF 4B  ──┐
+App 写 0xEF 16B ──┤ 上行三段
+App 写 0xED 17B ──┘
+                  ↓ 车端按固定顺序回 15 条 notify
+0x0800  01 44 46 30 30 2e 32        → ASCII "DF00.2"（协议/固件版本）
+0x0281  0000000000000000
+0x02fc  9800000000000000
+0x02fb  0000000000000000
+0x02fa / 0x02f9 / 0x02f8 / 0x02f7 / 0x02f6   全零
+0x0261 / 0x0262 / 0x0263                     全零
+0x02d5  fffffff800000000
+0x0231  0020008000000000
+0x0318  0400004307400080
+0x0225  1f02555500000100
+0x0281  0010000000000000            ← 同 msgId 第二次，不同 payload
+0x0082  ×3  见下
+```
+
+**计数验证**：`0x0261`/`0x0262`/`0x0263`/`0x02f6`–`0x02fc`/`0x0800` 在整份抓包里各出现恰好 31 次，与 31 轮握手一一对应。`0x0082` 共 93 条 = 31 × 3，每轮三条，payload 首字节固定是 `02 31`/`02 32`/`02 33`：
+
+```
+0231 a503cca8cf0e
+0232 5251838b3e83
+0233 422827d90000
+```
+
+`02 31`/`02 32`/`02 33` 像三个子字段编号，后 6 字节每轮全变；`0233` 末两字节恒为 `0000`。含义未定，不是递增计数器（无单调性）。**`0x0800` 的 `DF00.2` 是车端自报的协议/固件版本**，即 D55 协议族、版本 `DF00.2`。自研客户端可按这 15 条逐一校验：msgId 序列一致即握手成功，不一致即车端拒绝本次鉴权。
+
+**可重复性**：一次 65 分钟抓包里 App 自动做了 31 轮相同起手的三段握手，间隔中位数约 127 秒（相邻 124–133 秒，一次 250 秒、末尾 72 秒与 180 秒为手动操作打断）。该握手是**保活/重鉴权**，2 分钟可作重鉴权周期参考。三段内容每轮全变，但 `KI` 在解锁与上锁之间不变（会话级而非每帧级）。抓包窗口越长噪声越多：65 分钟日志里只有 2 条车控帧。
+
+**时序与延迟**：连接建立到第 1 帧写入约 1.2 s（含服务发现 0.5 s）；三次写 + 九次通知完成约 0.7 s；解锁写入到回执 **0.547 s**，上锁 **0.651 s**——这是 BLE 车控真实响应时间，`checkResult` 超时应显著大于此值。MTU 协商 517/247（`MTU_REQ=517`，`MTU_RSP=247`），单包最大 ATT PDU 153 字节，未触发分片。通知侧 16 条 `HANDLE_VALUE_NOTIFICATION`（`0x1e`）对应 16 条 `INDICATE`（`0x1d`）——车端用 indicate 而非 notify，App 必须逐条回确认，影响弱信号下吞吐。
+
+**实测帧内容**（两轮，定长，仅内容变）：① `0xEF` 4B = `d4e5fee5` / `712c7939`；② `0xEF` 16B = `92b7148348c91f370a898d0ce5855afe` / `e9675575cb8e9bdafffb78a60548ad9a`；③ `0xED` 17B = `db61b5b113d0870e6482ace4772c27e2e0` / `79e7bc63907ddbaa4703eee75aff5654e0`。
+
+第 3 帧的 TBox 外层切开：`00 11 | 8e4ec850 | 00 | db61b5b1…`（len=17 ✓，type=`0x00`，CRC 见 §6.15）。`0xEF` 两帧无 TBox 外层，`b1` 均为 `0x01`（单片）。上行 4 字节短包 `ffdba7e0`（轮 B `59bfc55f`）出现在握手开头，对应 §6.11 的 `len == 4` 分支。新增 msgId `0x02f6`–`0x02fb`（连续 6 个）、`0x0261`–`0x0263`（连续 3 个）、`0x0231` 不在 D55 分派表内，payload 全零，`0x02f6`–`0x02fb` 与 `0x02fc` 连号，像同族「能力/状态位图」逐条上报。`0x0800` 的 payload `0144463030482e32` 后 7 字节是 ASCII `DF00H.2`，首字节 `0x01` 正是 `buildAuthResultMessage` 取的那个标志位。`0x0318` 第一轮上报一次（`0400009307400080`），第二轮三次（`0400009307400080` → `0400000107400080` → `0400002307400080`），末字节 `0x93`/`0x01`/`0x23` 在变，对应某种状态位，与 §6.19 码表无直接关系。
+
+### 6.13 `ef0110` 的 KDF
+`ef0110` 的 16 字节 payload 由 native `createAuthKey`（`0x8c13c`）产出：
+
+```
+seed4  = hexStringToBytes( hexStringIncrement( stripColon(keyString)[-10:][:8] ) )
+K1     = MD5(seed4)                       ← hmac_md5 的 key（16 字节）
+msg    = app_n(4B) || car_n(4B)           ← hmac_md5 的 msg
+ef0110 = HMAC-MD5(K1, msg)                → 16 字节
+```
+
+`hmac_md5`（`0x8385c`）的签名是 `hmac_md5(msg, msglen, key, keylen, out)`——**前两个参数是消息**，`x0`/`w1` 走 `MD5Update(msg)`，`x2`/`w3` 是 key。`keyString` 是**车端 BLE 模块的 MAC 地址**，不是 KI：直接传 32 字符的 KI 进 `createAuthKey` 会 `FORTIFY: strlen: detected read past end of buffer` 然后 abort。**两把 `keyString`，各 100% 命中**：
+
+| 数据集 | 组数 | `keyString` | 命中 |
+| --- | --- | --- | --- |
+| 主账号 / 真车抓包 | 31 | `00:60:37:85:B9:D0` | **31/31** |
+| 子账号 / 桥接日志 | 157 | `08:00:00:00:00:00` | **157/157** |
+
+两个 MAC 都来自 `work/db/XpVehicle*.db` 的 `xp_vehicle_mac.macAddress`：`XpVehicle_after_login.db` 里是真车主模块 `00:60:37:85:b9:d0`，`XpVehicle.db` 里是 `08:00:00:00:00:00`——**子账号登录时服务端下发的占位 MAC**，不是笔误。子账号那 155 次 `0x0e` 与算法无关，也与「车端不认子账号钥匙」无关：占位 MAC 算出的 `ef0110` 数学上自洽（故能 157/157 复现），只是车端用真 MAC 派生，两边对不上。
+
+**复现**：`python3 scripts/ble-kdf-verify.py` 输出 31/31 + 157/157 = 188/188；`node --experimental-strip-types scripts/verify-ble-kdf.mts` 同样 188/188。Python 与 TS 两份独立实现同时命中同一批真实抓包，说明式子不是拟合。只要这两行不是满分，实现就是错的。**自研端实现 `ef0110` 所需全部齐备**：`app_n`（自己生成）、`car_n`（`ef0104` 的回应）、`keyString`（见下条规则）；BLE 链路上已无未知算法。
+
+**`keyString` 必须取当前 GATT 连接的对端 MAC，不能取 `xp_vehicle_mac.macAddress`。** 同一台从模块 `XPED-DC0D30B094C4`，只改 `--key`：
+
+| `--key` | 车端对 `ef0110` 的回应 | 判定 |
+| --- | --- | --- |
+| `00:60:37:85:B9:D0`（数据库主模块 MAC） | `08000e00000000000000` | `0x0e` 失败 |
+| `DC:0D:30:B0:94:C4`（当前连的从模块自己的 MAC） | `08000144463030482e33` | `0x01` 已认证 |
+
+车端在哪个模块上校验，就用那个模块自己的 MAC。App 能用数据库里的值是因为它连的就是主模块；连从模块时应换成从模块的 MAC（未单独验证，与本结论一致）。
+
+**native 直调方法**（后续排查未知量时照做）：`libbledata.so` 在裸 Android 进程里 `dlopen` 直接成功，不需要 JNIEnv stub。`createAuthKey`、`hexStringIncrement`、`hexStringToBytes`、`generateAuthKey`、`generateAuth1DataV3`、`generateSessionKey` 六个符号均可 dlsym 调通。要点：① NDK 交叉编译小二进制，`dlopen` + `dlsym` 直接调；② **先让真函数吐出中间值**（如 `hexStringIncrement` / `hexStringToBytes` 拿到 4 字节 seed），再用 Python 独立算一遍比对，两处一致才算模型正确；③ 反汇编只用来读参数顺序，不代替实跑。裸进程调崩只发生在需要 JNI 全局方法句柄的 `getSessionKey`（`JNI_OnLoad` 里 `GetMethodID` 取的 `hkdfSha256`）上，纯 C 函数不受影响。
+
+### 6.14 `ed1118`：P5V2 verifyKey 与 V3 sessionKey
+
+**P5V2 目标发送路径已确定**：`CarCtrlVerifyPackager` 从 `VerifyCodeUtil.getCode(vin, "1")` 读取 phone verifyKey；随机 int 经 `ByteUtil.int2byte` 后补零为 16 字节，以 AES-CBC、16 字节零 IV、NoPadding 加密。`VerifyCodeUtil` 优先读 `SecurityManager` 的 `VERIFY_CODE#<vin>#<type>`；为空才读普通缓存 `XP_VEHICLE_SDK_XP_AUTH_CODEVERIFY_CODE#<vin>#<type>`。主存储是 `files/mmkv/tee` 中的 XTee 信封，不应只在 `ble_cache_data` 搜索明文验证码。
+
+**独立离线验收**：已有 `work/mmkv/tee` 与 `work/live/tee.bin` 经已有 `/tmp/ks.sqlite` RSA 解封指定 phone 记录，得到 16 字节 verifyKey；31 条互不相同的历史 `ed1118[10:26]` 经 AES-CBC/零 IV/NoPadding 解密后，31/31 的 `[4:16]` 为十二个零，watch key 为 0/31。两份备份不代表两把独立密钥。只解指定验证码记录，未访问账号 token、未联网手机、未输出秘密；脱敏结果见 `work/ble-runtime-20261104/v2-known-key-match.json`。这证明历史 phone key 与旧密文一致，**不证明新账号激活、新鲜物料获取或真实车辆接受**。
+
+**接口静态契约**：`getXpKeyAuthData` 的 JSON Body 为 `vin`、`count:300`、`autoCreateKey:false`；`getBleInfo` 以 JSON Body `vin` 获取 `macAddress`。握手 `keyMac` 来自当前连接的 `peripheral.getAddress()`，不能把接口 `macAddress` 直接当作当前 GATT 对端地址。接口注解与发送路径证据来自本轮已提取文本，未据此执行新鲜账号网络测试。
+
+**P5 实车链路层根因与结果**：官方 App 每轮连接先 `requestMtu(160)`，车端回 `247`，CCCD 写 `0x0200`（INDICATION）；车端 414 条全为 `0x1d` 指示、手机逐条 `0x1e` 确认，三条 `0x0082` 验车分片放在一个 30 字节指示里。自研原生桥若不请求 MTU、且 CCCD 优先 NOTIFY，默认 23 字节链路装不下 30/150 字节指示，只能收到 20 字节状态碎片，严格认证必然超时。这不是认证算法或钥匙错误。修正为服务发现后请求 MTU、在 `onMtuChanged` 成功后写 CCCD 且优先 INDICATION（附录 §6.92）。
+
+修正后，隔离验收入口以 0.x 秒级完成 GATT 连接，三段握手后收到 150 字节状态表及 30 字节 `0x0082` 三分片，严格挑战校验通过；随后解锁、锁车各只写一次命令帧，用户现场确认车门确实解锁和锁上。因此「自研 App 经 BLE 控制本车解锁/锁车」已实车成立。该入口使用本地注入的一条一次性材料与本地校验码；新鲜账号物料的真实响应、无钥匙账号激活流程仍未完成（§9）。
+
+后续生产包在已有登录态下补齐了「登录后自动准备物料 → Control 页按钮 → BLE-only 解锁/锁车」的真车验收：车旁无其他设备占用时，生产路由以 `autoConnect=true` 连接、`status=0`、服务发现与 MTU 160 完成，解锁与锁车各只点一次，用户现场确认两次物理动作生效；两份日志无 MQTT 车控发布。锁车连接成功发生在 12 秒抓窗外，由 logcat 环形缓冲补读确认；未观测到标准命令回执码，锁车后车况 UI 仍短暂显示解锁状态，属遥测刷新滞后而非物理结果反证（§6.93）。
+
+自研 App 已把这 7 个有抓包实证的 P5 V2 命令码接入 DF 车型的按钮路由，并在 Control 页展示一次性操作的准备、连接、认证、下发与断开状态；这不是常驻数字钥匙连接。开/关后备箱共用 `0x04`，服务端一次性材料与具体动作、开关方向的绑定关系仍缺少完整证据，不能把新增 3 个按钮的代码接线等同于实车验收。两个后备箱按钮没有已实证的 MQTT 指令参数，因此只能在 DF 车型使用 BLE 路由；非 DF 车型不渲染、路由层也拒绝回退到 MQTT。锁车回执 `code=163` 在本轮实车上物理动作生效，但官方语义未取得；客户端对所有 `163` 回执以「已发送、结果未确认，请核对车况」第三态呈现，不判成功也不判失败，已知 `code=200` 成功判据不变。
+
+**以下 native XOR/TLV 分析只适用于 V3**，不用于解释上述 P5V2 历史密文。
+
+**帧格式完全确定**（用真实密文重建，与抓包逐字节一致）：
+
+```
+ed 11 18 | 00 11 | <crc32> | 00 | <16B 密文> | e0
+```
+
+| 字段 | 值 | 说明 |
+| --- | --- | --- |
+| `[0]` | `0xed` | channel |
+| `[1]` | `0x11` | flag |
+| `[2]` | `0x18` | **= tboxlen + 7**（17+7=24） |
+| `[3:5]` | `00 11` | tboxlen = 17（**不含**尾部 `e0`） |
+| `[5:9]` | crc32 | 覆盖 `type + 密文 + tail`（**含** `e0`） |
+| `[9]` | `0x00` | type |
+| `[10:26]` | 16B | 密文 |
+| `[26]` | `0xe0` | 固定尾字节 |
+
+`tboxlen` 与 CRC **覆盖同一个 payload**（`[type]` 之后的全部 17 字节，即 16B 密文 + `e0`），
+两者范围一致。早期版本记的「`tboxlen` 不含 `e0`、CRC 含」是表述错误——那句话把
+「`e0` 不是独立字段」误写成了「`e0` 不计入长度」。实现见
+`scripts/ble_frame.py:build_ed1118()`，用 31 条真帧逐字节验证 **31/31 还原**。
+
+`chunkbyte = tboxlen + 7` 在 `ed118b` 上同样成立（132+7=139=0x8b）。
+
+**调用图**：`generateAuth1DataV3`（`0xa1ac8`，JNI 入口，真正的 `ed1118` 构造）→ `createBleKeyV3Auth1RequestWithInput`（`0x8f4c4`，**主路径**）→ `getAuth1FactorTlvData`（`0x8ed74`，TLV 组装）+ `xorData`（循环 XOR）。`generateEmergencyAuth1Data`（`0xa1e3c`）→ `generateAuth1Packet`（`0x8948c`）是应急分支；`generateAuth1Packet` 在整个 so 里只有一个调用者，`generateAuth1DataV3` 不调它。两条路径最终落到同样的 TLV 组装，但「key 从哪来」的答案在主路径上。
+
+**key 由 Java 传入，native 不派生**。`createBleKeyV3Auth1RequestWithInput` 开头即校验：`8f4f0: ldur x8, [x0, #0xd]`（`params->key` 指针，空则直接返回）、`8f4fc: ldur w8, [x21, #0x15]`（`params->keyLen`，0 则直接返回）。`generateAuth1DataV3` 在 `0xa1b78` 用 `stur x23, [sp, #0x19]` 填这个字段，`x23` 来自 `JNIEnv->GetByteArrayElements`（`0xa1b44`）。
+
+**明文真实结构**（把 key 全置零，`createBleKeyV3Auth1RequestWithInput` 的输出即明文）：
+
+```
+val=0x00000000, data=00000 → 7f520d 0104 00000000 0205 0000000000
+val=0x00000001, data=00000 → 7f520d 0104 01000000 0205 0000000000
+val=0xffffffff, data=00000 → 7f520d 0104 ffffffff 0205 0000000000
+val=0, data=0102030405    → 7f520d 0104 00000000 0205 0102030405
+```
+
+布局：`0–2` = `7f 52 0d`；`3` = `01`（TLV tag 1）；`4` = `04`（长度 4）；`5–8` = `val`（u32 LE）；`9` = `02`（TLV tag 2）；`10` = `05`（长度 5）；`11–15` = `data`（5 字节）。
+
+XOR 循环模型与 TLV 结构已由 native 实测确认；输出总长 20 = 2 + 16 + 2(crc)，故 key 长 16。**但反推出的 16 字节 key 里只有 7 字节可信**：
+
+| 偏移 | 值（样本 0） | 为什么确定 |
+| --- | --- | --- |
+| 0–4 | `a4 33 b8 b0 17` | 对应 `7f520d0104` 固定 |
+| 9 | `80` | 对应 tag `02` |
+| 10 | `a9` | 对应长度 `05` |
+
+其余 9 字节（5–8、11–15）取决于未知的 `val`/`data`：`真实 key[5..8] = ct[5..8] ^ 真实 val`，`真实 key[11..15] = ct[11..15] ^ 真实 data`。
+
+**V3 待验**：真实调用方的 `val`/`data` 与 `sessionKey` 来源仍待确认。把 P5V2 历史密文套进 V3 XOR/TLV 再反推 key 不能证明两者同源；由此得到的 key 字节、候选派生排除结果均不能充当 P5V2 密钥证据。历史模板与自拼帧零响应也不能代替正确 P5V2 AES 路径的实车验收。
+
+**派生函数的 JNI 契约与数据传递已核验**（附录 §6.42d；离线复核命令
+`pixi run -e rev python scripts/verify-ble-jni-contract.py`）：
+
+```
+native_generateSessionKey(byte[] p1, byte[] p2, int p3, int p4)
+Java回调: hkdfSha256(p3_le‖p4_le, p1, p2, 16)
+```
+
+两个输入是字节数组：JNI 槽 `0x5c0`/`0x558` 分别是 `GetByteArrayElements`/
+`GetArrayLength`，不能解释为字符串或假定 UTF-8 编码。上式仅表示已核实的 Java
+回调数组顺序；`AlgorithmUtils.hkdfSha256` 的参数语义、真实数组来源仍待直接调用者证据，
+不能仅凭 native 变量名确定哪个数组充当 IKM、salt 或 info。HKDF 在 Java 静态方法里，
+native 做 JNI 桥接；裸进程缺少 Java 回调时的零结果不能当作有效派生结果。
+
+**历史候选排除的适用边界**（附录 §6.42c）：24 组密文在假定 V3 XOR/TLV 明文后，对 `ikm`/`salt` 的 9×9 组合、5 种 `info` 排列、MD5 字节序及固定 XOR 关系均未全中。P5V2 样本已由独立 verifyKey 的 AES 解密解释，这些排除不能反证 V3 明文假设成立，也不能证明真实 V3 `ikm`/`salt` 必含非会话量。
+
+**紧急通道是另一套算法**：`MD5(p3_le ‖ p4_le)`，16 字节，JNI 入参只有两个 int，
+Java 侧参数名就叫 `rand0`（附录 §6.42e）。用 MD5 公式试普通 `ed1118`，4 组全不匹配。
+
+**车端正常响应是必回的**：抓包里 App 发 `ed1118` 后 31 ms 就收到 150 字节 `0281000000000000000102fc9800…02551f02555500000000`（第二组连接 39 ms，节奏一致）。故零响应意味着**车端校验后直接丢弃**，不是「车端不校验」。150 字节内容为 `02 81 …` 状态快照，含 `02fc98`/`02fb`/`02fa` 一串 `02XX` 键值，末段 `02551f`、`025555`。
+
+### 6.15 命令帧与 CRC 覆盖范围
+**`crc32` 只覆盖 `payload`（type 之后的部分），不含 type 字节**：
+
+```
+id=2  type=02
+  crc(type + payload) = 694554cc
+  crc(payload)        = 938fa0ec   ← 帧里就是这个
+  frame               = 938fa0ec   ✅
+```
+
+99 条命令帧验证：`CRC(f[10:])` 正确 99 / 错误 0。`ed1118` 的 type 恰好是 `0x00`，`crc(f[9:])` 与 `crc(f[10:])` 碰巧都是 `8e4ec850`，所以握手帧怎么算都对；一旦换成 `type=0x02/0x03` 的命令帧就全错，车端直接丢弃。**两条 CRC 已验的真帧**（服务端签发、ECDSA 签名完整）：
+
+```
+cmd=2 (上锁) len=141
+ed118a0083938fa0ec025850424b5448010000826ae9f3d100544b49001012a774ba5b82bddb8bae973e35bed8e845440010fa505edb64d340d979be62b26cdbd5d9534e004630440220374e1b84242466e6f48bc2c283ee3ffd1cb79388362dbf2f8c2f74e8f12f04b30220505c22fc883f6368c59c802353b23762f515c1492dd0701ffbfd77797fdc22e302
+
+cmd=3 len=141
+ed118a00834faab57d035850424b5448010000826ae9f3d100554b49001012a774ba5b82bddb8bae973e35bed8e8454400104fad163352224877e37d1df9a6a2e6a0534e004630440220196dd0047f013d2dbb0f96829a24827375bfe7c76087a03b4b227baede08320e02207ee33f96d2961c86a591c4d4ca23e540d9aa4609552384d5edc42be7c45d001103
+```
+
+内层结构：
+
+```
+ed118a 0083 <crc32> 02 | 5850424b5448 01 0000 82 6ae9f3d1 00 | 84 | KI ED SN | 02
+                        "XPBKTH"    header(9B)          flag  TLV*   cmd
+```
+
+| tag | 值（cmd=2 帧） |
+| --- | --- |
+| `KI` | `12a774ba5b82bddb8bae973e35bed8e8` |
+| `ED` | `fa505edb64d340d979be62b26cdbd5d9` |
+| `SN` | `30440220374e...22e302`（DER ECDSA，71 字节） |
+
+### 6.16 签名链路：ECDSA P-256 + SHA-256，签的就是 `ED`
+**公钥可从两帧签名反推**（ECDSA 的 `(r,s)` 加消息摘要可还原候选公钥，至多 4 个）。以「`ED` 原文作消息、SHA-256」分别还原解锁帧与上锁帧，两帧落到同一个公钥：
+
+```
+压缩公钥   02 143bdc4ed3a761c41e0a8b32038ed28afeff7cde04e55f672d423d0fa207caec
+非压缩     04 143bdc4e…0fa207caec  38ea7275…88a9f3f3c4
+曲线       secp256r1 / P-256（在曲线方程上验证通过；secp256k1 上不成立）
+```
+
+验证结果：解锁帧签名对 `ED_un`+SHA-256、上锁帧签名对 `ED_lk`+SHA-256 均**通过**；解锁帧对 `ED_lk`、上锁帧对 `ED_un`、解锁帧对 `0x01‖ED_un` 均**失败**。`ED`+头部、`ED`+`KI`、`XPBKTH`+头部+`KI`+`ED`+指令码、`ED`+指令码等 11 种组合均不成立，只有「`ED` 裸 16 字节 + SHA-256」能在两帧上同时还原同一公钥。**签名覆盖范围 = `ED` 的 16 字节原文**，不含指令码、不含头部、不含魔数。**跨会话稳定**：用该公钥验另一次抓包的 5 条新帧，5/5 通过——`open trunk cmd=0x04 flag=U`、`close trunk cmd=0x04 flag=V`、`flash lights cmd=0x26 flag=W`、`open window cmd=0x0c flag=X`、`close window cmd=0x0d flag=Y`。签名私钥跨会话不变；签名**不保护** `cmd`/`type`/`flag`/`header`，改这些字段签名依然成立，车端不会通过签名发现指令被篡改，完整性只能靠 `KI` 加密或会话状态（未验证）。
+
+**私钥不在 APK 里**：公钥按非压缩 DER、压缩 DER（`02`/`03` 前缀）、base64、无 padding base64 四种编码在整个 `work/apk/` 下二进制搜索，零命中。结合「同一会话内 `KI` 不变而签名每次不同」，最可能的模型是密钥对在蓝牙钥匙激活时于设备侧生成、私钥存 Keystore、公钥注册到车端/云端。这与 §6.17 的 HKDF 协商是两条独立链路。私钥不可从现有帧推出：两次签名的 `r` 不同（`f78a764c…` vs `85fb448e…`），无 nonce 复用。
+
+**`KI` 是 AES-128 密钥**：两轮握手的 `0xED` 帧 payload 前 16 字节用 `KI` 作 AES-128-ECB 解密，得到 `轮 A: f4eee6ef 000000000000000000000000`、`轮 B: 42b10da7 000000000000000000000000`，即 **4 字节有效数据 + 12 字节零填充**，加解密往返一致。随机密钥产生这种结构的概率约 2⁻⁹⁶，故 `KI` 确实是这一层的 AES 密钥，该层零填充到 16 字节。`0xEF` 那两帧的 16 字节用 `KI` 解不出这种结构，握手三段用了不同密钥或不同层。
+
+**`ED` 不是用 `KI` 加密的**：`KI` 作密钥的 ECB / CBC(IV=0) / CBC(IV=上轮明文)、由握手材料派生的密钥（HKDF-SHA256 六种 info、SHA-256 前/后 16 字节、MD5、`KI⊕nonce`，共 40 余个候选）、以及连接里出现过的每个 16 字节值（两轮握手 5 个块）都无结构。`ED` 自身 16 字节全不同、零字节 0 个、首字节 `0xfd`/`0x8f`，是随机数形态。**结论：`ED` 是 16 字节随机 nonce（或随机密文），用现有材料无法判定内部结构。**
+
+### 6.17 会话密钥派生与密码学原语
+`SDKBleKeyV3::getSessionKey`（`0xa0344`）把两个 int 按小端写进 8 字节缓冲（`stp w24, w23`），将两个输入数组和该缓冲传给 `hkdf_sha256_jni`，输出长度 16。Java 回调的已证顺序为 `hkdfSha256(LE32(a)‖LE32(b), p1, p2, 16)`；数组语义与真实来源见 §6.14 的待解边界，不能把本地变量名称当成 IKM/salt/info 的证明。
+
+`hkdf_sha256_jni`（`0xa3528`）不实现 HKDF，使用 JavaVM 获取 JNIEnv 后调用 `AlgorithmUtils`。其中 `0x10006` 是 JNI 版本值，不能解读为 Mac 初始化参数；真实 HKDF 实现在 Java 方法中，尚未取得其方法体。
+
+**密码学原语一览**（`SDKBleKeyV3::` 下的符号全是 4 字节 `b` 跳板，实体是 `*_jni` 函数，即全部转 Java）：
+
+| 符号 | 实体 | 用途 |
+| --- | --- | --- |
+| `SDKBleKeyV3::aes_128_cbc_encrypt` / `_decrypt` | `aes_128_cbc_{en,de}crypt_jni`（`0xa40c0` / `0xa43fc`） | V1/V2 载荷加解密（IV 与 key 都校验 16 字节） |
+| `SDKBleKeyV3::aes_256_cbc_encrypt` / `_decrypt` | `aes_256_cbc_{en,de}crypt_jni`（`0xa3b2c` / `0xa3e00`） | V3 载荷加解密 |
+| `SDKBleKeyV3::hmac_sha256` | `hmac_sha256_jni`（`0xa38a8`） | 鉴权因子签名 |
+| `SDKBleKeyV3::hkdf_sha256` | `hkdf_sha256_jni`（`0xa3528`） | 会话密钥派生 |
+| `SDKBleKeyV3::calculateAuth1SessionKey` | `resc_calculateAuth1SessionKey`（`0x891e4`） | Auth1 阶段的救援/备用派生路径 |
+
+纯 native 实现：`MD5Init/Update/Final`（`0x839f4`/`0x83a08`/`0x8457c`）、`hmac_md5`（`0x8385c`）、`getXorResult`（`0xa00d4`）、`xorData`（`0x88f08`）。MD5 与 HMAC-MD5 属 V1 遗留的历史兼容路径，V3 不走。
+
+**实现 `AlgorithmUtils` 时**：`aes_128/256_cbc_*_jni` 实参是 `(vector<uint8>, vector<uint8>, const uint8_t* key)`，解密侧带长度校验（`cmp x9, #0x10` 等），**key 长度、IV 长度在 native 侧强校验**，不能省。AES 的 IV/padding 语义必须与 `Cipher.getInstance("AES/CBC/PKCS5Padding")` 完全对齐，否则密文对不上。
+
+### 6.18 指令面：可用的车控动作
+`BLE_CAR_*` 常量共 82 个（`work/ble_analysis/const_cmd_ble_car.txt`）：
+
+| 类别 | 常量 |
+| --- | --- |
+| 门锁 | `BLE_CAR_LOCK`、`BLE_CAR_UNLOCK`、`BLE_CAR_TRUNK_LOCK`/`UNLOCK` |
+| 后备箱 | `BLE_CAR_OPEN_TRUNK`、`BLE_CAR_CLOSE_TRUNK` |
+| 启动 | `BLE_CAR_START`（对应 DiDi 侧 `CarService.startCar` 与 `MonaCarCtrlService$unLockAndStartCarByBle`） |
+| 四门车窗 | 每门 `10/20/…/90` 十档 + `AUTO_UP`/`AUTO_DOWN`/`MANUAL_UP`/`MANUAL_DOWN`/`STOP`，前缀 `BLE_CAR_DRV_`/`PASS_`/`LEFT_`/`RIGHT_`；另有 `BLE_CAR_WIN_VT_OPEN`/`CLOSE`（通风开合） |
+| 寻车 | `BLE_CAR_FIND`、`BLE_CAR_FIND_DIRECTION_LAMP`、`BLE_CAR_FIND_HORN` |
+| RPA | `BLE_CAR_ACTIVE_RPA`、`BLE_CAR_RPA_IN`/`OUT`/`STOP`、`BLE_CAR_CALL`、`BLE_CAR_EXIT_RPA`、`BLE_CAR_ACTIVE_RPA_IN_HEART` |
+| 查询/上报 | `BLE_CAR_STATUS_BATTERY_SOC`、`BLE_CAR_STATUS_ODOMETER_INFO`、`BLE_CAR_STATUS_PARK_STATUS`、`BLE_CAR_KEY_EVENT_NOTIFY`、`BLE_CAR_CONTROL_REQ`/`RESP` |
+
+**第二套 `CAR_CTRL_*`**（`full_strings.txt:36100–36200` 连续段）：`CAR_CTRL_LOCK`/`UNLOCK`、`CLOSE_TRUNK`/`UNLOCK_TRUNK`、`OPEN_WINDOW`/`CLOSE_WINDOW`、`OPEN_LEFT_SLID_DOOR`/`CLOSE_LEFT_SLID_DOOR`（右侧同）、`FLASH_LIGHT`、`WHISTLE`、`ENTER_BLE_PARK`、`REQ_AUTO_PARK`、`REQ_SUPER_LOCK_LOCK`/`UNLOCK`、`LOCK_QUICK_CHARGING`/`SLOW_CHARGING`、`UNLOCK_QUICK_CHARGING`/`SLOW_CHARGING`。这些是**字符串键**（日志/埋点/路由名），不是指令字节。
+
+**第三套 `REQ_*`**（`full_strings.txt:98490–98570` 连续块，81 个）——动作覆盖面最全，比 `BLE_CAR_*` 多出滑门、剪刀门、超级锁、拖车钩、充电口锁、泊车：
+
+```
+REQ_LOCK / REQ_UNLOCK / REQ_LOCK_TRUNK / REQ_UNLOCK_TRUNK / REQ_TEMPORARY_LOCK / REQ_OPEN_BONNET
+REQ_OPEN_WINDOW / REQ_CLOSE_WINDOW / REQ_OPEN_SUNROOF / REQ_CLOSE_SUNROOF
+REQ_{LEFT,RIGHT}_{FRONT,REAR}_DOOR_{OPEN,CLOSE}
+REQ_SLIDE_DOOR_{LEFT,RIGHT}_{OPEN,CLOSE} / REQ_SCISSORS_DOOR_{DRIVER,PASSENGER}_{OPEN,CLOSE}
+REQ_SUPER_LOCK / REQ_SUPER_UNLOCK
+REQ_OPEN_{FAST,SLOW}_CHARGE_PORT / REQ_CLOSE_{FAST,SLOW}_CHARGE_PORT
+REQ_{LOCK,UNLOCK}_{QUICK,SLOW}_CHARGING
+REQ_CHARGE_PORT_{ALLOWED,FORBIDDEN} / REQ_TRUNK_UNLOCK_{ALLOWED,FORBIDDEN}
+REQ_TRAILER_HOOK_{OPEN,CLOSE,STOP,RESET}
+REQ_FLASH_LIGHT / REQ_HONK / REQ_FLASH_LIGHT_AND_HONK / REQ_SEARCH
+REQ_ENTER_BLE_PARK / REQ_AUTO_PARK / REQ_REMOTE_LIVE
+REQ_POLLING_{ENABLE,DISABLE,LOCK,UNLOCK,WELCOME} / REQ_WELCOME_MODE
+REQ_E28_{MAIN,VICE}_{OPEN,CLOSE} / REQ_H93_{LEFT,RIGHT}_{OPEN,CLOSE}
+REQ_EMERGENCY_KEY_{LOCK,UNLOCK}
+REQ_PAIR / REQ_AUTH / REQ_VERIFY_CAR / REQ_INIT
+REQ_CAR_STATE / REQ_CAR_STATUS_SERVICE / REQ_NOTIFY_IN_CAR / REQ_NOTIFY_OUT_CAR
+REQ_UPDATE / REQ_DELETE / REQ_DELETE_TEST_KEY / REQ_TIMEOUT / REQ_TIME_OUT
+REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
+```
+
+全 dex 正则匹配 `REQ_[A-Z0-9_]+` 得 **127 个**，多出的 46 个散落在别处，含协议结构名（`REQ_HEADER`/`REQ_BODY`/`REQ_INNER`/`REQ_BIT1`/`REQ_BIT2`/`REQ_CMD`）、状态名（`REQ_ERROR`/`REQ_NONE`/`REQ_NETWORK`/`REQ_LOCATE`/`REQ_DISCONNECT`/`REQ_FASTEN`）与一批电动门（`REQ_*_ELECTRIC_DOOR_*`）。**只有连续块内的 81 个同块同源、最可能属同一枚举**，散落的 46 个来源不明。
+
+**三套词表的关系**（推论，依据是覆盖面与命名粒度）：`REQ_*` 是业务动作全集（含车型专属 `E28_*`/`H93_*` 与协议控制项）；`BLE_CAR_*` 是已下移到 BLE 通道的子集，粒度更细（车窗十档）但缺滑门/剪刀门/超级锁/拖车钩；`CAR_CTRL_*` 是界面/埋点层动作名，粒度最粗。**三套词表都没有数值**——取值在加密 dex 的常量类静态初始化里（`BleCmdDefine`），native 侧也没有这些名字。这一层必须靠 HCI 抓包补（§9）。抓包时按 `REQ_*` 的名字对照 `type` 字节，命中率高于对着 `BLE_CAR_*`。
+
+### 6.19 错误码
+**上行响应的业务类型全集**（`classes.dex` 全量正则，各 12 与 11 个）：`BLE_RESP_*` = `AUTH_OK`、`AUTH_FAIL`、`CAR_STATUS`、`CAR_SYSTEM_REQ_RESEND_CMD`、`CAR_SYSTEM_WAKE_UP_FAIL`、`CHARGING_STATUS`、`CONTROL_FAIL`、`LOGIN_VEHICLE_EVENT`、`MAIN_DRIVING_STATUS`、`PARK_ERROR`、`PARK_STATUS`、`PASSENGER_SIDE_STATUS`；`BLE_DATA_*` = `CHARGE_UNLOCK`、`COLLECT`、`DISABLE_SDK`、`ENABLE_SDK`、`LOGIN_VEHICLE_RESULT`、`PARK_APA_ACCOUNT`、`PARK_APA_SWITCH`、`PROCESS`、`REQ_DISCONNECT_BLE`、`REQ_LOCATE`、`TBOX_4G_READY`。
+
+这 23 个是**回执语义的分类维度**，与 §6.11 的 `msgId`（16 位）是两层：`msgId` 决定走哪个 `build*Message`，`BLE_RESP_*` 是构建完成后打给业务层的类型标签，取值在加密 dex 内。其中 `BLE_RESP_CAR_SYSTEM_REQ_RESEND_CMD` 与 `BLE_RESP_CAR_SYSTEM_WAKE_UP_FAIL` 说明**车端可主动要求重发或报告唤醒失败**——链路层有车端发起的重传协商，不是纯 App 主导。忽略这两条，弱信号下表现为「指令无响应」。
+
+**车端码表**：`res/values-zh-rCN/strings.xml` 里 `vsdk_ble_msg_*` 共 92 条，编号分布 `0, 200, 300, 400, 500`；`10404–10422`；`10901–10913, 10915–10923, 10927–10956, 10958–10965`；`11009, 11010`；`14901–14906`。另有 `vsdk_e28_ble_msg_01`–`08`（E28 专属）。完整码表可直接照抄：
+
+```
+0     操作失败，请重试            200   成功
+300   操作失败，请重试            400   请重试操作，若未成功请联系400客服
+500   操作失败,请重试
+10404 打开充电口失败              10405 关闭充电口失败
+10406 请置于P档再重试             10407 请置于P档再重试
+10408 请置于P档再重试             10409 请先关闭车门
+10410 请先关闭前舱盖              10411 请先关闭后备箱
+10412 请稍后重试                  10413 请先关闭车门
+10414 请先关闭前舱盖              10415 请先关闭后备箱
+10416 车辆已启动，解锁暂不可用    10417 主驾有人，解锁暂不可用
+10418 开启超时,请重试             10419 请置于P档再重试
+10420 请先解锁车门                10421 关闭超时,请重试
+10422 请注意观察周围环境
+10901 解锁失败                    10902 上锁失败
+10903 后备箱开启失败，请重试      10904 后备箱关闭失败，请重试
+10905 车辆已下电，临停不可用      10906 主驾有人,锁车不可用
+10907 请关闭车门与前后盖再重试    10908 当前锁车不可用
+10909 主驾有人,临停不可用         10910 请驻车后重试
+10911 续航低,临停不可用           10912 请关闭车门与前后盖再重试
+10913 当前临停不可用              10915 操作失败,请重试
+10916 请关闭尾箱再重试            10917 请置于P档再重试
+10918 请关闭前盖再重试            10919 请关闭车门再重试
+10920 请关闭前盖再重试            10921 请关闭车门再重试
+10922 请关闭尾箱再重试            10923 请置于P档再重试
+10927–10933 左侧滑门开启失败，请重试（10929 例外：请置于P挡后重试）
+10934 侧滑门处有异物，请手动开启侧滑门
+10935–10939 左侧滑门关闭失败，请重试
+10940 侧滑门处有异物，请手动关闭侧滑门
+10941–10947 右侧滑门开启失败，请重试（10943 例外：请置于P挡后重试；10945 例外：请先解锁车辆）
+10948 侧滑门处有异物，请手动开启侧滑门
+10949 侧滑门无法完全打开,请关闭充电口盖后重试
+10950–10954 右侧滑门关闭失败，请重试
+10955 侧滑门处有异物，请手动关闭侧滑门
+10956 智慧场景运行中，禁用离开自动闭锁
+10958 拖车钩开启失败，请重试      10959 拖车钩关闭失败，请重试
+10960 请先锁车后重试              10961 超级锁启动中，开启超级锁失败
+10962 超级锁上锁失败，请重试      10963 左滑门无法打开，请关闭口盖后重试
+10964 请先锁车后重试              10965 超级锁退出失败，请重试
+11009 请在车辆上电时使用          11010 请置于P档再重试
+14901/14903/14905 请在车辆上电时使用
+14902/14904/14906 请置于P挡后重试
+```
+
+**码表反推的产品面事实**（推论，有文本支撑）：① **滑门（MPV）与超级锁是车控能力**，与 `CAR_CTRL_OPEN_LEFT_SLID_DOOR` / `CAR_CTRL_REQ_SUPER_LOCK_LOCK` 对应，各有 7–8 个失败分支（含异物、口盖未关）；`BLE_CAR_*` 里没有它们，说明滑门/超级锁走另一组指令码，不在那 82 个常量内。② `10416`/`10417` 区分「车辆已启动」与「主驾有人」两种拒绝解锁原因，`10906`/`10909` 同理区分锁车与临停——车端会做**座舱占用检测**并在回执里返回不同码。③ `10905` 与 `14901` 都是「车辆已下电」语义，但分属 109xx 与 149xx，暗示两段对应不同指令族（149xx 可能属泊车/RPA）。
+
+码表本身完整可抄（只是资源文件，不在加密 dex 内）；取不到的是「哪个码由哪个分支产生」，逻辑在 `XpErrorCodeHandler` 方法体内。`XpErrorCodeHandler` 在 dex 里有 7 处引用，方法体不可读，故「用 `getIdentifier("vsdk_ble_msg_" + code)` 动态拼名字」属推论。
+
+**客户端侧预检错误族**（`work/ble_analysis/const_error_ble.txt`，96 个，与车端 `vsdk_ble_msg_*` 是两套完全不同的东西）。这些是 App 在**发出任何一帧之前**自己判定的失败，自研客户端要复刻，否则用户看到的是「无响应」而不是「蓝牙未开」：
+
+```
+连接层：BLE_CONNECTION_FAILED / BLE_CONNECTION_AUTH_FAILED / BLE_AUTH_FAILED
+        BLE_ERROR_NO_CONNECTED / BLE_TBOX_STATE_ERROR / MSG_BLE_CONN_FAIL / SCAN_BLE_FAIL
+预检层：CHECK_FAIL_BLE_UNABLE / CHECK_FAIL_BLE_AUTH_FAIL / CHECK_FAIL_NO_BLE_PERMISSION
+        CHECK_FINAL_FAIL_BLE / CODE_ERROR_BLE_CONNECT_FAIL / CODE_ERROR_NOT_SUPPORT_BLE_KEY
+        RESULT_BLE_NOT_AUTHENTICATION / RESULT_BLE_SWITCH_IS_OFF
+        RESULT_BLE_WALLET_SERVICE_ERROR / ERROR_CODE_BLE_OFF
+激活层：ERROR_BLE_ACTIVE / ERROR_BLE_ACTIVE_F2 … _F6 / ERROR_BLE_ACTIVE_TIMEOUT
+        ERROR_BLE_TIMEOUT / ERROR_SENCE_BLE / ERROR_SENCE_BLE_AUTH
+```
+
+`ERROR_BLE_ACTIVE_F2`–`F6` 五个并列码说明激活流程（首次配对/钱包激活）有 6 条不同失败路径，只报一个「激活失败」会丢排障信息。`ERROR_SENCE_BLE` 里的 `SENCE` 是 `SCENE` 的拼写错误，代码里就这么写——与 §6.4 的 `AUTHO` 一样，搜索时要按错拼找。
+
+**触发链路的类名核实**（`classes.dex` 计数）：`CmdExecutor$cmdQueue`、`CmdExecutor$runningCmd` 各 1 处，`CmdCallbackProxy` 24 处，`BaseWidgetCmd$retry` 2 处，`VehicleCmd$checkResult` 6 处，`XpErrorCodeHandler` 7 处。这些名字确认存在但方法体全部不可读——§6.5 里的排队、串行化、`successPrediction` 重试都是从类名与字段名反推的行为描述。
+
+### 6.20 实现约束（会踩的坑）
+**假车侧：recv 特征必须带 NOTIFY 位。** 假车 properties 只声明 `0x20`（INDICATE）时，App 订阅后只干等 5 秒超时断开，从不发 `ef0110`，只发 `ef0104`；改成 `0x30`（NOTIFY|INDICATE）后**立刻走完 ef0104 → ef0110 → ed1118**。`GattCharacteristic` 只有 `uuid`/`properties`/`permissions`/`callback_id` 四个字段，CCCD 由 netsim 自动生成（`desc 00002902-0000-1000-8000-00805f9b34fb`，`descs=1`），属性位是唯一可调的开关。特征属性、而不是 `KI`，才是假车打通的拦路石。
+
+**Android GATT 四坑**（不是协议问题，自研端照抄即可）：① **`setCharacteristicNotification` 不够，必须显式写 CCCD 描述符**（`00002902-…`）——只调前者时蓝牙栈只在本地注册路由，服务端 `OnCharacteristicObserveRequest` 不触发，日志表现为「车端回了但 App 收不到」。② **CCCD 取值须按实测链路选择**：模拟器/netsim 早期实验写 `ENABLE_NOTIFICATION_VALUE` 才能订阅；P5 本轮实车 HCI 抓包为 `0x0200`（INDICATION），车端用 `0x1d` 指示、手机用 `0x1e` 确认，且验车分片位于 30 字节指示内，详见 §6.14、附录 §6.92。③ **GATT 客户端是单槽写队列**——回调里连续 `writeCharacteristic` 时第二次直接返回 `false` 且不报错，必须自维护队列，在 `onCharacteristicWrite` 里出队下一帧。④ **`ef0104` 不能在 `onServicesDiscovered` 里发**，那时 CCCD 写还在队列里会被单槽规则吃掉，应在订阅完成回调里发第一帧。
+
+**帧编码约束**（每条错了帧就不合法）：
+
+| 约束 | 说明 |
+| --- | --- |
+| CRC 只覆盖 payload | 不含 `type` 字节；`crc(type‖payload)` 在 `type=0` 时碰巧相同，换命令帧就全错（§6.15） |
+| CRC 初值 0 | 非 `0xFFFFFFFF`，无最终异或，多项式 `0xEDB88320`（§6.6） |
+| `ed1118` 长度与 CRC 覆盖不对称 | `tboxlen` 不含尾部 `e0`，CRC 含（§6.14） |
+| `chunkbyte = tboxlen + 7` | `ed1118`（17+7=24）与 `ed118b`（132+7=139=0x8b）都成立 |
+| `keyString` 取当前连接模块的 MAC | 不能取 `xp_vehicle_mac.macAddress`，否则回 `0x0e`（§6.13） |
+| 开/关后备箱靠 `header[3]` 区分 | 两者 `cmd` 都是 `0x04`，只看 `cmd` 会当成同一条（§6.7） |
+| 每条命令前重新握手 | 无会话复用；挑战窗口 2.0–2.5 s（§6.12） |
+| CCCD 先写 `0200` 再握手 | `0x0010 = 0200`，开启 indicate（§6.10） |
+
+### 6.21 取证手段与边界
+- **`am dumpheap` 绕过 Frida 的 ptrace 保护**：`adb shell am dumpheap <pid> /data/local/tmp/app.hprof` 产出约 82 MB（约 20 秒）。走 `Debug.dumpHprofData` 系统路径，不需要 ptrace，加固壳挡不住。
+- **`TestBleKeyV3Activity` 必须用 root 启动**：`adb shell su -c "am start --user 0 -n com.xiaopeng.mycarinfo/com.xiaopeng.common.car.home.TestBleKeyV3Activity"`。该 Activity 未导出，`shell`（uid 2000）直接启动会报 `SecurityException: not exported from uid 10235`。标题「测试数字钥匙3.0」，9×4 绿色按钮矩阵，覆盖整条 V3 握手与车控链路。九行按钮：① 支持V3 / 启动BLE / 创建钥匙 / 分享钥匙 ② 删除钥匙 / 拉取报文 / 连接蓝牙 / 解锁 ③ 闭锁 / 闪灯 / 开窗 / 关窗 ④ 自标定 / 进入泊车 / 订阅车况 / 泊车心跳 ⑤ 清空报文 / AUTH0_REQ / AUTH0_RSP / AUTH1_REQ ⑥ AUTH1_RSP / RKE_REQ / RKE_RSP / ICCOA=>GOOGLE ⑦ ICCE / 获取钥匙列表 / 清空小米拉活配置 / 获取MAC地址 ⑧ 获取报文数量 / 获取报文 / 开通钥匙账号联登 / 关闭钥匙账号联登 ⑨ 获取联登状态 / 延时杀死主进程 / 延时杀死蓝牙进程 / 当前是否使用应急钥匙。
+  **但这 39 个按钮点击后 `onClick` 不执行**（主进程零日志输出），窗口本身在 `InputDispatcher` 里注册正常（`inputConfig=0x0`、`touchableRegion` 全覆盖、`ownerUid=10235`、`responsive=true`），按钮也 `clickable=true`/`enabled=true`。原因未明，故**这个界面目前不能用来抓 sessionKey**（附录 §6.42f）。
+  该界面在 4.2.0 里不存在，是 5.x 新增的（附录 §6.42g）。
+- **Frida 会打断真实蓝牙连接**：`:BLE` 进程 attach 成功后 App 的蓝牙连接随即断开，pid 在崩溃重启循环里递增（30664 → 32409）。杀 frida-server 与所有 watcher 后立刻能连上（用户两次独立确认）。hook 抓不到握手帧的原因是 `:BLE` 进程在每次握手前被重建（4112 → 4523 → 5033 → 5338），而 `libbledata.so` 懒加载，attach 上去时握手往往已完成。
+- **HCI 抓包无需 root**：`settings put global bluetooth_btsnoop_log_mode full`（注意是 `global` 域的 `bluetooth_btsnoop_log_mode`，不是 `secure` 域的 `bluetooth_hci_log`），再 `cmd bluetooth_manager disable` / `enable` 使设置在蓝牙重启时被读取，之后 `adb bugreport` 取 zip 内 `FS/data/misc/bluetooth/logs/btsnoop_hci_*.log`。解析用 `scripts/btsnoop_decode.py`（不依赖 tshark）。
+
+### 6.22 未解决项
+
+| 项 | 状态 |
+| --- | --- |
+| P5V2 `ed1118` 与钥匙物料 | 隔离入口及已有登录态生产链路的解锁/锁车均已完成真车验收；无钥匙账号激活、新鲜物料全链路和其它命令未验。V3 `val`/`data`、sessionKey 来源另待确认（§6.14、§6.93） |
+| `0x70` 的结果码与 `payload[0]` 语义 | `payload[0]` 不是稳定命令回显；`163` 和同帧 `0x2a` 的官方语义不可得，保留为待取证缺口（§6.11） |
+| 握手是否硬前置 | **未知**。观察到的时序是每条命令前都重新握手，但「跳过握手能否发命令」未做 A/B/C 对照，现有证据不支持「车端必然丢弃」的强断言（§6.12） |
+| `ED` 是否被车端校验内容 | 未验证。若车端只验签名，`ED` 随便填；若当 nonce 防重放，必须与车端协商。需发一帧 `ED` 全零的车控帧看是否被拒，有风险 |
+| `ED` 时效、`KI` 跨会话稳定性 | 接口每轮新发 `ED`，但车端是否拒旧帧未实测；`KI` 同一会话内稳定，跨握手轮次未验证（只有一轮里出现了车控帧） |
+| `0xEC` 通道含义 | 该帧 `TBox type = 0x00`，payload 8 字节 ASCII `23897711`，紧跟解锁回执之后，更像车辆序列号或会话标识，非登录。需更多样本 |
+| 未定位语义的字节/msgId | `header[4..8]`（`6a 7b 5f e0`，作 BE 是 2026-08-11 17:46 UTC，早于抓包 82 天，作 LE 是 2089 年）；`0x0231`/`0x0261`–`0x0263`/`0x02f6`–`0x02fb` 不在 D55 分派表内且 payload 全零，疑为同族状态位图；`0x0082` 三条子字段后 6 字节每轮全变、`0233` 末两字节恒零，非递增计数器；`0x0318` 末字节 `0x93`/`0x01`/`0x23`，疑为状态位 |
+| 2801/3205/3206 组 UUID 的角色分配 | 仅 `406D` 组与 `…6D6C`/`…2802-…573FF530` 经实车证实，其余属结构推断 |
+| RSSI 阈值、超时、退避曲线、`CmdSelectChannel` 判定逻辑 | 在加密 dex 内 |
+| `BleCmdDefine` 各枚举取值、`TYPE_BLE_*` 载荷结构 | 在加密 dex 内；「载荷是 `{mac, cmdType, payload, timeout}`」一类说法都是猜的 |
+| `XmartV1LocalKey*` 轮换周期 | 未验（§9） |
 
 ## 7. 体积与功能构成
+
 
 | 项 | 大小（`du -sm`） |
 | --- | --- |
@@ -1233,6 +1568,8 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 
 ---
 
+---
+
 ## 8. 路线判断
 
 ### 8.1 自研 App 替代官方（当前选定）
@@ -1245,24 +1582,28 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 | tenant 密钥池 | ✅ 闭环 | 0 |
 | 本地密钥 | ✅ 闭环 | 0 |
 | `Xp-Authorization` blob | ✅ 闭环（分版本） | 0 |
-| 登录与会话 | ✅ 闭环（真号实测）：发码 → 验证码 → 第二道滑块(`LGN`) → `smsLogin` 200 → 解 `sData` → 带 `Xp-Uid` 打业务接口 200 | 两道滑块：第一道发码、第二道换 token（§4.2） |
+| 登录与会话 | ✅ 闭环（真号实测，§4.2） | 0 |
 | 令牌续期 | ✅ 闭环，连续 5 次成功 | 0 |
 | MQTT 连接与凭据 | ✅ 闭环 | 0 |
-| 车控指令 | 🟡 10/12 | 单扇车窗、除霜、循环、座椅加热通风、智能清洁/除味/香氛（启动走 BLE，不在 MQTT；风量 App 无此功能） |
-| BLE 离线解锁 | 🟡 native 可复用 | 3–5 天（含编译验证） |
+| MQTT 车控指令 | 🟡 13 条已打通 | 余项见 §5.7 |
+| BLE 握手 `ef0110` | ✅ KDF 解出，188/188（§6.13） | 0 |
+| BLE 握手 `ed1118` | ✅ P5V2 隔离验收入口在本车完成严格挑战校验（§6.14）；V3 另待验 | 无钥匙账号激活与其余命令的新物料链路 |
+| BLE 车控帧下发 | ✅ 隔离入口与已有登录态生产 BLE-only 链路在本车各完成一次解锁/锁车并由用户现场确认（§6.14、附录 §6.92、§6.93） | 其余 5 个动作、标准命令回执、车况 UI 刷新 |
 
-**客户端身份与令牌生命周期这两层已经没有未知量。** 剩余成本集中在车控指令码与 UI。
+**客户端身份与令牌生命周期已完成既有账号验证。** BLE 的 `ef0110` KDF 已解出并双实现验收；P5V2 `ed1118` 的 Java AES verifyKey 路径、隔离入口及已有登录态生产 BLE-only 解锁/锁车链路已在本车验证。剩余验收包括无钥匙账号激活、其余动作的新鲜物料链路、标准命令回执和车况 UI 刷新；V3 sessionKey 的未知不能概括为本车唯一卡点（§6.14、§6.93）。
 
 **两个必须先接受的约束**：
 
 - **单会话**：同一账号同时只允许一个有效会话，自研 App 登录会把官方 App 踢下线。
 - **跟版**：appId/secret 一旦轮换、canonical 一旦改版，客户端立刻失效，必须跟随官方版本更新。§2.2 的 dump 流程就是跟版时的重新取证手段。
 
-**成本**：MVP（只做云端车控、不做 BLE）约 1 周；加 BLE 离线解锁约 2–3 周。前置条件已满足。
+**成本边界**：云端车控与 BLE 验收分开估算；P5V2 隔离入口及已有登录态生产 BLE-only 解锁/锁车结果，不能替代无钥匙账号激活、其余动作的新鲜物料链路、标准回执和车况 UI 刷新验收。
 
 ### 8.2 挂在官方进程上（兜底一）
 
-不复刻 App，只做「界面壳 + 官方进程」：钥匙物料、TEE、签名全部沿用官方链路，自己只接管 UI 与连接策略。依据是 §6.2——BLE 协议层是纯函数、无调用方校验，hook 进去可直接调 `native_generateAuth0DataV3` 等原语，绕开官方那套 217 个类的轮询状态机。代价：需 root 或 Frida（而 §6.3 说明 Frida 会被检测）；官方改 native 接口就要跟；分发撞版权。
+不复刻 App，只做「界面壳 + 官方进程」：钥匙物料、TEE、签名全部沿用官方链路，自己只接管 UI 与连接策略。依据是 §6.2——BLE 协议层是纯函数、无调用方校验，hook 进去可直接调 native 原语，绕开官方那套 217 个类的轮询状态机。
+
+代价：需 root 或 Frida，而 **Frida attach `:BLE` 进程会打断真实蓝牙连接**（§6.21），只能做一次性取证，不能作为运行期架构。另外官方改 native 接口就要跟；分发撞版权。
 
 ### 8.3 改包精简（不可行）
 
@@ -1280,14 +1621,25 @@ App 自己承认两处结构性弱点：`ble_check_fail_des` = 「先关闭蓝�
 
 ## 9. 未验证项
 
-**车控指令**
+**BLE**
 
-- **车窗升降的指令码**：`st=12` 能读四个车窗位置，控制值未找到。App 发的请求报文未抓到。
-- **空调控制指令**：`st=3` 只读可用；`cmd_type:1 + cmd_value` 回执成功但车辆不执行。App 报文未抓到。
-- **鸣笛**：能力表有 `BLE_FLASH_LIGHT_HORN`，是否同通道的 `cmd_value:2` 未测。
-- **解锁+启动**：云端 MQTT 侧已排除（§5.6 附实测），确认走 BLE `CarService.startCar`；BLE 指令码未测（账号未激活蓝牙钥匙）。
+- **P5V2 新鲜钥匙物料与其它动作**：本地注入的一次性材料已通过本车隔离验收；已有登录态的生产 BLE-only 解锁/锁车也已真车验收。无钥匙账号激活流程、其余 5 个动作的新鲜物料与方向绑定、标准命令回执和锁车后车况 UI 刷新仍未完成（§6.14、附录 §6.92、§6.93）。
+- **`0x70` 回执语义**：`200` 是已知成功码之一；锁车物理生效时观察到 `163`，但其成功/中间态/失败语义及同帧 `0x2a` 未取得官方定义，均为待取证缺口（§6.11）。
+- **V3 sessionKey、`val` / `data` 的真实调用参数**：native XOR/TLV 与 Java JNI 契约已确认，但不得用于反推 P5V2 AES 路径（§6.14）。
+- **握手是否为命令的硬前置**：`§6.35e` 的原始实验用了自拼坏帧，结论已作废，需用修好 CRC 的帧重做（§6.21）。
+- **`ED` 的时效与防重放是否被车端校验**：若校验，服务端签发的帧必须在有效期内用掉（§6.21）。
+- **子账号改成真 MAC 后能否握手成功**：按 §6.13 的因果应当可以，但需要车在身边实测。
+- **App 连从模块时是否也换 `keyString`**：`§6.13` 只验证了连主模块的情形。
+- **`ed1118` 与 `ef0110` 是否同源**：`§6.13` 留的悬案，目前只确认「不同源」。
+- **车端限流阈值**：目前只有 3 个采样点，`0x0e` 后需冷却 ≥45 s（§6.14）。
+- **修好 CRC 的独立探针帧**：`§6.15` 的帧已逐字节校验通过；本轮隔离验收另以已组装的解锁/锁车命令帧各发一次并由用户现场确认生效（附录 §6.92）。
+- **`0xEC` 通道解密后的明文内层布局**：本次只出现一条，payload 是 8 字节 ASCII，疑似会话标识（§6.7），未定。
+
+**MQTT 车控指令**
+
+- **单扇车窗的指令码**：`st=12` 能读四个车窗位置，控制值未找到。App 发的请求报文未抓到。
+- **除霜、内外循环、座椅加热通风、智能清洁/除味/香氛**：同因，控制报文抓不到（§5.9）。
 - **远程查看的实时视频与视角切换**：本车 `avm_exist=0` 无环视硬件，`camera_status` 恒 -2，物理不可测（§5.7）。需换有环视的车重测。
-- **后备箱箱门开合**：确认走 BLE（§5.6），自研客户端需复用数字钥匙栈；BLE 指令码未测。
 - **遮阳帘 99→48 的跳变**：未解释（§5.9）。
 
 **协议与接口**
@@ -1298,26 +1650,12 @@ App 自己承认两处结构性弱点：`ble_check_fail_des` = 「先关闭蓝�
 
 **登录**
 
-- ~~**第二道滑块是否在真号正常流程下出现**~~：**已验（2026-10-31）**。真号发码 + `sms/validate` 通过后，`smsLogin` 返回 `12040101`，第二道滑块确认必经（§4.2）。
-- ~~**第二道滑块的票据通道**~~：**已解决（2026-11-01）**。通道是 `drag/validate` + `sceneType:"LGN"`（§4.2）。此前判「已排除 `drag/validate`」是枚举漏了 `LGN` 所致。
 - **运营商一键登录是否可用**：`oneclickLogin` 端点与三家 SDK 均在 App 内（§4.2），但 `accessCode`/`token` 必须在真机 + 真实 SIM 上由运营商网关鉴权换取，模拟器无法验证。若可用，这是完全绕开短信与滑块的入口。
-- ~~**真正的验证码下发接口**~~：**已解决**，是 `/verification/app/v5/sms/code`（§4.2）。
-
-**BLE**
-
-- **延迟的真实成因**（扫描/连接/服务发现/握手哪一段耗时）：需 `btsnoop_hci.log`，未采集。
-- **`libbledata.so` 在自研 App 内加载的实际可用性**：仅静态分析，未编译验证。
-- **`XmartV1LocalKey*` 的轮换周期**：`IndivKeySet` 解出 `[0,1,…,9]`，与实际使用的 `keyIndex` 关系未验。
-
-**环境**
-
-- **真机上 `XTeeSecurityAlias` 是否由 TEE 硬件保护**：推论为真机不可导出。这意味着 §2.6 的本地密钥提取流程**只在模拟器上成立**；真机场景下自研 App 需自己的密钥对。
-- **`apps.xiaopeng.com` 的服务端证书上级 CA**：由 `CN=Xiaopeng Motors Intermediate CA` 签发，其上级未知；`assets/ca-chain.crt` 是 `0xAA` 占位。国内主机不要求 mTLS，故只影响海外链路。
-- **5.23.5 崩溃根因**：`libbulk.so` 加载后 SIGSEGV，疑似 16 KB 页对齐，未验证（§1.3）。
 
 ---
 
 ## 10. 复现方式
+
 
 环境由 `pixi.toml` 固定（openjdk 21、python 3.13、capstone、pyelftools；`rev` 环境另装 `pyjks`、`cryptography`）。逆向工具在 `.tools/`（jadx 1.5.6、apktool 3.0.3），由 `pixi run fetch-tools` 下载；APK 由 `pixi run fetch-apk` 下载（短链带时效签名，必须走短链）；解包由 `pixi run decompile`、清单汇总由 `pixi run manifest`。
 
@@ -1371,30 +1709,22 @@ pixi run -e rev python scripts/mqtt-send.py camera-state # 读摄像头状态（
 
 ---
 
-## 附录 A：已作废结论
 
-保留此表以免重走弯路。每条都曾写进正文并被后续实测推翻。
+后续新增的取证脚本：
 
-| 曾记录的结论 | 实际 | 推翻依据 |
-| --- | --- | --- |
-| `WEEB` 用服务端密钥池，客户端无法解密 | **错**。`keyIndex` 直接索引 `XmartV1LocalKey*`，AAD 为空，明文 = 32 B 前缀 + 968 B JWT | 同代际密钥一次解开 |
-| `/sso/app/v3/token/refresh` 对自研客户端不可用 | **错**。可用，且可无限续期 | 连续 5 次续期成功 |
-| `msg_content` 是字符串拼接 `…}msg_content:{…}` | **错**。是 JSON 字段。拼接格式 broker 接受 publish 但车辆端解析失败，导致「连发 4 次闪灯零回执」 | 改 JSON 字段后每次都有回执 |
-| 闪灯指令是 `service_type:19 / cmd_type:1 / cmd_value:1` | **错**。`st=19` 是状态查询；闪灯是 `st=5 / ct=1 / cv=1` | 实测回执 `dipped_headlight_status:1` |
-| `tee` 登录后从不更新 | **错**。每约 3 小时自动更新 | 多次快照比对 |
-| 官方 App 没有任何自动续期能力 | **错**。它能解开 WEEB 并写回 `tee` | `tee` 自动更新 |
-| 官方 App 不走 refresh 接口 | **部分错**。堆里搜不到 `token/refresh` 字符串，但 `tee` 会更新，说明它用别的方式完成同一件事 | 同上 |
-| refresh rotation 后旧值失效、重放即废链 | **错**。同一 eyJ RT 可反复用；真正废链的是**高频调用** | 连刷 5 次全 200；十几次后 `12010202` |
-| MQTT 凭据可用 7 天 | **错**。`expireTime` 只是上限，AT 失效即连带作废 | AT 过期后 `connack rc=Not authorized` |
-| 信封必须带 `tee_id` 段 | **半错**。分版本：4.2.0 不带，5.19.0 必须带 | 两版本对照实测 |
-| `WEEB` 是 4 字符明文前缀，剥掉后得 1072 B | **错**。整串 base64 解码得 1075 B，`WEEB` 三字符 base64 后恰好产出 `XA` | 逐字节解码 |
-| `WEEB` 明文可用已知明文法解出 | **循环论证**。`pt = ct XOR (ct XOR at) = at`，必然还原 | 逻辑自证 |
-| `libbledata.so` 无任何反调试 | **只对静态字符串成立**。运行时存在，Frida 注入即被检测重启 | Frida 实测 |
-| 内层明文结构未知导致 `12110001` | **错**。真正原因是反复调 refresh 把令牌链作废 | 干净 token 一次通过 |
-| 车控指令可通过 REST 下发 | **错**。60+ 路径全 `Handler Not Found`，走 MQTT | 内存里抓到 MQTT 报文 |
-| 静态可从 dex 还原业务逻辑 | **错**。dex 整体加密，99.98% 是密文 | dex 头解析 |
-| 可以 MITM 抓明文 | **对一半**。系统 CA 可装进 `/apex/com.android.conscrypt/cacerts`（tmpfs），DigiCert 主机（`collect`/`sentry`）能解密；`apps*` 因私有 CA 信任锚仍拒绝 | mitmproxy 实测 |
-| 5.19.0 无法在模拟器运行 | **错**。可运行，是 5.23.5 崩 | 实测 |
-| 哨兵模式只能读不能写 | **错**。`st=8 action:2` 可写，`SENTINEL_MODE_VIDEO` 就是开关位 | 写 1/0 后 `soldier_camera_status` 0→1→0 |
-| `st=8` 的 `settings[]` 按数组位置对齐 | **错**。按键名匹配，顺序无关；未知 `code` 被静默忽略 | 首元素塞 `ZZ_BOGUS` 后灵敏度仍正确落位 |
-| `SENTINEL_MODE` / `SENTINEL_ACTION` 是哨兵开关的字段名 | **错**。写这两个键不改变任何状态；开关是 `SENTINEL_MODE_VIDEO` | 三者分别写入后读 `st=19` 对照 |
+- `scripts/btsnoop_decode.py`：解析 btsnoop HCI 抓包（§6.12）。
+- `scripts/ble_frame.py`：BLE 帧编解码，`--selftest` 自检（§6.13 → 现 §6.12）。
+- `scripts/fake_car.py`：模拟器内虚拟车端（§6.5）。
+- `scripts/ble-kdf-verify.py` / `scripts/verify-ble-kdf.mts`：`ef0110` KDF 的 Python 与 TS 双实现验收，188/188（§6.13）。
+- `scripts/ble-prep-frames.py`：从 `XpVehicle.db` 取 CRC 已验证的帧，输出可直接喂给探针的十六进制（§6.15）。
+- `scripts/ble-handshake-probe.swift` / `scripts/ble-direct-cmd-probe.swift`：Mac 端直连车端的握手与指令探针（§6.15）。
+
+---
+
+## 附录：不可复现的实测数据
+
+按调研轮次记录的实测值（native 偏移、抓包样本、设备拓扑、明文帧、取证命令）
+单独存放在 [`xpeng-app-teardown-appendix.md`](xpeng-app-teardown-appendix.md)。
+
+正文没有这些内容的副本，APK 与 dump 不入库，重跑需要 root 真机与车旁实测——
+需要具体数值时去那里查，不要重新做实验。
