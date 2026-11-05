@@ -12,6 +12,7 @@ import { ActivityIndicator, StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { carLink, type LinkState } from './src/core/car';
+import { bleLink } from './src/core/ble';
 import { sessionStore, type SessionState } from './src/core/session';
 import { themeVars, useThemeMode } from './src/core/theme';
 import { useUpdater } from './src/core/update';
@@ -61,6 +62,9 @@ function Shell() {
         const first = data?.vehicles?.[0];
         if (!alive || !first) return;
         setVehicle(first);
+        void bleLink.autoPrepareV2(first).catch((error) => {
+          console.warn('[shell] BLE V2 准备失败:', error instanceof Error ? error.message : String(error));
+        });
         await carLink.connect(first.vin, session.session.uid);
       } catch (e) {
         // 失败时留在「离线」，用户可在设置页重新连接；原因必须进日志，否则只能猜

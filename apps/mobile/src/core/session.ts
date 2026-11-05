@@ -12,6 +12,7 @@ import { ApiError } from '@xpeng/protocol/src/api';
 import { CODE_TOKEN_EXPIRED, refreshSession, type Session } from '@xpeng/protocol/src/session';
 import { native, StorageKey } from './native';
 import { nativeHttp } from './transport';
+import { SerialCallQueue } from './serial-call-queue';
 
 export const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
 
@@ -30,6 +31,7 @@ class SessionStore {
   readonly api = new XpApi(nativeHttp);
   private deviceIdValue = '';
   private lastRefreshAt = 0;
+  private readonly requestQueue = new SerialCallQueue();
 
   get deviceId(): string {
     return this.deviceIdValue;
@@ -90,8 +92,15 @@ class SessionStore {
   /**
    * 打一个业务接口；遇到 12010101 就续期后重试一次。
    * 续期失败会把状态切到 `relogin`，调用方只需处理抛出的错误。
+   *
+   * 服务端密钥池按 deviceId 只认最近一次下发，并发取池会使先发出的签名失效，
+   * 因此全部业务请求必须串行经过这条队列。
    */
-  async call<T = any>(path: string, body?: unknown): Promise<T> {
+  call<T = any>(path: string, body?: unknown): Promise<T> {
+    return this.requestQueue.run(() => this.callNow<T>(path, body));
+  }
+
+  private async callNow<T = any>(path: string, body?: unknown): Promise<T> {
     const s = this.state;
     if (s.kind !== 'active') throw new Error('未登录');
     try {
@@ -104,7 +113,7 @@ class SessionStore {
       return r.json.data as T;
     } catch (e) {
       if (e instanceof ApiError && e.code === CODE_TOKEN_EXPIRED) {
-        const renewed = await this.refreshNow();
+        const renewed = await this.refreshNowUnqueued();
         const r = await this.api.call(path, {
           deviceId: this.deviceIdValue,
           accessToken: renewed.accessToken,
@@ -119,6 +128,10 @@ class SessionStore {
 
   /** 立刻续期。失败则切 `relogin` 并抛错。 */
   async refreshNow(): Promise<Session> {
+    return this.requestQueue.run(() => this.refreshNowUnqueued());
+  }
+
+  private async refreshNowUnqueued(): Promise<Session> {
     const s = this.state;
     if (s.kind !== 'active') throw new Error('未登录，无法续期');
     try {

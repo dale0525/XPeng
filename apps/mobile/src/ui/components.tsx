@@ -91,7 +91,7 @@ export function InfoRow({
   );
 }
 
-export type CommandVisualState = 'idle' | 'primary' | 'pending' | 'success' | 'failed' | 'disabled';
+export type CommandVisualState = 'idle' | 'primary' | 'pending' | 'success' | 'failed' | 'unconfirmed' | 'disabled';
 
 /**
  * 车控按钮。设计稿里三种形态：
@@ -122,13 +122,15 @@ export function CommandButton({
       ? 'bg-secondary-container/20 border-2 border-secondary'
       : state === 'success'
         ? 'bg-success/15 border-2 border-success'
-        : state === 'failed'
-          ? 'bg-error-container border-2 border-error'
-          : state === 'primary'
-            ? 'bg-primary border border-primary'
-            : variant === 'solid'
-              ? 'bg-surface-tint border border-surface-tint'
-              : 'bg-surface-container border border-outline-variant/70';
+        : state === 'unconfirmed'
+          ? 'bg-secondary-container/20 border-2 border-secondary'
+          : state === 'failed'
+            ? 'bg-error-container border-2 border-error'
+              : state === 'primary'
+                ? 'bg-primary border border-primary'
+                : variant === 'solid'
+                  ? 'bg-surface-tint border border-surface-tint'
+                  : 'bg-surface-container border border-outline-variant/70';
 
   const iconTint =
     state === 'primary' || (variant === 'solid' && state === 'idle')
@@ -137,15 +139,17 @@ export function CommandButton({
         ? 'text-secondary'
         : state === 'success'
           ? 'text-success'
-          : state === 'failed'
-            ? 'text-error'
-            : tint === 'secondary'
-              ? 'text-secondary'
-              : tint === 'tertiary'
-                ? 'text-tertiary'
-                : tint === 'primary'
-                  ? 'text-primary'
-                  : 'text-on-surface-variant';
+          : state === 'unconfirmed'
+            ? 'text-secondary'
+            : state === 'failed'
+              ? 'text-error'
+                : tint === 'secondary'
+                  ? 'text-secondary'
+                  : tint === 'tertiary'
+                    ? 'text-tertiary'
+                    : tint === 'primary'
+                      ? 'text-primary'
+                      : 'text-on-surface-variant';
 
   const textTint =
     state === 'primary' || (variant === 'solid' && state === 'idle')
@@ -154,9 +158,11 @@ export function CommandButton({
         ? 'text-secondary'
         : state === 'success'
           ? 'text-success'
-          : state === 'failed'
-            ? 'text-error'
-            : 'text-on-surface';
+          : state === 'unconfirmed'
+            ? 'text-secondary'
+            : state === 'failed'
+              ? 'text-error'
+              : 'text-on-surface';
 
   const glowColor =
     state === 'primary' ? '#FFB703' : state === 'pending' || state === 'success' ? '#00EEFC' : undefined;

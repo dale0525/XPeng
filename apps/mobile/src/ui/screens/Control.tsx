@@ -12,7 +12,7 @@
  * 2. 哨兵徽章按 `sentinel_mode_video_enable` 显示「录像已启用/已关闭」，不写「防御监视中」；
  * 3. 「上次充电」四项来自 `chargeStatistics`，是最近一次充电的记录，不是累计值。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
 import {
   COMMANDS,
@@ -22,6 +22,9 @@ import {
 } from '@xpeng/protocol/src/commands';
 import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { carLink } from '../../core/car';
+import { bleLink } from '../../core/ble';
+import { isP5BleV2Vehicle } from '@xpeng/protocol/src/ble-v2-context';
+import { BLE_ONLY_V2_COMMAND_IDS, sendVehicleCommand } from '@xpeng/protocol/src/ble-v2-routing';
 import {
   CapsTag,
   Card,
@@ -71,7 +74,8 @@ const CMD_ICONS: Record<string, IconName> = {
   'sentinel.off': 'gpp_bad',
 };
 
-type States = Record<string, CommandVisualState>;
+type CommandOutcome = CommandVisualState | 'unconfirmed';
+type States = Record<string, CommandOutcome>;
 
 export function ControlScreen({
   vehicle,
@@ -86,12 +90,20 @@ export function ControlScreen({
 }) {
   const [states, setStates] = useState<States>({});
   const [temp, setTemp] = useState<number | null>(null);
+  const [bleState, setBleState] = useState(bleLink.uiState);
+
+  useEffect(() => bleLink.subscribe(setBleState), []);
 
   async function run(def: CommandDef) {
     setStates((s) => ({ ...s, [def.id]: 'pending' }));
-    const result = await carLink.send(def);
-    if (!result.ok) console.warn(`[cmd] ${def.id} 失败:`, result.error, 'msgId=', result.msgId);
-    setStates((s) => ({ ...s, [def.id]: result.ok ? 'success' : 'failed' }));
+    const result = await sendVehicleCommand(vehicle, def, {
+      send: (command) => carLink.send(command),
+      executePreparedV2: (vin, code) => bleLink.executePreparedV2(vin, code),
+    });
+    if (!result.ok) console.warn(`[cmd] ${def.id}:`, result.error, 'msgId=', result.msgId);
+    const outcome: CommandOutcome = result.ok ? 'success'
+      : result.unconfirmed ? 'unconfirmed' : 'failed';
+    setStates((s) => ({ ...s, [def.id]: outcome }));
     setTimeout(() => {
       setStates((s) => ({ ...s, [def.id]: 'idle' }));
     }, 3000);
@@ -136,8 +148,10 @@ export function ControlScreen({
   const locked = d?.driver_door_lock_st === 1;
   const shadePos = w?.sky_sun_shade_position ?? 0;
   const displayTemp = temp ?? h?.hvac_temp ?? 24;
-  const defs = (g: GroupKey) => COMMANDS.filter((x) => x.group === g);
-  const st = (id: string): CommandVisualState => states[id] ?? 'idle';
+  const p5Ble = isP5BleV2Vehicle(vehicle);
+  const defs = (g: GroupKey) => COMMANDS.filter((x) =>
+    x.group === g && (p5Ble || !BLE_ONLY_V2_COMMAND_IDS.includes(x.id as typeof BLE_ONLY_V2_COMMAND_IDS[number])));
+  const st = (id: string): CommandOutcome => states[id] ?? 'idle';
 
   const doorCells = [
     { label: '主驾门', v: d?.driver_door_ajar_st },
@@ -218,6 +232,14 @@ export function ControlScreen({
         <StatusStrip
           label="当前门锁状态"
           value={locked === undefined ? '—' : locked ? '已锁止 · 全部安全' : '已解锁'}
+          className="mb-2.5"
+        />
+        <StatusStrip
+          label="数字钥匙 / 蓝牙"
+          value={Object.values(states).includes('unconfirmed')
+            ? '指令已发送 · 请核对车况'
+            : bleState.error ? `${bleState.label} · ${bleState.error}` : bleState.label}
+          valueClass={bleState.connected ? 'text-primary' : bleState.phase === 'error' ? 'text-error' : 'text-secondary'}
           className="mb-2.5"
         />
         <View className="flex-row gap-1.5">
