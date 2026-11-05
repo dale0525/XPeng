@@ -1,9 +1,9 @@
 /**
- * 已打通的车控指令（MQTT `msg_content`）。
- *
- * 每条的 `service_type` / `cmd_type` / `cmd_value` 都经过实测并拿到 code:200 回执，
- * 见 docs/research/xpeng-app-teardown.md §5.6。未打通的通道不在这里出现——列表即
- * 能力边界，UI 只能从这份表渲染按钮。
+ * Car commands. MQTT entries use documented `service_type` / `msg_content`
+ * (docs/research/xpeng-app-teardown.md §5.6). P5 V2 evidenced BLE actions are
+ * selected by id in ble-v2-routing.ts. `serviceType: 0` with empty `msgContent`
+ * marks a BLE-only command with no MQTT representation; the router refuses to
+ * send it over MQTT.
  */
 
 export interface CommandDef {
@@ -78,6 +78,24 @@ export const COMMANDS: CommandDef[] = [
     serviceType: 9,
     msgContent: { cmd_type: 1 },
     confirmField: 'instant.door.driver_door_lock_st',
+  },
+  // BLE-only P5 V2 commands. Both share opcode 0x04; the open/close direction is
+  // carried by the server-issued material, not by a distinct command byte. The MQTT
+  // fields are placeholders: ble-v2-routing rejects these ids outside DF and never
+  // forwards them to carLink.send.
+  {
+    id: 'trunk.open',
+    label: '打开后备箱',
+    group: 'door',
+    serviceType: 0,
+    msgContent: {},
+  },
+  {
+    id: 'trunk.close',
+    label: '关闭后备箱',
+    group: 'door',
+    serviceType: 0,
+    msgContent: {},
   },
   {
     id: 'hvac.on',
