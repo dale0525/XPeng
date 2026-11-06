@@ -43,3 +43,4 @@ features = ["rev"]
 
 [environments.rev.dependencies]
 fonttools = ">=4.68.0,<5"
+capstone = ">=5.0.9,<6"
