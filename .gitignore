@@ -21,3 +21,5 @@ apps/mobile/android/app/src/main/res/raw/
 
 # release 签名密钥与口令：绝不入库
 .release-keys/
+
+.worktrees/
