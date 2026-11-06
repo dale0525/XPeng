@@ -7,6 +7,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
+import android.util.Log
 import com.logiconsole.xpcarinfo.net.MqttClient
 import com.logiconsole.xpcarinfo.net.XpengHttp
 import java.util.concurrent.ConcurrentHashMap
@@ -130,23 +131,72 @@ class XpengNetModule(private val ctx: ReactApplicationContext) :
         }
     }
 
-    /** 读写本地存储：只存会话与少量偏好，用 SharedPreferences 就够，不必引 AsyncStorage。 */
+    /**
+     * 读写本地存储：只存会话与少量偏好。`session.v1` 落盘前用 Keystore 包成密文，
+     * 取的时候解回原文明文 JSON（JS 侧 `JSON.parse` 不能见到信封）。
+     * 解不开只清该 key 并返回 null——`App.tsx` 会吞掉 init 的异常，
+     * 一旦 reject 或把密文交出去，界面会永久停在 loading。
+     */
     @ReactMethod
     fun storageGet(key: String, promise: Promise) {
-        val prefs = ctx.getSharedPreferences("xpeng", 0)
-        promise.resolve(prefs.getString(key, null))
+        io.execute {
+            val prefs = ctx.getSharedPreferences("xpeng", 0)
+            val stored = prefs.getString(key, null)
+            if (key != "session.v1" || stored == null || !SessionEnvelope.isEnvelope(stored)) {
+                if (key == "session.v1" && stored != null) {
+                    // 存量明文：原样交给 JS，顺手升级为密文，下次启动即密文。
+                    val migrated = runCatching { SessionEnvelope.encrypt(stored) }
+                        .onSuccess { prefs.edit().putString(key, it).apply() }
+                    Log.i("XPSession", "storageGet legacy plaintext migrated=${migrated.isSuccess} bytes=${stored.length}")
+                } else if (key == "session.v1") {
+                    Log.i("XPSession", "storageGet no session")
+                }
+                promise.resolve(stored)
+                return@execute
+            }
+            try {
+                val plain = SessionEnvelope.decrypt(stored)
+                Log.i("XPSession", "storageGet envelope decrypted bytes=${plain.length}")
+                promise.resolve(plain)
+            } catch (e: Throwable) {
+                // 密钥失效 / 信封损坏：清会话回登录页，保留 device.id，绝不 reject。
+                prefs.edit().remove(key).apply()
+                Log.w("XPSession", "storageGet decrypt failed, session cleared: ${e.javaClass.simpleName}")
+                promise.resolve(null)
+            }
+        }
     }
 
     @ReactMethod
     fun storageSet(key: String, value: String, promise: Promise) {
-        ctx.getSharedPreferences("xpeng", 0).edit().putString(key, value).apply()
-        promise.resolve(null)
+        io.execute {
+            try {
+                val stored = if (key == "session.v1") SessionEnvelope.encrypt(value) else value
+                ctx.getSharedPreferences("xpeng", 0).edit().putString(key, stored).apply()
+                if (key == "session.v1") Log.i("XPSession", "storageSet encrypted bytes=${value.length}")
+                promise.resolve(null)
+            } catch (e: Throwable) {
+                Log.e("XPSession", "storageSet failed: ${e.javaClass.simpleName}")
+                promise.reject("E_STORAGE", e.message ?: e.javaClass.simpleName, e)
+            }
+        }
     }
 
     @ReactMethod
     fun storageRemove(key: String, promise: Promise) {
         ctx.getSharedPreferences("xpeng", 0).edit().remove(key).apply()
+        if (key == "session.v1") Log.i("XPSession", "storageRemove session cleared")
         promise.resolve(null)
+    }
+
+    /** console.* 的 TAG 由 RN 固定为 ReactNativeJS、混着框架日志；这里改用业务 TAG 便于一条 filterspec 收全。 */
+    @ReactMethod
+    fun log(level: String, tag: String, message: String) {
+        when (level) {
+            "e" -> Log.e(tag, message)
+            "w" -> Log.w(tag, message)
+            else -> Log.i(tag, message)
+        }
     }
 
     private fun emitMessage(id: String, topic: String, payload: String) {
