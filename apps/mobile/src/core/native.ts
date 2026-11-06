@@ -4,6 +4,10 @@
  * 全部走一个自研模块 `XpengNet`（`android/.../bridge/XpengNetModule.kt`），
  * 不引 OkHttp / Paho / AsyncStorage：只用到「POST + 客户端证书」「MQTT 三件事」
  * 「读写两个字符串」，加起来不到 400 行 Kotlin，比三个依赖更省包体积。
+ *
+ * `log()` 是给真机自测用的：release 下 console.* 的 TAG 由 RN 固定为
+ * ReactNativeJS、会混入框架日志，无法按业务过滤；统一走原生 Log 用字面量
+ * XPSession 作 TAG，一条 `adb logcat -s XPSession` 就能收全续期链路。
  */
 import { NativeEventEmitter, NativeModules } from 'react-native';
 
@@ -30,7 +34,13 @@ const Native = NativeModules.XpengNet as {
   storageGet(key: string): Promise<string | null>;
   storageSet(key: string, value: string): Promise<void>;
   storageRemove(key: string): Promise<void>;
+  log(level: 'i' | 'w' | 'e', tag: string, message: string): void;
 };
+
+/** 真机自测用：统一 TAG，绝不传 token / 信封 / 请求体原文。 */
+export function xpLog(event: string, detail: string, level: 'i' | 'w' | 'e' = 'i'): void {
+  Native.log(level, 'XPSession', `${event} ${detail}`);
+}
 
 if (!Native) {
   throw new Error('XpengNet 原生模块未注册：检查 MainApplication 里的 add(XpengNetPackage())');

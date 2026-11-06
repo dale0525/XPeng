@@ -9,8 +9,8 @@
  */
 import { XpApi } from '@xpeng/protocol/src/api';
 import { ApiError } from '@xpeng/protocol/src/api';
-import { CODE_TOKEN_EXPIRED, refreshSession, type Session } from '@xpeng/protocol/src/session';
-import { native, StorageKey } from './native';
+import { CODE_TOKEN_EXPIRED, coldStartAction, refreshSession, type Session } from '@xpeng/protocol/src/session';
+import { native, StorageKey, xpLog } from './native';
 import { nativeHttp } from './transport';
 import { SerialCallQueue } from './serial-call-queue';
 
@@ -68,24 +68,41 @@ class SessionStore {
 
     const raw = await native.storageGet(StorageKey.session);
     if (!raw) {
+      xpLog('init', 'no saved session -> anonymous');
       this.set({ kind: 'anonymous' });
       return;
     }
     const saved = JSON.parse(raw) as { session: Session; lastRefreshAt: number };
     this.lastRefreshAt = saved.lastRefreshAt;
-    this.set({ kind: 'active', session: saved.session, lastRefreshAt: saved.lastRefreshAt });
-    this.startTimer();
+    const action = coldStartAction(saved.session);
+    const atRemain = Number.isFinite(saved.session.expiresAt) ? String(saved.session.expiresAt - Date.now()) : 'n/a(legacy)';
+    const rtRemain = Number.isFinite(saved.session.refreshExpiresAt) ? String(saved.session.refreshExpiresAt - Date.now()) : 'n/a(legacy)';
+    xpLog('init', `coldStart=${action} atRemainMs=${atRemain} rtRemainMs=${rtRemain}`);
+    if (action === 'relogin') {
+      await native.storageRemove(StorageKey.session);
+      this.set({ kind: 'relogin', reason: '登录已失效，请重新登录' });
+      return;
+    }
+    if (action === 'refresh') {
+      // 先续期再置 active：避免 App 首屏业务请求与预热各触发一次 refresh。
+      await this.requestQueue.run(() => this.refreshNowUnqueued(saved.session));
+    } else {
+      this.set({ kind: 'active', session: saved.session, lastRefreshAt: saved.lastRefreshAt });
+    }
+    if (this.state.kind === 'active') this.startTimer();
   }
 
   async adopt(session: Session): Promise<void> {
     await this.persist(session);
     this.set({ kind: 'active', session, lastRefreshAt: Date.now() });
+    xpLog('adopt', `login atExpiresInS=${Math.round((session.expiresAt - Date.now()) / 1000)} rtExpiresInS=${Math.round((session.refreshExpiresAt - Date.now()) / 1000)}`);
     this.startTimer();
   }
 
   async logout(): Promise<void> {
     this.stopTimer();
     await native.storageRemove(StorageKey.session);
+    xpLog('logout', 'session cleared');
     this.set({ kind: 'anonymous' });
   }
 
@@ -113,7 +130,8 @@ class SessionStore {
       return r.json.data as T;
     } catch (e) {
       if (e instanceof ApiError && e.code === CODE_TOKEN_EXPIRED) {
-        const renewed = await this.refreshNowUnqueued();
+        xpLog('call', `code=${e.code} desc=${e.desc} -> refresh and retry once`);
+        const renewed = await this.refreshNowUnqueued(s.session);
         const r = await this.api.call(path, {
           deviceId: this.deviceIdValue,
           accessToken: renewed.accessToken,
@@ -128,21 +146,27 @@ class SessionStore {
 
   /** 立刻续期。失败则切 `relogin` 并抛错。 */
   async refreshNow(): Promise<Session> {
-    return this.requestQueue.run(() => this.refreshNowUnqueued());
+    return this.requestQueue.run(() => {
+      const s = this.state;
+      if (s.kind !== 'active') throw new Error('未登录，无法续期');
+      return this.refreshNowUnqueued(s.session);
+    });
   }
 
-  private async refreshNowUnqueued(): Promise<Session> {
-    const s = this.state;
-    if (s.kind !== 'active') throw new Error('未登录，无法续期');
+  private async refreshNowUnqueued(current: Session): Promise<Session> {
+    const started = Date.now();
+    xpLog('refresh', `start atLen=${current.accessToken.length} rtLen=${current.refreshToken.length} rtIsJwt=${current.refreshToken.startsWith('eyJ')}`);
     try {
-      const next = await refreshSession(this.api, this.deviceIdValue, s.session);
+      const next = await refreshSession(this.api, this.deviceIdValue, current);
       await this.persist(next);
       this.lastRefreshAt = Date.now();
       this.set({ kind: 'active', session: next, lastRefreshAt: this.lastRefreshAt });
+      xpLog('refresh', `ok costMs=${Date.now() - started} newAtLen=${next.accessToken.length} newRtLen=${next.refreshToken.length} atExpiresInS=${Math.round((next.expiresAt - this.lastRefreshAt) / 1000)} rtExpiresInS=${Math.round((next.refreshExpiresAt - this.lastRefreshAt) / 1000)}`);
       return next;
     } catch (e) {
       this.stopTimer();
       const reason = e instanceof ApiError ? `${e.code} ${e.desc}` : String(e);
+      xpLog('refresh', `FAIL costMs=${Date.now() - started} reason=${reason}`, 'w');
       this.set({ kind: 'relogin', reason });
       throw e;
     }
@@ -159,6 +183,7 @@ class SessionStore {
   private startTimer() {
     this.stopTimer();
     this.timer = setInterval(() => {
+      xpLog('timer', `interval fired everyMs=${REFRESH_INTERVAL_MS}`);
       this.refreshNow().catch(() => {
         // 失败已切到 relogin，UI 会提示重新登录
       });
