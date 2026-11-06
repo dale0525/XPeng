@@ -36,12 +36,40 @@ export const CODE_TOKEN_EXPIRED = 12010101;
 export interface Session {
   /** 968 B JWT，业务接口与 MQTT 凭据都靠它。 */
   accessToken: string;
-  /** 信封形式，放进 `/sso/app/v3/token/refresh` 的内层明文。 */
+  /** 968 B JWT（eyJ…）。登录/续期响应里是 WEEB 信封，必须用当次密钥池解开后才能作为 refresh 输入。 */
   refreshToken: string;
   /** 业务请求的 `Xp-Uid` 必须等于它。 */
   uid: number;
   /** 登录时刻（毫秒）。真实寿命约 2.5 h，比声明的 7200 s 宽约 33 分钟。 */
   issuedAt: number;
+  /** accessToken 建议过期时刻（issuedAt + expiresIn × 1000）。 */
+  expiresAt: number;
+  /** refreshToken 过期时刻（issuedAt + refreshExpiresIn × 1000），90 天滑动续期。 */
+  refreshExpiresAt: number;
+}
+
+/**
+ * 冷启动时的会话判定。expiresIn 只是建议值，真实寿命比它宽约 33 分钟，
+ * 所以「过了 expiresAt」不等于失效；只有 refreshExpiresAt 明确过期才不能续期，
+ * 直接落登录页，避免带着必废的 RT 盲发请求。
+ */
+export function coldStartAction(session: Session, now = Date.now()): 'active' | 'refresh' | 'relogin' {
+  // 旧版本落盘的 RT 是 WEEB 信封且没有有效期字段：它刷不动，只能重新登录。
+  // 字段可能整个缺失（JSON.stringify 会省略 undefined），不能对它调字符串方法。
+  if (typeof session.refreshToken !== 'string' || !session.refreshToken.startsWith('eyJ') ||
+      !Number.isFinite(session.expiresAt) || !Number.isFinite(session.refreshExpiresAt)) {
+    return 'relogin';
+  }
+  if (session.refreshExpiresAt <= now) return 'relogin';
+  return session.expiresAt <= now ? 'refresh' : 'active';
+}
+
+function expiryFields(inner: any, now: number): Pick<Session, 'issuedAt' | 'expiresAt' | 'refreshExpiresAt'> {
+  return {
+    issuedAt: now,
+    expiresAt: now + Number(inner.expiresIn) * 1000,
+    refreshExpiresAt: now + Number(inner.refreshExpiresIn) * 1000,
+  };
 }
 
 export interface LoginStep {
@@ -194,11 +222,12 @@ export class LoginFlow {
     if (!inner.accessToken) {
       throw new Error(`登录返回 200 但取不到 token：keys=${Object.keys(data).join(',')}`);
     }
+    const now = Date.now();
     return {
       accessToken: unwrapJwt(inner.accessToken, pool).jwt,
-      refreshToken: inner.refreshToken,
+      refreshToken: unwrapJwt(inner.refreshToken, pool).jwt,
       uid: inner.uid,
-      issuedAt: Date.now(),
+      ...expiryFields(inner, now),
     };
   }
 }
@@ -236,10 +265,11 @@ export async function refreshSession(
     throw new ApiError(r.json.code, r.json.desc ?? r.json.msg ?? '', '/sso/app/v3/token/refresh');
   }
   const d = r.json.data;
+  const now = Date.now();
   return {
     accessToken: unwrapJwt(d.accessToken, r.pool).jwt,
-    refreshToken: d.refreshToken,
+    refreshToken: unwrapJwt(d.refreshToken, r.pool).jwt,
     uid: session.uid,
-    issuedAt: Date.now(),
+    ...expiryFields(d, now),
   };
 }
