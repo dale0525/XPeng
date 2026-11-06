@@ -13,7 +13,7 @@ import {
 } from '@xpeng/protocol/src/mqtt';
 import { COMMANDS, READ_STATUS, type CommandDef } from '@xpeng/protocol/src/commands';
 import type { MqttAccount, VehicleStatus } from '@xpeng/protocol/src/vehicles';
-import { onMqttDisconnect, onMqttMessage, native } from './native';
+import { onMqttDisconnect, onMqttMessage, native, xpLog } from './native';
 import { sessionStore } from './session';
 
 const CONNECTION_ID = 'car';
@@ -81,7 +81,13 @@ class CarLink {
 
   /** 取凭据 → 连 broker → 订阅。凭据每次签发都会作废旧凭据，所以每次连接都重取。 */
   async connect(vin: string, uid: number): Promise<void> {
-    if (this.state === 'online' || this.state === 'connecting') return;
+    if (this.state === 'connecting') return;
+    // 续期成功后 App 会带着新 accessToken 重跑连接：AT 失效时服务端会连带作废旧
+    // MQTT 凭据（§5.2），必须先断干净再重取，否则 online 状态下会一直用废凭据。
+    if (this.state === 'online') {
+      xpLog('mqtt', 'reconnect after token refresh: disconnect first');
+      await this.disconnect();
+    }
     this.setState('connecting');
     this.vin = vin;
     this.uid = String(uid);
@@ -118,9 +124,11 @@ class CarLink {
         topics,
       );
       if (rc !== 0) {
+        xpLog('mqtt', `connect refused rc=${rc}`, 'w');
         this.setState('offline', `broker 拒绝连接（返回码 ${rc}）`);
         return;
       }
+      xpLog('mqtt', `connect ok host=${host} topics=${Object.keys(topics).length}`);
       this.setState('online');
       await this.readStatus().catch(() => {
         // 首次读状态失败不阻断连接；用户可手动刷新

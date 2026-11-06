@@ -87,7 +87,7 @@ export function SettingsScreen({
             <View className="flex-row items-center gap-1.5">
               <Text className="text-[16px] font-icon text-outline">{Icon.schedule}</Text>
               <Text className="font-mono text-xs text-on-surface-variant">
-                剩余 {formatDuration(session.issuedAt + 9000_000 - Date.now())}
+                剩余 {formatDuration(session.expiresAt - Date.now())}
               </Text>
             </View>
             <Pressable
