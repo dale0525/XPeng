@@ -17,7 +17,7 @@
 
 **登录已端到端打通**（2026-11-01）：发码 → 验证码 → 第二道滑块 `drag/validate{sceneType:"LGN"}` → `smsLogin` 200 → 解 `sData` 拿到 AT/RT → 带 `Xp-Uid=<uid>` 打业务接口 200。三个必要条件：第二道滑块场景是 `LGN`（不是发码用的 `SMS`）、换 token 打 `v5/smsLogin`、解 `sData` 必须用同一次请求的服务端密钥池。
 
-**MQTT 车控已打通 13 条**：解锁、锁车、闪灯、遮阳帘开关、空调开关、设温度、全车车窗升降、极速降温、极速升温、高温抑菌、鸣笛、哨兵开关、哨兵灵敏度。均实测成功并有 `code:200` 回执。未打通的是单扇车窗、除霜、内外循环、座椅加热通风、智能清洁/除味/香氛（风量官方 App 无此功能）。**后备箱开关与「解锁并启动」的启动那一步都不在 MQTT**，走 BLE（§5.6）。**远程查看**只读可用，开流与视角切换本车无环视硬件（`avm_exist=0`）。
+**MQTT 车控已打通 14 条**：解锁、锁车、闪灯、遮阳帘开关、空调开关、设温度、全车车窗升降、极速降温、极速升温、高温抑菌、鸣笛、哨兵开关、哨兵灵敏度、临停。均实测成功并有 `code:200` 回执。车主账号真机点击取证另确认：远程查看的开流、后/左/右视角切换及前视初始化走 `service_type:11 / cmd_type:2`（§5.7）；官方名称「远程启动」走云端 MQTT `service_type:9 / cmd_type:6` 加服务端签发的动态 `<TOKEN>`，BLE 路线可并存（§5.6）。未打通的是单扇车窗、除霜、内外循环、座椅加热通风、智能清洁/除味/香氛（风量官方 App 无此功能）；后备箱开合仍走 BLE。`avm_exist=0` 与 `camera_status=-2` 不能再判定实时视频物理不可用。
 
 **BLE 链路：P5V2 目标发送路径与 V3 native 必须区分。** 握手第二步 `ef0110` 的 KDF 已完全解出（§6.13）：`HMAC-MD5(MD5(hexIncrement(keyString[-10:][:8])), app_n‖car_n)`，188/188 组真实样本命中，Python 与 TS 双实现。`keyString` 是**当前 GATT 连接对端模块自己的 MAC**（§6.13）。命令帧此前被车端静默丢弃的真因是 CRC 覆盖范围算错（只覆盖 payload、不含 type 字节，§6.15），不是抓不到报文。
 
@@ -33,8 +33,8 @@
 | 登录 | ✅ 端到端闭环（§4.2） |
 | 令牌续期 | ✅ 闭环 |
 | MQTT 连接与凭据 | ✅ 闭环 |
-| MQTT 车控指令 | 🟡 13 条已打通，余项见 §5.7 |
-| 远程查看 | 🟡 只读可，开流未打通且本车无环视硬件 |
+| MQTT 车控指令 | 🟡 14 条可固定参数下发；临停/远程查看/远程启动另见真机取证结论（§5.6、§5.7） |
+| 远程查看 | ✅ 车主账号真机逐项点击，确认初始化/拉流/后/左/右切换/关流的 `cmd_value` 与四个单路视角的 `camera_type` |
 | BLE 帧格式与指令码 | ✅ 闭环（§6.7、§6.15） |
 | BLE 握手 `ef0110` | ✅ KDF 解出，188/188（§6.13） |
 | BLE 握手 `ed1118` | ✅ P5V2 隔离验收入口已在本车完成严格挑战校验；V3 另有未知（§6.14） |
@@ -627,6 +627,8 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | DiDi 通道 | `Mona/Send/User/<uid>`、`Mona/Msg/User/<uid>` |
 | 推送 | `Xp/Msg/Push/<deviceId>` |
 
+车主账号真机点击取证时，独立 clientId 可以连上 broker 并订阅下行 `Xmart/Msg/User/<uid>`、`Mona/Msg/User/<uid>` 与 `Xp/Msg/Push/<deviceId>`；broker 对上行 `Xmart/Send/User/<uid>` 与 `Mona/Send/User/<uid>` 的订阅回 `Unspecified error`。App 发出的请求报文不能靠订阅上行主题取得，本轮改用「下行回执的 `msg_ref` 与点击瞬间单次堆样本中 `msg_id` / `protocol_ver` 邻域配对」还原。
+
 
 ### 5.4 报文格式
 
@@ -656,8 +658,8 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | **3** | **空调** | ✅ `{"cmd_type":1,"cmd_value":0/1}` 开关、`{"cmd_type":2,"cmd_value":N}` 设温度、`{"cmd_type":4}` 读状态 |
 | **5** | **灯光** | ✅ `{"cmd_type":1,"cmd_value":1}` 闪灯 |
 | **8** | **哨兵模式** | ✅ `{"action":1}` 读设置；`{"action":2,"settings":[{"code":"SENTINEL_MODE_VIDEO","value":1/0}]}` 开关哨兵；同格式写 `SENTINEL_MODE_SENSITIVITY` 改灵敏度 |
-| **9** | **门锁 / 车身** | ✅ `{"cmd_type":0}` 解锁、`{"cmd_type":1}` 锁车 |
-| 11 | 远程查看摄像头 | ⚠️ `{"cmd_type":1,"cmd_value":0}` 只读（回 `camera_status`/`camera_360`/`live_push_status`），开流与视角切换未打通 |
+| **9** | **门锁 / 车身 / 临停 / 远程启动授权** | ✅ `{"cmd_type":0}` 解锁、`{"cmd_type":1}` 锁车、`{"cmd_type":3}` 临停、`{"cmd_type":6,"token":"<TOKEN>"}` 远程启动 |
+| 11 | 远程查看摄像头 | ✅ `{"cmd_type":1,"cmd_value":0}` 读状态；`{"cmd_type":2,"cmd_value":2/11/3/4/5/-1,"pushType":1,"protocolType":2}` 分别初始化到前视、启动拉流、切至后/左/右视角、关闭；从其它视角切回前视的请求未直接留住（§5.7） |
 | **12** | **车窗 + 遮阳帘** | ✅ `{"cmd_type":4,"cmd_value":0/1}` 遮阳帘、`{"cmd_type":1,"cmd_value":2/1}` 全车车窗降/升 |
 | 19 | 车辆状态 | ✅ `cmd_type:0/1/2` 只读 |
 | 22 | 预约 | ✅ 只读，`function`/`action` |
@@ -722,9 +724,9 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 
 `service_type:9` 的回执同时带 `temp_lock_st`、四个车门 `ajar_st`、`trunk_ajar_st`、`driver_door_lock_st`、`rear_right_door_ajar_st`。
 
-**注意**：`service_type:9 / cmd_type:0` 是**解锁动作**，不是状态查询。要只读门锁状态需用 `cmd_type:3`（返回「车辆已下电，临停不可用」时说明该通道要求车辆上电）。
+**注意**：`service_type:9 / cmd_type:0` 是**解锁动作**，不是状态查询。`cmd_type:3` 是**临停动作**，也不是只读门锁查询。
 
-**临停（`st=9 ct=3`）待补**：App 首页「临停」按钮即此功能。2026-10-30 22:00 在车辆下电状态下请求，返回 `{"code":10905,"msg":"车辆已下电，临停不可用"}`——**这是前提条件不满足，不是通道不存在**。该通道要求车辆处于上电/通电状态，等有上电机会时补测完整语义（`cmd_value` 取值与回执字段）。同理 `st=9 ct=4/5` 在 10-30 19:08 的测试中无回执，也可能受同一前提限制，需在上电状态下重测。
+**临停（`st=9 ct=3`）真机点击取证**：App 首页「临停」按钮发出的真实请求是 `{"protocol_ver":"2.0","msg_id":"<ID>","target_id":"<VIN>","service_type":9,"msg_type":2,"msg_content":{"cmd_type":3}}`。车辆下电时回 `{"code":10905,"msg":"车辆已下电，临停不可用"}`；车辆上电时同一请求回 `code:200` / `msg:"成功"`，回执 `msg_content` 同时带 `temp_lock_st`、`driver_door_lock_st`、四个车门 `ajar_st` 与 `trunk_ajar_st`。因此 10905 是下电拒绝码，临停的状态字段是 `temp_lock_st`，不是只读门锁状态。`st=9 ct=4/5` 在上电状态下的语义仍未测。
 
 **后备箱开关不在 MQTT 通道（2026-10-30 22:05 定论，10-31 用户确认）**：App 操作后备箱时提示「蓝牙未连接」，必须连蓝牙才能操作。同时 `CallbacksManagerV1` 的完整回调类清单只有 4 个——`CarCameraControlCallback`（摄像头 st=11）、`CarDoorLockControlCallback`（门锁 st=9）、`CarWindowControlCallback`（车窗 st=12）、`PowerControlCallBack`（电源），**没有任何后备箱回调**。REST 侧 `/sp-vowner-mapp/p/api/rvc/v2/openTrunk` 在 `apps-booster`（唯一要求 mTLS 的主机）上返回 `Content-Length: 0`，与其他 `/sp-vowner-mapp/*` 表现一致。结论：后备箱开关走 **DiDi Davinci 数字钥匙 BLE** 的 `CarService.OpenTrunk` / `CloseTrunk`，与 `startCar` 同属一类，不在云端 MQTT 体系内。
 
@@ -742,27 +744,30 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 
 **判据修正**：判断「远程启动是否被打开」只能看 `st=19` 的 `instant.power.remote_start_status`，**不能用 `car_igon_state`**。
 
-**已确认的子动作**：解锁车门 = `st=9 ct=0`（已打通）；「打开远程启动」这一步的 MQTT 指令**仍未找到**——2026-10-30 22:08 与 22:20 两次全程录音（订阅 `Xmart/Msg/User/<uid>`）里，用户真实执行「解锁并启动」时只录到 `st=9`（解锁回执）与 `st=19`（状态推送，其中 `remote_start_status` 变为 1），**没有任何独立的启动指令报文**，说明该指令不经这个下行主题。
+**本轮真机点击取证补正**：官方 App 的「远程启动」按钮确实发出云端 MQTT 请求，真实报文是 `service_type:9 / msg_type:2 / msg_content:{"cmd_type":6,"token":"<TOKEN>"}`；`<TOKEN>` 是服务端签发的动态数字钥匙帧（`XPBKTH + KI / ED / SN`，`SN` 为 ECDSA P-256 签名），不是可本地生成的随机串，不入库、不贴值。历史堆样本里存在两份不同的 `XPBKTH` 结构帧指纹，其中仅一份与本次 `ct=6` 报文同帧出现；它们说明这类服务端帧并非常量，但不能单独证明该 `ct=6` 帧的一次性或 TTL，TTL、一次性与重放错误码未验。埋点同时出现 `action:"remote_start"`、`service_type:9`、`cmd_type:6`、`code:0`；点击后 `instant.power.remote_start_status` 由 0 变 1，随后回落到 0，`car_power_state` 保持 0，下行 `st=9` 回 `code:200` 并带 `temp_lock_st` 与门状态字段。由此确认远程启动存在非 BLE 云端 MQTT 路线；此前「云端 MQTT 侧不存在、只走 BLE」的判断仅对当时的下行抓包成立，被本轮内存请求帧证据推翻。BLE 路线仍见下文，二者并非互斥。
 
-2026-10-31 09:58 补一次受控实测（带前后对照）：`st=9 ct=0` 解锁前 `remote_start_status=0`，解锁回执 `driver_door_lock_st: 0` 后立刻读 `st=19`，`remote_start_status` **仍为 0**。这排除了「解锁报文本身就带启动」的猜想——同一个云端通道在「仅解锁」与「解锁并启动」两种 App 操作下发出的是同一份 `st=9 ct=0`，区别只能来自 MQTT 之外的通道。结论：**「解锁并启动」在云端 MQTT 侧不存在，走 BLE**（`CarService.startCar`，见下条）。
-
-**启动车辆不在 MQTT 通道（2026-10-30 19:15 定论）**：App 首页「远程启动」点击后弹「请在2分钟内踩下刹车并挂挡」，说明它只做**上电 + 解除防盗**，挂挡仍需人工。该动作走**蓝牙数字钥匙 SDK**，不在云端 MQTT。
+**启动车辆不点屏**：App 首页「远程启动」点击后弹「请在2分钟内踩下刹车并挂挡」，说明它打开远程启动授权窗口，挂挡仍需人工。BLE 数字钥匙 SDK 是与 MQTT 平行的既有通道。
 
 证据：`com.didi.davinci.digitalkey.mona.CarService` 的完整方法清单里含 `startCar`、`unLockCar`、`lockCar`、`foldMirror`/`unfoldMirror`、`openSentryMode`/`closeSentryMode`、`openProtectMode`/`closeProtectMode`、`operateCamera`、`awakeXpuByImmediateOutbound`，日志前缀形如 `---------CarService: startCar------------`。这是 DiDi Davinci 数字钥匙（BLE）层，与 MQTT 的 `service_type` 体系平行。
 
-MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回执；`st=9 ct=0` 带 `cv=1/2` 都只解锁（`cmd_value` 被忽略）；`st=6 ct=1 cv=1` 回 `200` 但 `remote_start_status` 保持 0；`st=10 ct=1 cv=1` 无回执且状态不变。`callbacks/v1` 里的 `PowerControlCallBack` 与 `CarDoorLockControlCallback` 并列，说明电源控制是独立回调，但未在 MQTT 找到对应 `service_type`。
+早期受控枚举排除过一批固定参数：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回执；`st=9 ct=0` 带 `cv=1/2` 都只解锁（`cmd_value` 被忽略）；`st=6 ct=1 cv=1` 回 `200` 但 `remote_start_status` 保持 0；`st=10 ct=1 cv=1` 无回执且状态不变。这些结果不能推出「MQTT 侧不存在远程启动」：本轮抓到的 `st=9 ct=6` 必须携带动态 `<TOKEN>`，固定参数枚举无法覆盖。`callbacks/v1` 里的 `PowerControlCallBack` 与 `CarDoorLockControlCallback` 并列，说明电源控制是独立回调。
 
 **遮阳帘的 `cmd_value` 是二值开关**（0/1），不是位置百分比。`cmd_value:99/100` 均返回 `code:8`。
 
 
-### 5.7 未打通的通道
+### 5.7 远程查看、临停与远程启动的通道边界
 
-**远程查看（实时视频 + 视角切换，`service_type:11`）**：只读可用，控制未打通。
+**远程查看（实时视频 + 视角切换，`service_type:11`）**：本轮车主账号真机点击取证已打通真实请求形态。
 
-- `{"cmd_type":1,"cmd_value":0}` 返回 `camera_status`、`camera_degree`、`live_push_status`、`camera_type`、`camera_os_switch`、`fileStatus`、`camera_360{camera_front,back,left,right}`。
-- `cmd_type:2/3` 一律 `code:8`；`cmd_type:1` 的 `cmd_value` 改成 2/3 后 `camera_type` 从 9 变 0 但 `camera_status` 恒为 -2，无开流迹象；`cmd_type:7` 各种 `cmd_value` 全 `code:8`。
-- **本车实测无法继续**：`st=19` 的 `instant.equipment.avm_exist = 0`，即该车没有环视硬件；`camera_status` 恒为 `-2`（`CAMERA_STATUS_CLOSE` 语义），四个 `camera_360.*` 虽回 1 但无实际数据流。**实时视频与视角切换在这台车上物理不可用**，不是协议没猜对。
-- 要在有环视硬件的车上继续：先 `st=11 ct=1 cv=0` 看 `camera_status` 能否从 -2 变到 `CAMERA_STATUS_OPEN`，再据此定 `camera_type` 与 `camera_degree` 的取值含义。
+- 读状态仍可用 `{"cmd_type":1,"cmd_value":0}`，返回 `camera_status`、`camera_degree`、`live_push_status`、`camera_type`、`camera_os_switch`、`fileStatus`、`camera_360{camera_front,back,left,right}`。
+- 官方 App 的请求都走 `{"cmd_type":2,"cmd_value":N,"pushType":1,"protocolType":2}`；`pushType=1`、`protocolType=2` 恒定。按 `msg_id == msg_ref` 全等配对：`2` 打开/初始化（回 `camera_type=1`、无流地址），`11` 启动拉流（首次回 `camera_live_url`），`-1` 关闭（回 `camera_type=0`、流地址消失）。这些请求来自堆样本中的 `sendVehicleMsgAsync` / `>>>publish` 原文，不是按回执字段猜的。
+- 真机逐项点击并用屏幕标题核对物理角度后，四个单路视角的「请求 `cmd_value` → 回执 `camera_type`」为：前 `2 → 1`（默认视角/初始化）、后 `3 → 3`、左 `4 → 5`、右 `5 → 7`。从右视补点左视、从左视切回前视也分别观察到 `camera_type=5` 与 `camera_type=1`；其中补点左视再次精确配对 `4 → 5`。屏幕只有前/后/左/右四个按钮，本车当前界面没有 360、俯视、四宫格或 OMS 入口；其它车型的扩展视角未验。
+- 下行 `st=11` 回 `code:200`，`camera_degree=0.0`，`camera_360` 四路均为 1；开流成功帧带 `camera_live_url`。`camera_status=-2` 仍可开流，不能再据此判「无环视硬件」或「车主权限不足」；`avm_exist=0` 与 `camera_status=-2` 分属不同口径。
+- `camera_live_url` 内容属运行时凭据，不收录。触发式堆取样并非每次都能留住刚发出的 PUBLISH：从右视切回前视的那一次只有屏幕「前视」与 `camera_type=1` 回执，没有完整请求帧；但初始化时 `cmd_value=2 → camera_type=1` 已有全等配对，且 `3/4/5 → 3/5/7` 构成连续映射。静态侧因 360 壳只留下 `CameraType` / `CAMERA_*` 字符串名与方法名，未找到数值常量或 `switchCamera` 实现字节码；资源 id 与枚举名不能替代这些运行时数值证据。
+
+**临停**：见 §5.6，`st=9 ct=3` 是动作指令；下电回 10905，上电回 `code:200`。此前把它称作「只读门锁查询」的判断已撤回。
+
+**远程启动**：见 §5.6，`st=9 ct=6` 加动态 `<TOKEN>` 是云端 MQTT 路线；BLE 数字钥匙路线仍可并存。`<TOKEN>` 与 §6.54a 的 `token_json.message` 同构，服务端私钥签名、客户端不能本地生成（§6.81c）；候选签发接口是 `POST /digital-key/v1/key/ble/getXpKeyAuthData {vin,cardNo}`，需有效 AT 与一致的 `Xp-Uid` / `deviceId`。本轮用当前本地 AT 单次调用该接口返 `12010101 登录状态已过期`，未重试、未续期、未下发车控；因此 `ct=6` 专用请求形状、TTL、一次性与重放错误码仍未验证，不提供脱离官方 App 的固定下发参数。自研 App 当前没有远程启动入口，这是未来接入的前置条件而非线上缺陷。
 
 **车窗单扇控制**：`service_type:12 / cmd_type:1` 只能一键全车（四窗同值联动），**单扇控制未打通**。`cmd_type:1` 的 `cmd_value` 只接受 1/2；`cmd_type:0/2..15` 配各种 `cmd_value` 全部 `code:8`。
 
@@ -871,9 +876,9 @@ MQTT 侧实测排除：`st=9 ct=2` → `code:8`；`st=9 ct=4/5 cv=1` → 无回�
 | 功能 | 接收 handler | 请求类 | 状态字段 | 通道判定 |
 | --- | --- | --- | --- | --- |
 | 哨兵模式 | `MqttReceiveHandler` 的 `handleOtherSettings`（`st=8` 回 `settings[]`，属「其它设置」而非独立哨兵 handler） | `xpcar/cmd/SentinelCmd` + `SentinelCmd$ActionType`、`CommandParams$SentinelParams`；另有 `mona/cmd/SentinelCmd` | `instant.ext.sentinel_mode_sensitivity`、`sentinel_mode_video_enable`、`soldier_camera_status`；`digital_vehicle.sentinel.{cur_uid,abnormal_vibration,abnormal_vibration_st}` | **MQTT 可写**（`st=8 action:2`） |
-| 远程查看 | `handleCameraService` | `xpcar/cmd/` 无摄像头 cmd；走 `link/camera/MonaCameraManager.reqRemoteLive` / `startRemoteLivePaket`、`XpCameraManager.reqRemoteLive` | `camera_status`、`camera_degree`、`camera_360.*`、`live_push_status`、`camera_type`、`camera_os_switch`、`fileStatus` | 只读可（`st=11`），开流/切视角未打通 |
+| 远程查看 | `handleCameraService` | `xpcar/cmd/` 无摄像头 cmd；走 `link/camera/MonaCameraManager.reqRemoteLive` / `startRemoteLivePaket`、`XpCameraManager.reqRemoteLive` | `camera_status`、`camera_degree`、`camera_360.*`、`live_push_status`、`camera_type`、`camera_os_switch`、`fileStatus` | **MQTT 可写**（`st=11 ct=2`，开流/四视角切换/关流见 §5.7） |
 | 后备箱 | **无对应 handler**（`CallbacksManagerV1` 也无回调） | `xpcar/cmd/TrunkCmd` + `TrunkCmd$ActionType`，含 `executeByBle` 与 `executeByMqtt` 两条路径；`mona/cmd/TrunkCmd` | `instant.door.trunk_ajar_st`、`instant.trunkPower.{powerSwitch,timeToPowerOffInMin}`（后者是 220V 供电，非箱门） | **BLE**（`executeByMqtt` 在本车不可用） |
-| 解锁并启动 | `handleCarDoorService`（只覆盖解锁/锁车） | `xpcar/cmd/RemoteUnlockStartCmd`（含 `onExecuteCmd`、`successPrediction`）、`BleUnlockStartCmd`、`LockCmd`/`UnlockCmd` | `instant.power.remote_start_status`（1=授权窗口开启）、`car_igon_state`（始终 0，不能用作判据） | 解锁走 MQTT（`st=9 ct=0`），**「并启动」走 BLE** |
+| 解锁并启动 | `handleCarDoorService`（只覆盖解锁/锁车） | `xpcar/cmd/RemoteUnlockStartCmd`（含 `onExecuteCmd`、`successPrediction`）、`BleUnlockStartCmd`、`LockCmd`/`UnlockCmd` | `instant.power.remote_start_status`（1=授权窗口开启）、`car_igon_state`（始终 0，不能用作判据） | 解锁走 MQTT（`st=9 ct=0`）；「远程启动」另有云端 MQTT `st=9 ct=6` 加动态 `<TOKEN>`，BLE 数字钥匙路线可并存（§5.6） |
 
 注意 `TrunkCmd` 同时存在 `executeByBle$*` 与 `executeByMqtt$*` 两组内部类，说明代码层面保留了云端开箱路径；但本车实测无 MQTT 报文、无回调、`st=19` 也不含开箱指令回执字段，故该路径对本车型不可用（可能是高配车型或特定市场分支）。
 
@@ -1585,7 +1590,7 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 | 登录与会话 | ✅ 闭环（真号实测，§4.2） | 0 |
 | 令牌续期 | ✅ 闭环，连续 5 次成功 | 0 |
 | MQTT 连接与凭据 | ✅ 闭环 | 0 |
-| MQTT 车控指令 | 🟡 13 条已打通 | 余项见 §5.7 |
+| MQTT 车控指令 | 🟡 14 条可固定参数下发；临停/远程查看/远程启动真机取证结论见 §5.6、§5.7 | 云端远程启动需自研有效登录态签发 `<TOKEN>`；其 TTL / 复用性未验 |
 | BLE 握手 `ef0110` | ✅ KDF 解出，188/188（§6.13） | 0 |
 | BLE 握手 `ed1118` | ✅ P5V2 隔离验收入口在本车完成严格挑战校验（§6.14）；V3 另待验 | 无钥匙账号激活与其余命令的新物料链路 |
 | BLE 车控帧下发 | ✅ 隔离入口与已有登录态生产 BLE-only 链路在本车各完成一次解锁/锁车并由用户现场确认（§6.14、附录 §6.92、§6.93） | 其余 5 个动作、标准命令回执、车况 UI 刷新 |
@@ -1635,11 +1640,13 @@ App 自己承认两处结构性弱点：`ble_check_fail_des` = 「先关闭蓝�
 - **修好 CRC 的独立探针帧**：`§6.15` 的帧已逐字节校验通过；本轮隔离验收另以已组装的解锁/锁车命令帧各发一次并由用户现场确认生效（附录 §6.92）。
 - **`0xEC` 通道解密后的明文内层布局**：本次只出现一条，payload 是 8 字节 ASCII，疑似会话标识（§6.7），未定。
 
+**自研客户端现状边界**：当前 `commands.ts` 没有导出 `service_type:11` 或 `st=9 ct=3/6`，自研 App 的 Control 页只展示 `remote_start_status` / `temp_lock_st`、没有远程查看与远程启动按钮；脚本侧只有临停 `temp-park` 与只读 `camera-state`。摄像头初始化、拉流、四个单路视角与关流的 `cmd_value` 已由真机逐项点击和精确配对闭环，可直接接入；远程启动 `<TOKEN>` 生成链仍未闭环，但两者都不是现网缺陷，而是接入这些功能前的前置条件。BLE `startCar` 虽可绕开 `<TOKEN>`，当前只验收了解锁/锁车，未接通远程启动。
+
 **MQTT 车控指令**
 
 - **单扇车窗的指令码**：`st=12` 能读四个车窗位置，控制值未找到。App 发的请求报文未抓到。
 - **除霜、内外循环、座椅加热通风、智能清洁/除味/香氛**：同因，控制报文抓不到（§5.9）。
-- **远程查看的实时视频与视角切换**：本车 `avm_exist=0` 无环视硬件，`camera_status` 恒 -2，物理不可测（§5.7）。需换有环视的车重测。
+- **远程查看扩展视角**：当前车机界面的前/后/左/右四路已闭环（§5.7）；静态枚举里的 `CAMERA_360`、`CAMERA_TOP`、`CAMERA_FOUR_GRID`、`CAMERA_OMS` 等扩展视角没有在本车界面出现，其 `cmd_value` 与 `camera_type` 未验证。
 - **遮阳帘 99→48 的跳变**：未解释（§5.9）。
 
 **协议与接口**
