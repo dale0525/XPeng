@@ -182,9 +182,9 @@ if __name__ == '__main__':
     elif args[0] == 'lock':
         # 锁车：service_type=9 / cmd_type=1，回执 driver_door_lock_st=1
         send({'cmd_type': 1}, service_type=9)
-    elif args[0] == 'door-state':
-        # 只读查门锁状态（cmd_type=1 即锁车动作，故查状态用 cmd_type=0 会触发解锁，
-        # 这里改用 service_type=9 的 cmd_type=3 只读通道）
+    elif args[0] == 'temp-park':
+        # 临停：service_type=9 / cmd_type=3。下电回 10905，上电回 code=200 并带
+        # temp_lock_st 与门状态字段。不是只读门锁查询。
         send({'cmd_type': 3}, service_type=9)
     elif args[0] == 'flash':
         # 闪灯：service_type=5 / cmd_type=1 / cmd_value=1
