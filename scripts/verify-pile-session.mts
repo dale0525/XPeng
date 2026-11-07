@@ -1,0 +1,223 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import type { PileTransport } from '../packages/protocol/src/pile-session.ts';
+import {
+  PileSession,
+  PileSessionError,
+  START_CHARGE_FRAME,
+  STATUS_ACK_FRAME,
+} from '../packages/protocol/src/pile-session.ts';
+import { fromHex, toHex } from '../packages/protocol/src/bytes.ts';
+import { parsePileFrame as parse } from '../packages/protocol/src/pile-frame.ts';
+
+/** Frames captured from the real pile in two independent sessions. */
+const SESSION_A = {
+  write1: '6829ff8b38ebf07e01ee6a6393',
+  notify1: '692922a756036c7e01ee6a96ea',
+  write2: '68503f881ae1eed841eb87ff898b1b70ae8438fc',
+  notify2: '694a000a010200160f00eeee1711',
+} as const;
+
+const SESSION_B = {
+  write1: '6829ff36cf1fb2121eef6a3003',
+  notify1: '6929223fd47734121eef6a9dbe',
+  write2: '68503bb8f9938b7219ff971008ee052602841a98',
+  notify2: '694a0008010200160f00eeeed176',
+} as const;
+
+const START_REPLY = '6961003de1';
+const STATUS_1 = '68a51abf3170001f99';
+const STATUS_2 = '68a53ebf3170009e2b';
+
+/** Replays scripted notifications and records every write. */
+class ScriptedTransport implements PileTransport {
+  readonly writes: string[] = [];
+  private readonly queue: string[];
+
+  constructor(notifications: string[]) {
+    this.queue = [...notifications];
+  }
+
+  async write(frame: Uint8Array): Promise<void> {
+    this.writes.push(toHex(frame));
+  }
+
+  async nextNotification(): Promise<Uint8Array> {
+    const next = this.queue.shift();
+    if (next === undefined) throw new Error('no scripted notification left');
+    return fromHex(next);
+  }
+}
+
+test('handshake follows write1 -> notify1 -> write2 -> notify2', async () => {
+  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2]);
+  const session = new PileSession(transport);
+  const { notify1, notify2 } = await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+
+  assert.deepEqual(transport.writes, [SESSION_A.write1, SESSION_A.write2]);
+  assert.equal(notify1.class, 1);
+  assert.equal(notify2.class, 2);
+});
+
+test('the second session is accepted with its own material', async () => {
+  const transport = new ScriptedTransport([SESSION_B.notify1, SESSION_B.notify2]);
+  const session = new PileSession(transport);
+
+  await session.connect({
+    connectWrite1: fromHex(SESSION_B.write1),
+    connectWrite2: fromHex(SESSION_B.write2),
+  });
+
+  assert.deepEqual(transport.writes, [SESSION_B.write1, SESSION_B.write2]);
+});
+
+test('start charging writes the constant frame and acks each status', async () => {
+  const transport = new ScriptedTransport([
+    SESSION_A.notify1,
+    SESSION_A.notify2,
+    START_REPLY,
+    STATUS_1,
+    STATUS_2,
+  ]);
+  const session = new PileSession(transport);
+  await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+
+  const status = await session.startCharging();
+
+  assert.deepEqual(transport.writes, [
+    SESSION_A.write1,
+    SESSION_A.write2,
+    toHex(START_CHARGE_FRAME),
+    toHex(STATUS_ACK_FRAME),
+    toHex(STATUS_ACK_FRAME),
+  ]);
+  assert.equal(status.length, 2);
+  assert.equal(status[0]!.class, 5);
+});
+
+test('a single status frame is enough', async () => {
+  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2, START_REPLY, STATUS_1]);
+  const session = new PileSession(transport);
+  await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+
+  const status = await session.startCharging();
+  assert.equal(status.length, 1);
+});
+
+test('start charging is refused before the handshake', async () => {
+  const transport = new ScriptedTransport([]);
+  const session = new PileSession(transport);
+  await assert.rejects(() => session.startCharging(), /requires a completed handshake/);
+});
+
+test('wrong notify class is rejected rather than accepted blindly', async () => {
+  const transport = new ScriptedTransport(['694a000a010200160f00eeee1711']);
+  const session = new PileSession(transport);
+  await assert.rejects(
+    () =>
+      session.connect({
+        connectWrite1: fromHex(SESSION_A.write1),
+        connectWrite2: fromHex(SESSION_A.write2),
+      }),
+    /expected class 1, got 2/,
+  );
+});
+
+test('a corrupted notification is rejected', async () => {
+  const broken = fromHex(SESSION_A.notify1);
+  broken[broken.length - 1] = (broken[broken.length - 1]! ^ 0xff) & 0xff;
+  const transport = new ScriptedTransport([toHex(broken)]);
+  const session = new PileSession(transport);
+  await assert.rejects(
+    () =>
+      session.connect({
+        connectWrite1: fromHex(SESSION_A.write1),
+        connectWrite2: fromHex(SESSION_A.write2),
+      }),
+    /undecodable frame/,
+  );
+});
+
+test('a non-zero start reply payload is rejected', async () => {
+  const transport = new ScriptedTransport([
+    SESSION_A.notify1,
+    SESSION_A.notify2,
+    // class 3 reply with payload 0x01 instead of the expected 0x00 (CRC valid)
+    '6961012dc0',
+    STATUS_1,
+  ]);
+  const session = new PileSession(transport);
+  await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+  await assert.rejects(() => session.startCharging(), /unexpected start-charging reply shape/);
+});
+
+test('connect cannot run twice', async () => {
+  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2]);
+  const session = new PileSession(transport);
+  await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+  await assert.rejects(
+    () =>
+      session.connect({
+        connectWrite1: fromHex(SESSION_A.write1),
+        connectWrite2: fromHex(SESSION_A.write2),
+      }),
+    /already completed/,
+  );
+});
+
+test('a transport that never notifies surfaces the timeout path', async () => {
+  const transport: PileTransport = {
+    async write() {},
+    async nextNotification() {
+      throw new PileSessionError('timeout');
+    },
+  };
+  const session = new PileSession(transport);
+  await assert.rejects(
+    () => session.connect({ connectWrite1: fromHex(SESSION_A.write1), connectWrite2: fromHex(SESSION_A.write2) }),
+    /timeout/,
+  );
+});
+test('generated handshake frames are well-formed and pile-shaped', async () => {
+  const { generateHandshakeMaterial } = await import('../packages/protocol/src/pile-session.ts');
+  const material = generateHandshakeMaterial();
+  const w1 = parse(material.connectWrite1);
+  const w2 = parse(material.connectWrite2);
+  assert.equal(w1.class, 1);
+  assert.equal(w1.payload.length, 9);
+  assert.equal(w1.payload[0], 0xff);
+  assert.equal(w2.class, 2);
+  assert.equal(w2.payload.length, 16);
+  assert.equal(w2.payload[15], 0x84);
+});
+
+test('two generated handshakes differ (random payloads)', async () => {
+  const { generateHandshakeMaterial } = await import('../packages/protocol/src/pile-session.ts');
+  const a = generateHandshakeMaterial();
+  const b = generateHandshakeMaterial();
+  assert.notDeepEqual([...a.connectWrite1], [...b.connectWrite1]);
+  assert.notDeepEqual([...a.connectWrite2], [...b.connectWrite2]);
+});
+
+test('a generated handshake drives the state machine end to end', async () => {
+  const { generateHandshakeMaterial } = await import('../packages/protocol/src/pile-session.ts');
+  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2]);
+  const session = new PileSession(transport);
+  await session.connect(generateHandshakeMaterial());
+  assert.equal(transport.writes.length, 2);
+});
