@@ -17,6 +17,17 @@ interface BleNative {
   stopScan(): Promise<void>;
   connect(mac: string): Promise<void>;
   connectDiagnostic(mac: string): Promise<void>;
+  connectProfile(
+    mac: string,
+    serviceUuid: string | null,
+    writeUuid: string | null,
+    readUuid: string | null,
+    writeHandle: number | null,
+    readHandle: number | null,
+    autoConnect: boolean,
+    timeoutMs: number,
+  ): Promise<void>;
+  dumpServices(): Promise<Array<{ service: string; characteristics: Array<{ uuid: string; handle: number; properties: number }> }>>;
   write(hex: string): Promise<void>;
   disconnect(): Promise<void>;
 }
