@@ -20,16 +20,31 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     override fun getName() = "XpengBle"
     private val handler = Handler(Looper.getMainLooper())
     private val adapter get() = ctx.getSystemService(BluetoothManager::class.java)?.adapter
-    private val serviceId = UUID.fromString("0000ed28-abab-406d-832d-7ad799b479f7")
-    private val writeId = UUID.fromString("0000ed28-abab-9c8c-2801-b1a015e46d6c")
-    private val readId = UUID.fromString("0000ed28-abab-9c8c-2802-d3df573ff530")
+    // Defaults are the vehicle digital-key profile. A Bluetooth charging pile uses
+    // a different service and characteristic set, so `connectProfile` overrides
+    // these per connection instead of hard-coding one device class.
+    private val vehicleServiceId = UUID.fromString("0000ed28-abab-406d-832d-7ad799b479f7")
+    private val vehicleWriteId = UUID.fromString("0000ed28-abab-9c8c-2801-b1a015e46d6c")
+    private val vehicleReadId = UUID.fromString("0000ed28-abab-9c8c-2802-d3df573ff530")
     private val cccdId = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    private var serviceId = vehicleServiceId
+    private var writeId = vehicleWriteId
+    private var readId = vehicleReadId
     private var gatt: BluetoothGatt? = null
     private var writer: BluetoothGattCharacteristic? = null
     private var ccDescriptor: BluetoothGattDescriptor? = null
     private var cccdValue: ByteArray? = null
+    private var pendingWriteHandle: Int? = null
+    private var pendingReadHandle: Int? = null
     private var connecting: Promise? = null
     private var deadline: Runnable? = null
+    // Connection retry state. Captured on a real phone 2026-11-07: the official app
+    // connects with auto:false, gets status 133 (GATT_CONN_FAILED_ESTABLISHMENT),
+    // then reconnects ~40 ms later with auto:true and succeeds. We replicate exactly
+    // that, so the first attempt is auto:false and 133 escalates to auto:true.
+    private var connectMac: String? = null
+    private var connectTimeoutMs: Long = 10000
+    private var connectAttemptsLeft = 0
     private var permissionPromise: Promise? = null
     private var scanning: Promise? = null
     private var scanner: BluetoothLeScanner? = null
@@ -76,7 +91,11 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(type: Int, result: ScanResult) { handler.post {
-            if (scanning != null && (scanTargetMac != null || result.scanRecord?.deviceName?.startsWith("XPED") == true)) devices[result.device.address] = Arguments.createMap().apply {
+            // Without a target MAC all named devices are reported, not only car
+            // digital keys: a Bluetooth charging pile advertises an `XPAC…` name and
+            // was previously invisible because the filter hard-coded "XPED".
+            val name = result.scanRecord?.deviceName
+            if (scanning != null && (scanTargetMac != null || (name != null && name.isNotEmpty()))) devices[result.device.address] = Arguments.createMap().apply {
                 putString("mac", result.device.address); putString("name", result.scanRecord?.deviceName)
                 putInt("rssi", result.rssi)
             }
@@ -115,6 +134,31 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     @ReactMethod fun stopScan(p: Promise) { handler.post { endScan(); p.resolve(null) } }
 
     private fun clearDeadline() { deadline?.let { handler.removeCallbacks(it) }; deadline = null }
+    /**
+     * On a 133 during establishment, retry with a direct connect.
+     *
+     * Status 133 happens intermittently on the first attempt (the official app hits
+     * it too). We retry with auto:false rather than auto:true because a background
+     * (auto:true) connect does not reliably deliver onClientConnectionState on this
+     * stack — every successful self-client connect here used auto:false. A short
+     * delay lets the controller settle before the next attempt.
+     */
+    private fun retryOnEstablishFailure(reason: String): Boolean {
+        val mac = connectMac
+        if (connectAttemptsLeft <= 0 || mac == null) return false
+        connectAttemptsLeft -= 1
+        val old = gatt
+        gatt = null; writer = null; ccDescriptor = null; cccdValue = null
+        old?.disconnect(); old?.close()
+        handler.postDelayed({
+            try {
+                gatt = adapter!!.getRemoteDevice(mac).connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE)
+            } catch (e: Exception) {
+                close(e.message ?: "Connect retry failed")
+            }
+        }, 200)
+        return true
+    }
     private fun armDeadline(timeoutMs: Long = 10000) {
         clearDeadline()
         deadline = Runnable { close("BLE operation timeout") }.also { handler.postDelayed(it, timeoutMs) }
@@ -123,6 +167,9 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         clearDeadline()
         val old = gatt; val mac = old?.device?.address
         gatt = null; writer = null; ccDescriptor = null; cccdValue = null
+        pendingWriteHandle = null; pendingReadHandle = null
+        serviceId = vehicleServiceId; writeId = vehicleWriteId; readId = vehicleReadId
+        connectMac = null; connectAttemptsLeft = 0
         connecting?.reject("E_CONNECTION", reason); connecting = null
         while (writes.isNotEmpty()) writes.removeFirst().promise.reject("E_WRITE", reason)
         writing = false
@@ -131,20 +178,59 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             putString("mac", mac); putString("reason", reason)
         })
     }
+    /**
+     * Locate characteristics by attribute handle when a UUID is not known.
+     *
+     * On Android `instanceId` is the attribute handle. The pile's write handle is
+     * `0x0006` and its notify handle `0x0003`, both confirmed by captured HCI, so a
+     * profile can be addressed without ever learning the 128-bit UUIDs.
+     */
+    private class HandleMatch(
+        val service: BluetoothGattService?,
+        val write: BluetoothGattCharacteristic?,
+        val read: BluetoothGattCharacteristic?,
+    )
+
+    private fun resolveByHandle(g: BluetoothGatt): HandleMatch {
+        val wh = pendingWriteHandle
+        val rh = pendingReadHandle
+        if (wh == null && rh == null) return HandleMatch(null, null, null)
+        var svc: BluetoothGattService? = null
+        var write: BluetoothGattCharacteristic? = null
+        var read: BluetoothGattCharacteristic? = null
+        for (s in g.services) for (c in s.characteristics) {
+            if (wh != null && c.instanceId == wh) { write = c; svc = s }
+            if (rh != null && c.instanceId == rh) { read = c; if (svc == null) svc = s }
+        }
+        return HandleMatch(svc, write, read)
+    }
+
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, state: Int) { handler.post {
             if (g !== gatt) return@post
-            if (status != BluetoothGatt.GATT_SUCCESS || state == BluetoothProfile.STATE_DISCONNECTED) close("GATT disconnected: $status")
+            if (status != BluetoothGatt.GATT_SUCCESS || state == BluetoothProfile.STATE_DISCONNECTED) {
+                if (status == 133 && retryOnEstablishFailure("GATT disconnected: $status")) return@post
+                close("GATT disconnected: $status")
+            }
             else if (state == BluetoothProfile.STATE_CONNECTED && !g.discoverServices()) close("Service discovery failed to start")
         } }
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) { handler.post {
             if (g !== gatt) return@post
             if (status != BluetoothGatt.GATT_SUCCESS) { close("Service discovery failed: $status"); return@post }
-            val service = g.getService(serviceId)
-            val rd = service?.getCharacteristic(readId)
-            writer = service?.getCharacteristic(writeId)
+            val byHandle = resolveByHandle(g)
+            val service = byHandle.service ?: g.getService(serviceId)
+            val rd = byHandle.read ?: service?.getCharacteristic(readId)
+            val wr = byHandle.write ?: service?.getCharacteristic(writeId)
+            // When resolved by handle the profile UUIDs are unknown; adopt the real
+            // characteristic UUIDs so the notification filter in `incoming` matches.
+            if (rd != null) readId = rd.uuid
+            if (wr != null) writeId = wr.uuid
+            writer = wr
             val desc = rd?.getDescriptor(cccdId)
-            if (rd == null || writer == null || desc == null) { close("ED28 characteristics missing"); return@post }
+            if (rd == null || wr == null || desc == null) {
+                close("GATT profile not found (service=$serviceId write=$writeId read=$readId handles=${pendingWriteHandle}/${pendingReadHandle})")
+                return@post
+            }
             if (!g.setCharacteristicNotification(rd, true)) { close("Notification registration failed"); return@post }
             // Official HCI: requestMtu(160) -> 247, then CCCD 0x0200 (indicate).
             // The car packs the three 0x0082 verify fragments into one 30-byte
@@ -166,7 +252,8 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             if (!started) close("CCCD write failed to start")
         } }
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) { handler.post {
-            if (g !== gatt || descriptor.uuid != cccdId || connecting == null) return@post
+            if (g !== gatt || connecting == null) return@post
+            if (descriptor != ccDescriptor && descriptor.uuid != cccdId) return@post
             if (status != BluetoothGatt.GATT_SUCCESS) close("CCCD write failed: $status") else {
                 clearDeadline(); val p = connecting; connecting = null; p?.resolve(null)
             }
@@ -198,9 +285,74 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         if (gatt != null || scanning != null) { p.reject("E_BUSY", "BLE operation pending"); return@post }
         if (!BluetoothAdapter.checkBluetoothAddress(mac)) { p.reject("E_ADDRESS", "Invalid BLE address"); return@post }
         connecting = p; armDeadline(timeoutMs)
+        connectMac = mac; connectTimeoutMs = timeoutMs; connectAttemptsLeft = 3
         try { gatt = adapter!!.getRemoteDevice(mac).connectGatt(ctx, autoConnect, callback, BluetoothDevice.TRANSPORT_LE) }
         catch (e: Exception) { close(e.message ?: "Connect failed") }
         if (gatt == null) close("Connection could not start")
+    } }
+
+    /**
+     * Connect using an explicit GATT profile instead of the vehicle digital-key one.
+     *
+     * The pile's service `1b7e8251-...` is known, but the 128-bit UUIDs of its write
+     * and notify characteristics were never recovered (the official HCI slice has no
+     * complete characteristic declaration). Pass `writeHandle`/`readHandle` instead:
+     * they are addressable by attribute handle (`0x0006` write, `0x0003` notify), so
+     * a client does not need those UUIDs.
+     */
+    @ReactMethod fun connectProfile(
+        mac: String,
+        serviceUuid: String?,
+        writeUuid: String?,
+        readUuid: String?,
+        writeHandle: Double?,
+        readHandle: Double?,
+        autoConnect: Boolean,
+        timeoutMs: Double,
+        p: Promise,
+    ) { handler.post {
+        if (!ready(p)) return@post
+        if (gatt != null || scanning != null) { p.reject("E_BUSY", "BLE operation pending"); return@post }
+        if (!BluetoothAdapter.checkBluetoothAddress(mac)) { p.reject("E_ADDRESS", "Invalid BLE address"); return@post }
+        if (!timeoutMs.isFinite() || timeoutMs < 1 || timeoutMs > 60000) { p.reject("E_TIMEOUT", "Invalid connect timeout"); return@post }
+        val service = serviceUuid?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val write = writeUuid?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val read = readUuid?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        if (service == null && (write == null || read == null) && (writeHandle == null || readHandle == null)) {
+            p.reject("E_PROFILE", "Profile needs a service UUID or both characteristic handles"); return@post
+        }
+        serviceId = service ?: vehicleServiceId
+        writeId = write ?: vehicleWriteId
+        readId = read ?: vehicleReadId
+        pendingWriteHandle = writeHandle?.toInt()
+        pendingReadHandle = readHandle?.toInt()
+        connecting = p; armDeadline(timeoutMs.toLong())
+        connectMac = mac; connectTimeoutMs = timeoutMs.toLong(); connectAttemptsLeft = 3
+        try { gatt = adapter!!.getRemoteDevice(mac).connectGatt(ctx, autoConnect, callback, BluetoothDevice.TRANSPORT_LE) }
+        catch (e: Exception) { close(e.message ?: "Connect failed") }
+        if (gatt == null) close("Connection could not start")
+    } }
+
+    /** Enumerate the connected device's services and characteristics for profiling. */
+    @ReactMethod fun dumpServices(p: Promise) { handler.post {
+        val g = gatt
+        if (g == null) { p.reject("E_NOT_READY", "No GATT connection"); return@post }
+        val result = Arguments.createArray()
+        for (svc in g.services) {
+            val item = Arguments.createMap()
+            item.putString("service", svc.uuid.toString())
+            val chars = Arguments.createArray()
+            for (c in svc.characteristics) {
+                val ch = Arguments.createMap()
+                ch.putString("uuid", c.uuid.toString())
+                ch.putInt("handle", c.instanceId)
+                ch.putInt("properties", c.properties)
+                chars.pushMap(ch)
+            }
+            item.putArray("characteristics", chars)
+            result.pushMap(item)
+        }
+        p.resolve(result)
     } }
     private fun drain() {
         if (writing || writes.isEmpty()) return
