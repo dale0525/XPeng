@@ -14,7 +14,6 @@ import { sendVehicleCommand } from '@xpeng/protocol/src/ble-v2-routing';
 import {
   CapsTag,
   Card,
-  CommandButton,
   InfoRow,
   ReadoutCell,
   ScreenScroll,
@@ -60,7 +59,7 @@ const QUICK_META: Record<CustomCommandId, {
   doorLock: { label: '解锁', note: '门锁', icon: 'lock_open' },
   remoteUnlock: { label: '远程解锁', note: '应急启动', icon: 'vpn_key' },
   acOn: { label: '开启空调', note: '速冷恒温', icon: 'ac_unit' },
-  flash: { label: '已闪灯', note: '已响应', icon: 'highlight' },
+  flash: { label: '闪灯', note: '寻车提示', icon: 'highlight' },
   windowClose: { label: '全车车窗关闭', note: '一键闭窗', icon: 'window' },
   windowVent: { label: '全车车窗通风', note: '微开换气', icon: 'air' },
   shadeOpen: { label: '打开遮阳帘', note: '天幕采光', icon: 'vertical_shades' },
@@ -106,12 +105,31 @@ export function ControlScreen(props: {
   quickCommands: readonly CustomCommandId[];
   onCustomize: () => void;
   onUnsupported: (label: string) => void;
+  onRemoteView: () => void;
+  onSummon: () => void;
+  onConnectCharger: () => void;
+  /** 当前登录账号 uid，用于判定是否为车主（远程查看仅车主可用）。 */
+  viewerUid: number | null;
 }): React.JSX.Element {
-  const { vehicle, status, bottomInset, quickCommands, onCustomize, onUnsupported } = props;
+  const {
+    vehicle,
+    status,
+    onRefresh,
+    bottomInset,
+    quickCommands,
+    onCustomize,
+    onUnsupported,
+    onRemoteView,
+    onSummon,
+    onConnectCharger,
+    viewerUid,
+  } = props;
   const [states, setStates] = useState<Record<string, Outcome>>({});
   const [temp, setTemp] = useState<number | null>(null);
   const [bleState, setBleState] = useState(bleLink.uiState);
   const waterOpacity = useRef(new Animated.Value(0.28)).current;
+  /** 闪灯只响应一段时间：点过后 2.4 秒内才显示已响应态，与 run() 的回落时长一致。 */
+  const [flashJustFired, setFlashJustFired] = useState(false);
 
   useEffect(() => bleLink.subscribe(setBleState), []);
   useEffect(() => {
@@ -132,12 +150,16 @@ export function ControlScreen(props: {
       executePreparedV2: (vin, code) => bleLink.executePreparedV2(vin, code),
     });
     if (!result.ok) console.warn(`[cmd] ${def.id}:`, result.error, 'msgId=', result.msgId);
+    // 闪灯没有可读状态字段（只能靠人眼确认），所以「已响应」只跟这次下发成功挂钩，
+    // 且限时显示，不能像状态字段那样常驻。
+    if (def.id === 'light.flash' && result.ok) setFlashJustFired(true);
     const outcome: Outcome = result.ok
       ? 'success'
       : result.unconfirmed ? 'unconfirmed' : 'failed';
     setStates((s) => ({ ...s, [def.id]: outcome }));
     setTimeout(() => {
       setStates((s) => ({ ...s, [def.id]: 'idle' }));
+      if (def.id === 'light.flash') setFlashJustFired(false);
     }, 3000);
     if (result.ok) carLink.readStatus().catch(() => {});
   }
@@ -174,6 +196,15 @@ export function ControlScreen(props: {
   const ext = i?.ext;
   const seat = i?.seat;
   const locked = d?.driver_door_lock_st === 1;
+  // 远程查看仅车主可用：车控指令按车主权限签发，子账号即使放开入口也会被服务端拒绝，
+  // 因此在入口处拦截，点击给「仅车主可用」提示（设计稿不表现权限差异，只做代码拦截）。
+  // ownerInfo 在真机上可能为 null（子账号或车主信息未随列表下发），此时无法确认车主身份，
+  // 按非车主处理——宁可拦下一次可用的远程查看，也不先发一条注定被服务端拒绝的指令。
+  const isOwner = viewerUid !== null && vehicle.ownerInfo?.uid === viewerUid;
+  const openRemoteView = () => {
+    if (isOwner) onRemoteView();
+    else onUnsupported('远程查看（仅车主可用）');
+  };
   const windowCells = [
     w?.front_left_window_position,
     w?.front_right_window_position,
@@ -227,77 +258,107 @@ export function ControlScreen(props: {
     ? DASH
     : sentinelVideo === 1 ? '已启用' : '已关闭';
   const st = (id: string): Outcome => states[id] ?? 'idle';
+  // 充电遮罩只在真正充电时出现：`charging_state` 非 0 视为充电中（0=未充电）。
+  // 拿不到回执时按「未知」处理，不画遮罩——宁可少一个效果，也不能在没充电的车上报充电中。
+  // 充电态判定：`charging_state` 的枚举含义在文档里没有取值说明（只列了字段名），
+// 真机上未充电时它也可能非 0——2026-11-08 真机就出现过车没充电却显示「充电中」。
+// 因此只用一条正证据：`time_to_complete_charge_min > 0` 表示车端确实在算「还需多久充满」。
+// 拿不到这个值时按未充电处理，宁可少画一次水面，也不能对没充电的车报充电中。
+  const chargeMinNum = c?.time_to_complete_charge_min;
+  const charging = chargeMinNum !== undefined && chargeMinNum > 0;
+  // 遮罩高度跟 SOC 成比例（50%~100% 映射 18%~90%），让「水面」真的代表电量，而不是固定 48%。
+  const socNum = c?.battery_soc;
+  const waterPercent = socNum === undefined
+    ? 18
+    : Math.max(18, Math.min(90, Math.round(18 + (socNum / 100) * 72)));
+  const chargeHeadline = charging ? '充电中' : '未充电';
 
   return (
     <ScreenScroll bottomInset={bottomInset}>
-      <Card padded={false} className="bg-ink border-hairline overflow-hidden">
-        <View className="relative min-h-[300px] justify-between p-5">
-          <View className="absolute inset-0 items-center justify-center opacity-40">
-            <Image source={CAR_IMAGE} className="w-full h-44" resizeMode="contain" />
+      {/* ===== 2. Vehicle Hero Main Card —— 照 a694：整卡 bg-ink、rounded-[28px]、p-5、min-h-380 ===== */}
+      <Card padded={false} className="bg-ink rounded-[28px] overflow-hidden">
+        <View className="relative min-h-[380px] justify-between p-5">
+          {/* 车图 + 上下压暗遮罩（稿子用 gradient-to-t，RN 无渐变库，用两层半透明黑等价模拟） */}
+          <View className="absolute inset-x-0 top-0 items-center justify-center" style={{ bottom: 120 }}>
+            <Image source={CAR_IMAGE} className="w-full h-full" resizeMode="contain" />
           </View>
-          <Animated.View
-            className="absolute bottom-0 left-0 right-0 h-[48%] bg-positive"
-            style={{ height: '48%', opacity: waterOpacity }}>
-            <View className="h-[2px] w-full bg-positive/70" />
-          </Animated.View>
+          <View className="absolute inset-x-0 top-0 h-16 bg-ink/70" />
+          <View className="absolute inset-x-0 h-24 bg-ink/70" style={{ bottom: 0 }} />
+          {/* 充电水波纹（稿子：bottom 一条 112px 高、绿色渐隐，只在充电时出现） */}
+          {charging ? (
+            <Animated.View
+              className="absolute bottom-0 left-0 right-0 bg-positive/25"
+              style={{ height: 112, opacity: waterOpacity }} />
+          ) : null}
 
+          {/* Hero Header：车型名 + 锁止徽章；下方状态迷你标签 */}
           <View className="relative flex-row items-start justify-between">
             <View>
               <View className="flex-row items-center gap-2">
-                <Text className="text-lg font-headline font-bold text-surface-container-lowest tracking-tight">
-                  车辆名 —
+                <Text className="text-[18px] font-headline font-semibold text-white tracking-wide">
+                  {vehicle.vehicleTypeName || DASH}
                 </Text>
-                <View className="flex-row items-center gap-1 px-2 py-0.5 rounded-full bg-ink/80 border border-positive/30">
-                  <View className="w-1.5 h-1.5 rounded-full bg-positive" />
-                  <Text className="text-[11px] font-body font-medium text-positive">已布防</Text>
+                <View className="flex-row items-center gap-1 rounded-full border border-white/10 bg-white/10 px-2 py-0.5">
+                  <View className={locked ? 'w-1.5 h-1.5 rounded-full bg-positive' : 'w-1.5 h-1.5 rounded-full bg-on-surface-variant'} />
+                  <Text className="text-[11px] font-body font-medium text-white/90">
+                    {d === undefined ? DASH : locked ? '已锁止' : '未锁止'}
+                  </Text>
                 </View>
               </View>
-              <View className="flex-row items-center gap-2 mt-1">
-                <Text className="text-xs text-surface-container-highest">
-                  整车闭锁 <Text className="font-body font-medium text-surface-container-lowest">{DASH}</Text>
-                </Text>
-                <Text className="text-xs text-surface-container-highest">•</Text>
-                <Text className="text-xs text-surface-container-highest">
-                  五门状态 <Text className="font-body font-medium text-surface-container-lowest">{DASH}</Text>
-                </Text>
+              <View className="mt-1 flex-row items-center gap-1.5">
+                <Text className="text-[11px] text-white/60">整车闭锁 {doorLockText}</Text>
+                <Text className="text-[11px] text-white/60">·</Text>
+                <Text className="text-[11px] text-white/60">五门 {fiveDoorText}</Text>
+                <Text className="text-[11px] text-white/60">·</Text>
+                <Text className="text-[11px] text-white/60">哨兵 {heroVideoText}</Text>
               </View>
             </View>
-            <View className="flex-row items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10">
-              <Text className="text-[15px] font-icon text-accent">{Icon.shield}</Text>
-              <Text className="text-[11px] text-surface-container-lowest">哨兵录像 —</Text>
+            <View className="flex-row items-center gap-1.5">
+              <Pressable onPress={onRefresh} aria-label="更多参数"
+                className="h-8 w-8 items-center justify-center rounded-full bg-white/15 active:scale-95">
+                <Text className="text-[18px] font-icon text-white">{Icon.tune}</Text>
+              </Pressable>
+              <Pressable onPress={() => onUnsupported('更多参数')} aria-label="菜单选项"
+                className="h-8 w-8 items-center justify-center rounded-full bg-white/15 active:scale-95">
+                <Text className="text-[18px] font-icon text-white">{Icon.more_vert}</Text>
+              </Pressable>
             </View>
           </View>
 
-          <View className="relative mt-16 pt-4">
-            <View className="flex-row items-baseline gap-2">
-              <Text className="text-display-hero-mobile font-headline font-bold text-surface-container-lowest">{soc}</Text>
-              <Text className="text-2xl font-headline font-bold text-positive">%</Text>
-              <Text className="text-2xl font-icon text-accent">{Icon.bolt}</Text>
+          {/* Hero Bottom：电量大字 + 充电徽章；分隔线 + 充电详情 */}
+          <View className="relative mt-28 justify-end">
+            <View className="flex-row items-baseline gap-1">
+              <Text className="text-[56px] font-headline font-bold tracking-tighter text-white tabular-nums">{soc}</Text>
+              <Text className="text-[30px] font-headline font-bold text-white/80">%</Text>
+              {charging ? (
+                <View className="ml-3 flex-row items-center gap-1 rounded-full border border-positive/40 bg-positive/20 px-2.5 py-1">
+                  <Text className="text-[14px] font-icon text-positive">{Icon.bolt}</Text>
+                  <Text className="text-[11px] font-body font-medium text-positive">充电中</Text>
+                </View>
+              ) : null}
             </View>
-            <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-white/15">
+            <View className="mt-2 flex-row items-center justify-between border-t border-white/10 pt-2">
               <View className="flex-row items-center gap-1.5">
-                <LiveDot colorClass="bg-positive" size={5} />
-                <Text className="text-xs font-body font-medium text-surface-container-lowest">充电中</Text>
-                <Text className="text-xs text-surface-container-highest">
-                  / 预计 {chargeMinutes} 分钟后充满
+                <View className={charging ? 'w-1.5 h-1.5 rounded-full bg-positive' : 'w-1.5 h-1.5 rounded-full bg-on-surface-variant'} />
+                <Text className="text-[12px] text-white/70">
+                  {charging
+                    ? (chargeMinutes === DASH ? '预计 — 分钟后充满' : `预计 ${chargeMinutes} 分钟后充满`)
+                    : '未充电'}
                 </Text>
               </View>
-              <Text className="text-[13px] font-headline font-semibold text-surface-container-lowest">
-                电量 {soc}
-              </Text>
+              <Text className="text-[12px] font-headline font-medium text-white/90">电量 {soc}</Text>
             </View>
           </View>
         </View>
       </Card>
 
-      <Card>
-        <View className="flex-row items-center justify-between mb-3 px-1">
-          <Text className="text-sm font-headline font-semibold text-on-surface">快捷指令</Text>
-          <Pressable
-            onPress={onCustomize}
-            className="flex-row items-center gap-1 active:scale-95">
-            <Text className="text-[15px] font-icon text-on-surface-variant">{Icon.tune}</Text>
-            <Text className="text-xs font-body font-medium text-on-surface-variant">自定义</Text>
+      {/* ===== 3. Shortcut Actions（快捷指令） ===== */}
+      <View className="gap-2.5">
+        <View className="flex-row items-center justify-between px-1">
+          <Text className="text-[15px] font-headline font-semibold tracking-tight text-on-surface">快捷指令</Text>
+          <Pressable onPress={onCustomize} className="flex-row items-center gap-0.5 active:scale-95">
+            <Text className="text-[12px] font-body text-on-surface-variant">自定义</Text>
+            <Text className="text-[14px] font-icon text-on-surface-variant">{Icon.chevron_right}</Text>
           </Pressable>
         </View>
         <View className="flex-row gap-2.5">
@@ -305,260 +366,188 @@ export function ControlScreen(props: {
             <QuickAction
               key={id}
               meta={QUICK_META[id]}
-              highlighted={id === 'flash'}
+              highlighted={id === 'flash' && flashJustFired}
               onPress={() => runQuick(id)}
             />
           ))}
         </View>
+      </View>
+
+      {/* ===== 4. Extended Feature Entry Points（三列卡片） ===== */}
+      <View className="flex-row gap-2">
+        <FeatureEntry icon={Icon.videocam} label="远程查看" note="车身全景环视" onPress={onRemoteView} />
+        <FeatureEntry icon={Icon.swap_vertical_circle} label="直线召唤" note="前后遥控泊车" onPress={onSummon} />
+        <FeatureEntry icon={Icon.ev_station} label="连接充电桩" note="智慧家充桩配对" onPress={onConnectCharger} />
+      </View>
+
+      {/* ===== 5. Doors & Central Locking（车门与中控锁） ===== */}
+      <Card>
+        <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center gap-2">
+            <Text className="text-[20px] font-icon text-on-surface-variant">{Icon.lock_clock}</Text>
+            <Text className="text-[16px] font-headline font-semibold text-on-surface">车门与中控锁</Text>
+          </View>
+          <View className="flex-row items-center gap-1.5">
+            <Text className="rounded-full bg-inset px-2 py-0.5 text-[12px] text-on-surface-variant">门锁 {doorLockText}</Text>
+            <Text className="rounded-full bg-inset px-2 py-0.5 text-[12px] text-on-surface-variant">五门 {fiveDoorText}</Text>
+          </View>
+        </View>
+        {/* 稿：卡片内部 space-y-4 —— 卡头与按钮网格间隔 16。 */}
+        <View className="flex-row flex-wrap gap-2.5 pt-1">
+          <View className="basis-[48%]">
+            <Pill2
+              title="中控门锁"
+              note={d === undefined ? '读取中' : locked ? '车辆已锁止' : '车辆未锁止'}
+              onPress={() => runId(locked ? 'door.lock' : 'door.unlock')}
+            />
+          </View>
+          <View className="basis-[48%]">
+            <Pill2 title="远程解锁" note="仅远程下发" onPress={() => onUnsupported('远程解锁')} />
+          </View>
+          <View className="basis-[48%]">
+            <Pill2
+              title={tailgateOpen ? '关闭尾门' : '打开尾门'}
+              note="BLE 直连"
+              onPress={() => onUnsupported('电动尾门')}
+            />
+          </View>
+          <View className="basis-[48%]">
+            <Pill2
+              title="开启临停"
+              note="单次触发"
+              onPress={() =>
+                run({ id: 'temp.park', label: '开启临停', group: 'door', serviceType: 9, msgContent: { cmd_type: 3 } })
+              }
+            />
+          </View>
+        </View>
       </Card>
 
+      {/* ===== 6. Windows & Sunshade（车窗与遮阳帘） ===== */}
       <Card>
-        <SectionHeader
-          title="车门与中控锁"
-          right={
-            <View className="flex-row items-center gap-2">
-              <CapsTag text={`门锁 ${doorLockText}`} />
-              <CapsTag text={`五门 ${fiveDoorText}`} />
-            </View>
-          }
-        />
-        <StatusStrip
-          label="MQTT + BLE 双通道"
-          value={bleState.error ? `${bleState.label} · ${bleState.error}` : bleState.label}
-          valueClass={bleState.connected ? 'text-positive' : 'text-on-surface-variant'}
-          className="mb-2.5"
-        />
-        <View className="bg-inset rounded-box p-3.5 mb-2.5">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1 pr-2">
-              <Text className="text-sm font-headline font-semibold text-on-surface">中控门锁</Text>
-              <Text className="text-xs font-body text-on-surface-variant">
-                未解锁显示「解锁」，已解锁切换为「锁车」
-              </Text>
-            </View>
-            {!locked ? (
-              <Pressable
-                onPress={() => runId('door.unlock')}
-                className="flex-row items-center gap-1 px-4 py-2 rounded-full bg-primary-container active:scale-95">
-                <Text className="text-[18px] font-icon text-on-primary-fixed">{Icon.lock_open}</Text>
-                <Text className="text-sm font-headline font-semibold text-on-primary-fixed">解锁</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={() => runId('door.lock')}
-                className="flex-row items-center gap-1 px-4 py-2 rounded-full bg-primary-container active:scale-95">
-                <Text className="text-[18px] font-icon text-on-primary-fixed">{Icon.lock}</Text>
-                <Text className="text-sm font-headline font-semibold text-on-primary-fixed">锁车</Text>
-              </Pressable>
-            )}
+        <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center gap-2">
+            <Text className="text-[20px] font-icon text-on-surface-variant">{Icon.roller_shades}</Text>
+            <Text className="text-[16px] font-headline font-semibold text-on-surface">车窗与遮阳帘</Text>
           </View>
         </View>
-        <View className="bg-inset rounded-box p-3.5 mb-2.5">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1 pr-2">
-              <View className="flex-row items-center gap-1.5">
-                <Text className="text-sm font-headline font-semibold text-on-surface">远程解锁</Text>
-                <Text className="text-[10px] font-body text-on-surface-variant bg-surface-container-lowest px-1.5 py-0.5 rounded-full">
-                  仅远程下发
-                </Text>
-              </View>
-              <Text className="text-xs font-body text-on-surface-variant">
-                无钥匙应急 · 解锁后 2 分钟内可踩刹车挂挡启动
-              </Text>
-            </View>
-            <PillAction label="远程解锁" onPress={() => onUnsupported('远程解锁')} />
+        <View className="mt-4 flex-row flex-wrap gap-2">
+          <StatPill label="四窗开度" value={`${windowPercent}%`} />
+          <StatPill label="天幕开度" value={`${shadePercent}%`} />
+          <StatPill label="太阳能天窗" value={solarText} />
+          <StatPill label="电动尾门状态" value={tailgateText} />
+        </View>
+        <View className="mt-4 flex-row flex-wrap gap-2.5 pt-1">
+          <View className="basis-[48%]"><TextPill label="全车车窗通风" onPress={() => runId('window.down')} /></View>
+          <View className="basis-[48%]"><TextPill label="全车车窗关闭" onPress={() => runId('window.up')} /></View>
+          <View className="basis-[48%]"><TextPill label="打开遮阳帘" onPress={() => runId('shade.open')} /></View>
+          <View className="basis-[48%]"><TextPill label="关闭遮阳帘" onPress={() => runId('shade.close')} /></View>
+        </View>
+      </Card>
+
+      {/* ===== 7. Climate & Seats（空调与座椅） ===== */}
+      <Card>
+        <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center gap-2">
+            <Text className="text-[20px] font-icon text-on-surface-variant">{Icon.ac_unit}</Text>
+            <Text className="text-[16px] font-headline font-semibold text-on-surface">空调与座椅</Text>
           </View>
         </View>
-        <View className="bg-inset rounded-box p-3.5 mb-2.5">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1 pr-2">
-              <View className="flex-row items-center gap-1.5">
-                <Text className="text-sm font-headline font-semibold text-on-surface">电动尾门</Text>
-                <Text className="text-[10px] font-body text-on-surface-variant bg-surface-container-lowest px-1.5 py-0.5 rounded-full">
-                  BLE 直连
-                </Text>
-              </View>
-              <Text className="text-xs font-body text-on-surface-variant">
-                当前已关显示「打开尾门」，开启后切换「关闭尾门」
-              </Text>
-            </View>
-            {tailgateOpen ? (
-              <PillAction label="关闭尾门" onPress={() => onUnsupported('电动尾门')} />
-            ) : (
-              <PillAction label="打开尾门" onPress={() => onUnsupported('电动尾门')} />
-            )}
-          </View>
+        <View className="mt-4 flex-row flex-wrap gap-2">
+          <StatPill label="目标/实测" value={`${targetText}°C / ${innerText}°C`} />
+          <StatPill label="风量" value={windText} />
+          <StatPill label="AUTO 模式" value={autoText} />
+          <StatPill label="座椅加热通风" value={seatText} />
         </View>
-        <View className="bg-inset rounded-box p-3.5">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-1 pr-2">
-              <Text className="text-sm font-headline font-semibold text-on-surface">临停</Text>
-              <Text className="text-xs font-body text-on-surface-variant">临时停车保持车端动力供电</Text>
-            </View>
-            <Pressable
-              onPress={() => onUnsupported('临停')}
-              className="w-12 h-6 rounded-full bg-surface-container-highest p-0.5">
-              <View className="w-5 h-5 rounded-full bg-surface-container-lowest" />
+        <View className="mt-4 gap-2 pt-1">
+          <View className="flex-row gap-2.5">
+            <Pressable onPress={() => runId('hvac.on')}
+              className="flex-1 flex-row items-center justify-center gap-1 rounded-full bg-on-surface px-3 py-2.5 active:scale-95">
+              <Text className="text-[16px] font-icon text-surface">{Icon.power_settings_new}</Text>
+              <Text className="text-[12px] font-headline font-semibold text-surface">打开空调</Text>
+            </Pressable>
+            <Pressable onPress={() => runId('hvac.off')}
+              className="flex-1 items-center justify-center rounded-full bg-inset px-3 py-2.5 active:scale-95">
+              <Text className="text-[12px] font-headline font-semibold text-on-surface">关闭空调</Text>
+            </Pressable>
+          </View>
+          <View className="flex-row gap-2.5">
+            <Pressable onPress={() => changeTemp(-1)}
+              className="flex-1 flex-row items-center justify-center gap-1 rounded-full bg-inset px-3 py-2 active:scale-95">
+              <Text className="text-[16px] font-icon text-on-surface">{Icon.remove}</Text>
+              <Text className="text-[12px] font-headline font-semibold text-on-surface">温度 -</Text>
+            </Pressable>
+            <Pressable onPress={() => changeTemp(1)}
+              className="flex-1 flex-row items-center justify-center gap-1 rounded-full bg-inset px-3 py-2 active:scale-95">
+              <Text className="text-[16px] font-icon text-on-surface">{Icon.add}</Text>
+              <Text className="text-[12px] font-headline font-semibold text-on-surface">温度 +</Text>
+            </Pressable>
+          </View>
+          <View className="flex-row gap-2 pt-1">
+            <Pressable onPress={() => runId('hvac.quickCool')}
+              className="flex-1 items-center justify-center rounded-full bg-inset px-1 py-2 active:scale-95">
+              <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">极速降温 (18°C)</Text>
+            </Pressable>
+            <Pressable onPress={() => runId('hvac.quickWarm')}
+              className="flex-1 items-center justify-center rounded-full bg-inset px-1 py-2 active:scale-95">
+              <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">极速升温 (32°C)</Text>
+            </Pressable>
+            <Pressable onPress={() => runId('hvac.highTemp')}
+              className="flex-1 items-center justify-center rounded-full bg-inset px-1 py-2 active:scale-95">
+              <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">高温抑菌 (32°C)</Text>
             </Pressable>
           </View>
         </View>
       </Card>
 
+      {/* ===== 8. Lights & Horn（灯光与提示） ===== */}
       <Card>
-        <SectionHeader title="车窗与遮阳帘" />
-        <View className="flex-row flex-wrap gap-2 mb-2.5">
-          <ReadoutCell label="四窗开度" value={`${windowPercent} %`} />
-          <ReadoutCell label="天幕开度" value={`${shadePercent} %`} />
-          <ReadoutCell label="太阳能天窗" value={solarText} />
-          <ReadoutCell label="电动尾门状态" value={tailgateText} />
+        <View className="flex-row items-center gap-2">
+          <Text className="text-[20px] font-icon text-on-surface-variant">{Icon.campaign}</Text>
+          <Text className="text-[16px] font-headline font-semibold text-on-surface">灯光与提示</Text>
         </View>
-        <View className="flex-row flex-wrap gap-2.5">
-          <CommandButton
-            icon={ACTION_ICONS['window.down']}
-            label="全车车窗通风"
-            state={st('window.down')}
-            className="basis-[48%]"
-            onPress={() => runId('window.down')}
-          />
-          <CommandButton
-            icon={ACTION_ICONS['window.up']}
-            label="全车车窗关闭"
-            state={st('window.up')}
-            className="basis-[48%]"
-            onPress={() => runId('window.up')}
-          />
-          <CommandButton
-            icon={ACTION_ICONS['shade.open']}
-            label="打开遮阳帘"
-            state={st('shade.open')}
-            className="basis-[48%]"
-            onPress={() => runId('shade.open')}
-          />
-          <CommandButton
-            icon={ACTION_ICONS['shade.close']}
-            label="关闭遮阳帘"
-            state={st('shade.close')}
-            className="basis-[48%]"
-            onPress={() => runId('shade.close')}
-          />
-        </View>
-      </Card>
-
-      <Card>
-        <SectionHeader title="空调与座椅" />
-        <View className="bg-inset rounded-box p-3.5 mb-2.5">
-          <InfoRow
-            label="设定目标 / 实测温度"
-            value={`目标 ${targetText} °C / 实测 ${innerText} °C`}
-          />
-          <InfoRow label="风量档位" value={windText} small />
-          <InfoRow label="AUTO 恒温" value={autoText} small />
-          <InfoRow label="座椅加热通风" value={seatText} small />
-        </View>
-        <View className="flex-row flex-wrap gap-2 mb-2.5">
-          <CommandButton
-            icon={ACTION_ICONS['hvac.on']}
-            label="打开空调"
-            state={st('hvac.on')}
-            variant="solid"
-            className="basis-[23%]"
-            onPress={() => runId('hvac.on')}
-          />
-          <CommandButton
-            icon={ACTION_ICONS['hvac.off']}
-            label="关闭空调"
-            state={st('hvac.off')}
-            className="basis-[23%]"
-            onPress={() => runId('hvac.off')}
-          />
-          <Pressable
-            onPress={() => changeTemp(-1)}
-            className="basis-[23%] flex-row items-center justify-center gap-1 py-3 px-1 rounded-lg bg-inset border border-hairline active:scale-95">
-            <Text className="text-[16px] font-icon text-on-surface">{Icon.remove}</Text>
-            <Text className="text-xs font-headline font-semibold text-on-surface">温度</Text>
+        <View className="mt-4 flex-row gap-2.5">
+          <Pressable onPress={() => runId('light.flash')}
+            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-inset px-4 py-2.5 active:scale-95">
+            <Text className="text-[18px] font-icon text-on-surface">{Icon.lightbulb}</Text>
+            <Text className="text-[12px] font-headline font-bold text-on-surface">闪灯</Text>
           </Pressable>
-          <Pressable
-            onPress={() => changeTemp(1)}
-            className="basis-[23%] flex-row items-center justify-center gap-1 py-3 px-1 rounded-lg bg-inset border border-hairline active:scale-95">
-            <Text className="text-[16px] font-icon text-on-surface">{Icon.add}</Text>
-            <Text className="text-xs font-headline font-semibold text-on-surface">温度</Text>
+          <Pressable onPress={() => runId('light.horn')}
+            className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-inset px-4 py-2.5 active:scale-95">
+            <Text className="text-[18px] font-icon text-on-surface">{Icon.volume_up}</Text>
+            <Text className="text-[12px] font-headline font-bold text-on-surface">鸣笛</Text>
           </Pressable>
         </View>
-        <View className="flex-row gap-2">
-          <CommandButton
-            icon={ACTION_ICONS['hvac.quickCool']}
-            label="极速降温 (18°C)"
-            state={st('hvac.quickCool')}
-            tint="secondary"
-            className="flex-1"
-            onPress={() => runId('hvac.quickCool')}
-          />
-          <CommandButton
-            icon={ACTION_ICONS['hvac.quickWarm']}
-            label="极速升温 (32°C)"
-            state={st('hvac.quickWarm')}
-            tint="primary"
-            className="flex-1"
-            onPress={() => runId('hvac.quickWarm')}
-          />
-          <CommandButton
-            icon={ACTION_ICONS['hvac.highTemp']}
-            label="高温抑菌 (32°C)"
-            state={st('hvac.highTemp')}
-            tint="tertiary"
-            className="flex-1"
-            onPress={() => runId('hvac.highTemp')}
-          />
-        </View>
       </Card>
 
-      <Card>
-        <SectionHeader title="灯光与提示" />
-        <View className="flex-row gap-3">
-          <View className="flex-1">
-            <CommandButton
-              icon={ACTION_ICONS['light.flash']}
-              label="闪灯（已响应态）"
-              state={st('light.flash')}
-              variant="solid"
-              onPress={() => runId('light.flash')}
-            />
-          </View>
-          <View className="flex-1">
-            <CommandButton
-              icon={ACTION_ICONS['light.horn']}
-              label="鸣笛提示"
-              state={st('light.horn')}
-              onPress={() => runId('light.horn')}
-            />
+      {/* ===== 9. Sentry Mode（哨兵模式） ===== */}
+      <Card className="mb-6">
+        <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center gap-2">
+            <Text className="text-[20px] font-icon text-on-surface-variant">{Icon.shield}</Text>
+            <Text className="text-[16px] font-headline font-semibold text-on-surface">哨兵模式</Text>
           </View>
         </View>
-      </Card>
-
-      <Card>
-        <SectionHeader title="哨兵模式" />
-        <View className="flex-row gap-2 mb-2.5">
-          <ReadoutCell label="录像使能" value={videoText} />
-          <ReadoutCell label="维修模式" value={repairText} />
-          <ReadoutCell label="灵敏度" value={sensitivityText} />
+        <View className="mt-4 flex-row gap-2">
+          <Text className="flex-1 truncate rounded-full bg-inset px-2 py-1 text-center text-[11px] text-on-surface-variant">
+            录像使能: <Text className="font-semibold text-on-surface">{videoText}</Text>
+          </Text>
+          <Text className="flex-1 truncate rounded-full bg-inset px-2 py-1 text-center text-[11px] text-on-surface-variant">
+            维修模式: <Text className="font-semibold text-on-surface">{repairText}</Text>
+          </Text>
+          <Text className="flex-1 truncate rounded-full bg-inset px-2 py-1 text-center text-[11px] text-on-surface-variant">
+            灵敏度: <Text className="font-semibold text-on-surface">{sensitivityText}</Text>
+          </Text>
         </View>
-        <View className="flex-row gap-3">
-          <View className="flex-1">
-            <CommandButton
-              icon={ACTION_ICONS['sentinel.on']}
-              label="开启哨兵模式"
-              state={st('sentinel.on')}
-              onPress={() => runId('sentinel.on')}
-            />
-          </View>
-          <View className="flex-1">
-            <CommandButton
-              icon={ACTION_ICONS['sentinel.off']}
-              label="关闭哨兵模式"
-              state={st('sentinel.off')}
-              onPress={() => runId('sentinel.off')}
-            />
-          </View>
+        <View className="mt-4 flex-row gap-2.5 pt-1">
+          <Pressable onPress={() => runId('sentinel.on')}
+            className="flex-1 items-center justify-center rounded-full bg-on-surface px-3 py-2.5 active:scale-95">
+            <Text className="text-[12px] font-headline font-bold text-surface">开启哨兵模式</Text>
+          </Pressable>
+          <Pressable onPress={() => runId('sentinel.off')}
+            className="flex-1 items-center justify-center rounded-full bg-inset px-3 py-2.5 active:scale-95">
+            <Text className="text-[12px] font-headline font-bold text-on-surface">关闭哨兵模式</Text>
+          </Pressable>
         </View>
       </Card>
     </ScreenScroll>
@@ -574,29 +563,56 @@ function QuickAction({
   highlighted: boolean;
   onPress: () => void;
 }) {
-  if (highlighted) {
-    return (
-      <Pressable
-        onPress={onPress}
-        className="flex-1 items-center justify-center p-3 rounded-box bg-primary-container/25 border border-primary-container active:scale-95">
-        <View className="w-10 h-10 rounded-full bg-primary-container items-center justify-center mb-1.5">
-          <Text className="text-[20px] font-icon text-on-primary-fixed">{Icon[meta.icon]}</Text>
-        </View>
-        <Text className="text-xs font-headline font-bold text-on-surface text-center">{meta.label}</Text>
-        <Text className="text-[10px] font-body text-on-surface-variant mt-0.5 text-center">{meta.note}</Text>
-      </Pressable>
-    );
-  }
+  // 照 a694：卡片恒为 bg-white/rounded-[22px]/p-3；「闪灯」的高亮只体现在图标圈底色（bg-[#F4EF00]），
+  // 不是整卡变色。
   return (
     <Pressable
       onPress={onPress}
-      className="flex-1 items-center justify-center p-3 rounded-box bg-inset active:scale-95">
-      <View className="w-10 h-10 rounded-full bg-surface-container-lowest items-center justify-center mb-1.5">
+      className="flex-1 items-center justify-center rounded-[22px] bg-surface p-3 active:scale-95">
+      <View
+        className={
+          highlighted
+            ? 'mb-2 h-11 w-11 items-center justify-center rounded-full bg-primary-container'
+            : 'mb-2 h-11 w-11 items-center justify-center rounded-full bg-inset'
+        }>
         <Text className="text-[20px] font-icon text-on-surface">{Icon[meta.icon]}</Text>
       </View>
-      <Text className="text-xs font-headline font-semibold text-on-surface text-center">{meta.label}</Text>
-      <Text className="text-[10px] font-body text-on-surface-variant mt-0.5 text-center">{meta.note}</Text>
+      <Text className="text-center text-[12px] font-headline font-semibold text-on-surface">{meta.label}</Text>
     </Pressable>
+  );
+}
+
+/** 双行胶囊按钮：照 a694 车门区——12px 粗体主文字 + 10px 次要副文字，rounded-full bg-inset。 */
+function Pill2({ title, note, onPress }: { title: string; note: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="items-center justify-center rounded-full bg-inset px-4 py-2.5 active:scale-95">
+      <Text className="text-[12px] font-headline font-bold text-on-surface">{title}</Text>
+      <Text className="text-[10px] font-body text-on-surface-variant">{note}</Text>
+    </Pressable>
+  );
+}
+
+function TextPill({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="rounded-full bg-inset px-3 py-2.5 items-center justify-center active:scale-95">
+      <Text className="text-[12px] font-headline font-semibold text-on-surface">{label}</Text>
+    </Pressable>
+  );
+}
+
+/** 扁平只读胶囊：稿子里车窗区的读数格就是这个样式，不是大方盒。 */
+function StatPill({ label, value }: { label: string; value: string }) {
+  return (
+    <View className="basis-[48%] flex-row items-center justify-between rounded-full bg-inset px-3 py-1">
+      <Text className="text-[11px] font-body font-medium text-on-surface-variant">{label}</Text>
+      <Text className="text-[11px] font-label font-semibold text-on-surface" numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -606,6 +622,37 @@ function PillAction({ label, onPress }: { label: string; onPress: () => void }) 
       onPress={onPress}
       className="px-3.5 py-2 rounded-full bg-surface border border-hairline active:scale-95">
       <Text className="text-xs font-headline font-semibold text-on-surface">{label}</Text>
+    </Pressable>
+  );
+}
+
+/** 扩展功能入口卡：图标 + 标题 + 副标题，照设计稿的三列卡片。 */
+function FeatureEntry({
+  icon,
+  label,
+  note,
+  onPress,
+}: {
+  icon: string;
+  label: string;
+  note: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="flex-1 min-h-[92px] rounded-[22px] bg-surface p-3 items-start justify-between active:scale-95">
+      <View className="w-8 h-8 rounded-full bg-inset items-center justify-center">
+        <Text className="text-[18px] font-icon text-on-surface">{icon}</Text>
+      </View>
+      <View className="mt-2 w-full">
+        <Text className="text-xs font-headline font-bold text-on-surface leading-tight" numberOfLines={1}>
+          {label}
+        </Text>
+        <Text className="text-[10px] font-body text-on-surface-variant mt-0.5" numberOfLines={1}>
+          {note}
+        </Text>
+      </View>
     </Pressable>
   );
 }
