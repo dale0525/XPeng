@@ -44,9 +44,20 @@ style={{ opacity: countdown > 0 ? 0.5 : 1 }}
 
 然后二分：把可疑处的动态 className 换成固定 class + `style`，重装验证。
 
+## 照设计稿抄界面
+
+稿子在 `docs/design/<screenId>.html`，是要被逐像素还原的**唯一依据**。别按描述自己重画样式——按稿子的 class 原样搬，只把硬编码数据换成语义 token 与真实字段。
+
+- **亮暗是同一份结构**：两份稿（亮/暗）共用同一套语义 token 类名（`bg-surface`、`text-on-surface`），暗色不另写一份。稿子里的 hex 先查 `tailwind.config.js` 已定义的语义名再落类名，禁止在组件里写死 `#EDEDEF` 这类字面量。
+- **判亮暗看背景类**：稿子大量用深色文字，数「深色出现次数」不可靠；看 `body` 或最外层容器的 `bg-` 指向哪个 token 才能定论。
+- **间距必须整段抄，不能逐块凑**：容器、卡片内边距、卡内块间距是三处独立的值，各自漏了都会让整屏显得挤。以车控稿（`a694…`）为准的实测值：内容容器 `px-4 pt-2.5 gap-4`、卡片 `p-5`、卡内块之间 `space-y-4`（16px）。只改字号不改这三处，看起来就是「字号对了但排版还是不对」。
+- **别自己发明交互态**：稿里按钮是什么样就是什么样。曾自造过一个按钮组件，带 pending/success/failed 变色，稿里根本没有——用户的评价是「我让你用 stitch 设计就是为了抄作业」。用户要的融合（状态并入控制卡）也靠**分组与视觉区分**表达，不是靠给状态格套按钮外衣。
+- **稿中没有取值的字段不要猜**：逆向文档里只有字段名、没有枚举语义的（如 `charge_connector_status`，真机先后见过 `0` 和 `7`），显示 `—` 而不是裸数字。
+- **稿是静态的，动效要重写**：稿里的动画（如充电水面铺满）在 RN 里得用 `Animated` 重做，不能指望照搬；静态帧与实现层动效的差异要提前跟用户确认。
+
 ## 其他
 
-- 样式库是 NativeWind，实现时用 Tailwind 类名，与 Stitch 设计稿一致。
+- 样式库是 NativeWind，用 Tailwind 类名，与 Stitch 设计稿一致（具体抄法见上一节）。
 - 图标走 Material Symbols 字体子集（`src/ui/icons.ts` + `android/app/src/main/assets/fonts/`）。引用前确认该字形在字体里存在，否则渲染成豆腐块。
 - 加载动画用 `src/ui/atoms.tsx` 的 `SpinnerIcon`（`Animated` + `Easing.linear`），不用平台 `ActivityIndicator`——字体与配色不匹配。
 - 原生模块若用 `NativeEventEmitter`，必须提供 `addListener` / `removeListeners` 空实现，否则开发版会顶出黄色 LogBox 条。
