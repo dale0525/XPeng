@@ -1,5 +1,5 @@
 /**
- * 手机号登录页（对应 `docs/design/c6048d2d97a84497b5ed3c70524e44ff.html`）。
+ * 手机号登录页（对应 `docs/design/c6048d2d97a84497b5ed3c70524e44ff.html`，亮色基准）。
  *
  * 两道滑块都是弹层而非常驻控件：官方就是这么做的，而且常驻会让易盾 SDK 在用户
  * 还没到那一步时就先采集一次指纹。稿中的「请验证滑块」胶囊因此只作状态提示。
@@ -11,7 +11,7 @@ import { LoginFlow } from '@xpeng/protocol/src/session';
 import { DARK_COLORS, LIGHT_COLORS } from '../../core/colors';
 import { sessionStore } from '../../core/session';
 import { useThemeMode } from '../../core/theme';
-import { SpinnerIcon } from '../atoms';
+import { plateShadow, SpinnerIcon } from '../atoms';
 import { CapsTag } from '../components';
 import { Icon } from '../icons';
 import { CaptchaModal } from '../SliderCaptcha';
@@ -158,30 +158,36 @@ export function LoginScreen(): React.JSX.Element {
         contentContainerClassName="px-6 pt-5 pb-6 flex-grow"
         keyboardShouldPersistTaps="handled">
         <View className="flex-1 flex-col justify-between">
-          <View className="w-full">
-            <View className="w-full h-11 items-center justify-between">
+          {/* 顶部栏 + 标题 */}
+          <View className="w-full flex-col">
+            <View className="w-full h-11 flex-row items-center justify-between">
               <Pressable
                 onPress={resetCodeStage}
                 accessibilityLabel="返回"
-                className="w-11 h-11 rounded-full bg-surface items-center justify-center active:scale-95">
+                className="w-11 h-11 rounded-full bg-surface items-center justify-center active:scale-95"
+                style={plateShadow}>
                 <Text className="font-icon text-[20px] text-on-surface">{Icon.arrow_back}</Text>
               </Pressable>
             </View>
             <View className="mt-8 mb-2">
-              <Text className="font-label text-[32px] font-bold leading-tight tracking-tight text-on-surface">
+              <Text className="font-headline text-[32px] font-bold leading-tight tracking-tight text-on-surface">
                 手机号登录
               </Text>
-              <Text className="mt-2 font-body text-[14px] text-on-surface-variant">
+              <Text className="mt-2 font-body text-[14px] text-on-surface-variant font-normal">
                 使用手机号验证码登录
               </Text>
             </View>
           </View>
 
-          <View className="w-full py-2">
+          {/* 表单区 */}
+          <View className="w-full py-2 my-auto">
             <View className="w-full gap-3.5">
-              <View className="w-full h-[62px] rounded-full bg-surface border border-surface-container px-5 flex-row items-center">
+              {/* 手机号胶囊 */}
+              <View
+                className="w-full h-[62px] rounded-full bg-surface border border-surface-container px-5 flex-row items-center"
+                style={plateShadow}>
                 <View className="flex-row items-center gap-1 pr-3 border-r border-surface-variant">
-                  <Text className="font-label text-[15px] font-semibold text-on-surface">+86</Text>
+                  <Text className="font-headline text-[15px] font-semibold text-on-surface">+86</Text>
                   <Text className="font-icon text-[18px] text-on-surface-variant">
                     {Icon.expand_more}
                   </Text>
@@ -198,7 +204,10 @@ export function LoginScreen(): React.JSX.Element {
                 />
               </View>
 
-              <View className="w-full h-[62px] rounded-full bg-surface border border-surface-container pl-5 pr-2.5 flex-row items-center justify-between">
+              {/* 验证码胶囊 */}
+              <View
+                className="w-full h-[62px] rounded-full bg-surface border border-surface-container pl-5 pr-2.5 flex-row items-center justify-between"
+                style={plateShadow}>
                 <TextInput
                   ref={codeInput}
                   value={code}
@@ -230,7 +239,10 @@ export function LoginScreen(): React.JSX.Element {
                 </View>
               </View>
 
-              <View className="w-full h-[52px] rounded-full bg-surface border border-surface-container px-4 flex-row items-center justify-between">
+              {/* 滑块验证状态槽 */}
+              <View
+                className="w-full h-[52px] rounded-full bg-surface border border-surface-container px-4 flex-row items-center justify-between"
+                style={plateShadow}>
                 <View className="flex-row items-center gap-2.5">
                   <View className="w-6 h-6 rounded-full bg-primary-container items-center justify-center">
                     <Text className="font-icon text-[16px] text-on-surface">
@@ -242,7 +254,9 @@ export function LoginScreen(): React.JSX.Element {
                   </Text>
                 </View>
                 <View className="flex-row items-center gap-2 pr-1">
-                  <Text className="font-body text-[12px] text-on-surface-variant">验证中</Text>
+                  <Text className="font-body text-[12px] text-on-surface-variant font-normal">
+                    验证中
+                  </Text>
                   {busy || captcha !== null ? (
                     <SpinnerIcon size={16} className="text-on-surface" />
                   ) : (
@@ -268,27 +282,31 @@ export function LoginScreen(): React.JSX.Element {
                 </View>
               ) : null}
             </View>
-
-            <View className="w-full items-center mt-2 mb-4">
-              <Pressable
-                onPress={pressLogin}
-                disabled={busy}
-                className="w-full h-[56px] rounded-full bg-primary-container items-center justify-center active:scale-[0.98]"
-                style={{ opacity: busy ? 0.6 : 1 }}>
-                <Text className="font-label text-[16px] font-bold tracking-wide text-on-primary-fixed">
-                  登录
-                </Text>
-              </Pressable>
-              <Pressable onPress={resetCodeStage} className="mt-4 active:scale-95">
-                <Text className="font-body text-[13px] font-medium text-on-surface-variant">
-                  换一个手机号
-                </Text>
-              </Pressable>
-            </View>
           </View>
 
-          <View className="w-full items-center gap-2 pb-1">
-            <View className="w-full max-w-[340px] rounded-full bg-surface py-2 px-3.5 flex-row items-center justify-center gap-1.5">
+          {/* 操作区 */}
+          <View className="w-full flex-col items-center mt-2 mb-4">
+            <Pressable
+              onPress={pressLogin}
+              disabled={busy}
+              className="w-full h-[56px] rounded-full bg-primary-container items-center justify-center active:scale-[0.98]"
+              style={{ opacity: busy ? 0.6 : 1 }}>
+              <Text className="font-headline text-[16px] font-bold tracking-wide text-on-primary-fixed">
+                登录
+              </Text>
+            </Pressable>
+            <Pressable onPress={resetCodeStage} className="mt-4 active:scale-95">
+              <Text className="font-body text-[13px] font-medium text-on-surface-variant">
+                换一个手机号
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* 底部安全说明 */}
+          <View className="w-full flex-col items-center gap-2 pb-1">
+            <View
+              className="w-full max-w-[340px] rounded-full bg-surface py-2 px-3.5 flex-row items-center justify-center gap-1.5"
+              style={plateShadow}>
               <Text className="font-icon text-[15px] text-on-surface-variant">
                 {Icon.shield}
               </Text>
@@ -296,7 +314,9 @@ export function LoginScreen(): React.JSX.Element {
                 仅使用本人账号，不收集第三方数据
               </Text>
             </View>
-            <View className="w-full max-w-[340px] rounded-full bg-surface py-2 px-3.5 flex-row items-center justify-center gap-1.5">
+            <View
+              className="w-full max-w-[340px] rounded-full bg-surface py-2 px-3.5 flex-row items-center justify-center gap-1.5"
+              style={plateShadow}>
               <Text className="font-icon text-[15px] text-on-surface-variant">
                 {Icon.info}
               </Text>

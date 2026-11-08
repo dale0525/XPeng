@@ -22,6 +22,9 @@ import { CustomCommandSheet } from './src/ui/screens/CustomCommandSheet';
 import { LoginScreen } from './src/ui/screens/Login';
 import { SettingsScreen } from './src/ui/screens/Settings';
 import { StatusScreen } from './src/ui/screens/Status';
+import { RemoteViewSheet } from './src/ui/screens/RemoteViewSheet';
+import { StraightSummonSheet } from './src/ui/screens/StraightSummonSheet';
+import { ConnectChargerSheet } from './src/ui/screens/ConnectChargerSheet';
 
 const PAGE_TITLE: Record<TabKey, string> = {
   control: '车控',
@@ -47,8 +50,19 @@ function Shell() {
   const [linkReason, setLinkReason] = useState<string | undefined>();
   const [latency, setLatency] = useState<number | null>(null);
   const [bluetoothReady, setBluetoothReady] = useState(false);
+  /**
+   * 真正有没有活动 GATT 链路。`bluetoothReady` 只表示数字钥匙材料已就绪
+   * （`phase === 'ready'`），链路本身并不存在——原生 `write` 在没有 GATT 时以
+   * `E_NOT_READY / BLE not subscribed` 拒绝（`XpengBleModule.kt` 的 write 判
+   * `gatt == null || writer == null`）。把 ready 当「已连接」显示，等于把
+   * 「按下去没有反应」这件事藏起来。
+   */
+  const [bluetoothConnected, setBluetoothConnected] = useState(false);
   const [quickCommands, setQuickCommands] = useState<readonly CustomCommandId[]>(DEFAULT_CUSTOM_COMMAND_IDS);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [remoteViewVisible, setRemoteViewVisible] = useState(false);
+  const [summonVisible, setSummonVisible] = useState(false);
+  const [chargerVisible, setChargerVisible] = useState(false);
   const [unsupported, setUnsupported] = useState<string | null>(null);
   const [theme, setTheme, scheme] = useThemeMode();
   const updater = useUpdater();
@@ -63,7 +77,12 @@ function Shell() {
     native.storageGet(StorageKey.quickCommands)
       .then((saved) => setQuickCommands(parseQuickCommands(saved)))
       .catch(() => {});
-    return bleLink.subscribe((state) => setBluetoothReady(state.phase === 'ready'));
+    return bleLink.subscribe((state) => {
+      setBluetoothReady(state.phase === 'ready');
+      // `connected` 才是 GATT 链路真实状态（ble.ts 的 uiState 只在
+      // authenticating/authenticated/command 三个活跃阶段置 true）。
+      setBluetoothConnected(state.connected);
+    });
   }, []);
 
   useEffect(() => {
@@ -168,8 +187,8 @@ function Shell() {
         <Banner tone="error" text={`连接断开：${linkReason}`} tag="RETRY" />
       ) : null}
       {unsupported ? (
-        <View className="absolute top-16 left-5 right-5 z-50 rounded-full bg-ink px-4 py-2.5">
-          <Text className="text-[12px] font-body text-on-surface">{`${unsupported} 尚未打通`}</Text>
+        <View className="mx-5 mb-2 rounded-box bg-surface-container-highest px-4 py-2.5">
+          <Text className="text-[12px] font-body text-on-surface">{`${unsupported} 暂不可用`}</Text>
         </View>
       ) : null}
 
@@ -188,6 +207,10 @@ function Shell() {
             quickCommands={quickCommands}
             onCustomize={() => setSheetVisible(true)}
             onUnsupported={setUnsupported}
+            onRemoteView={() => setRemoteViewVisible(true)}
+            onSummon={() => setSummonVisible(true)}
+            onConnectCharger={() => setChargerVisible(true)}
+            viewerUid={session.session.uid}
           />
         ) : tab === 'status' ? (
           <StatusScreen status={status} bottomInset={108 + insets.bottom} />
@@ -218,6 +241,19 @@ function Shell() {
         selected={quickCommands}
         onCancel={() => setSheetVisible(false)}
         onSave={saveQuickCommands}
+      />
+      <RemoteViewSheet
+        visible={remoteViewVisible}
+        onClose={() => setRemoteViewVisible(false)}
+      />
+      <StraightSummonSheet
+        visible={summonVisible}
+        onClose={() => setSummonVisible(false)}
+        bluetoothConnected={bluetoothConnected}
+      />
+      <ConnectChargerSheet
+        visible={chargerVisible}
+        onClose={() => setChargerVisible(false)}
       />
     </View>
   );

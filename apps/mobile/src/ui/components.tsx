@@ -13,14 +13,17 @@ export function Card({
   padded?: boolean;
 }) {
   if (className) {
+    // 外部传了 className 时不能在里层再写死 `bg-surface`：里层会把外层的底色整个盖住，
+    // 于是 `bg-ink` 这类深色卡片渲染成白底，上面白色大字（电量数字）就看不见了。
+    // 底色与圆角/描边交给调用方，里层只保留裁切。
     return (
       <View className={className} style={plateShadow}>
         {padded ? (
-          <View className="bg-surface rounded-card border border-hairline overflow-hidden p-3.5">
+          <View className="rounded-card overflow-hidden p-5">
             {children}
           </View>
         ) : (
-          <View className="bg-surface rounded-card border border-hairline overflow-hidden">
+          <View className="rounded-card overflow-hidden">
             {children}
           </View>
         )}
@@ -58,7 +61,8 @@ export function SectionHeader({
       <View className="flex-row items-center gap-1.5">
         {icon ? (
           <View className="w-7 h-7 rounded-full bg-inset items-center justify-center">
-            <Text className="text-base font-icon text-primary">{Icon[icon]}</Text>
+            {/* 设计稿分区图标 20px、用次要文字色，不是主题主色。 */}
+            <Text className="text-[20px] font-icon text-on-surface-variant">{Icon[icon]}</Text>
           </View>
         ) : accent === 'secondary' ? (
           <View className="w-1.5 h-3.5 rounded-full bg-secondary" />
@@ -67,7 +71,8 @@ export function SectionHeader({
         ) : (
           <View className="w-1.5 h-3.5 rounded-full bg-primary" />
         )}
-        <Text className="font-headline text-headline-sm text-on-surface">{title}</Text>
+        {/* 设计稿分区标题为 16px（text-[16px] font-semibold），不是 headline-sm(20px)。 */}
+        <Text className="font-headline text-[16px] font-semibold text-on-surface">{title}</Text>
       </View>
       {right}
     </View>
@@ -89,19 +94,20 @@ export function InfoRow({
   valueClass?: string;
   small?: boolean;
 }) {
+  // 设计稿信息行：14px，行间距靠 pt-3 分隔；标签次要色、值加粗。
   return (
-    <View className="flex-row justify-between items-center py-1">
+    <View className="flex-row justify-between items-center pt-3">
       {small ? (
-        <Text className="text-[10px] font-body text-on-surface-variant">{label}</Text>
+        <Text className="text-[12px] font-body text-on-surface-variant">{label}</Text>
       ) : (
-        <Text className="text-body-sm font-body text-on-surface-variant">{label}</Text>
+        <Text className="text-[14px] font-body text-on-surface-variant">{label}</Text>
       )}
       {small ? (
-        <Text className="text-[10px] font-label font-semibold">
+        <Text className="text-[12px] font-label font-semibold">
           <Text className={valueClass}>{value}</Text>
         </Text>
       ) : (
-        <Text className="text-body-sm font-label font-semibold">
+        <Text className="text-[14px] font-label font-semibold">
           <Text className={valueClass}>{value}</Text>
         </Text>
       )}
@@ -140,7 +146,8 @@ function CommandFace({
   tile: boolean;
 }) {
   const iconSize = tile ? 16 : 18;
-  const textSize = tile ? 11 : 15;
+  // 设计稿里这类胶囊按钮文字是 text-xs(12px) semibold；原来非 tile 给 15px，视觉上明显偏大。
+  const textSize = tile ? 11 : 12;
   switch (face) {
     case 'on-primary':
       return (
@@ -333,10 +340,11 @@ export function ReadoutCell({
 }) {
   const body = (
     <>
-      <Text className="text-[10px] font-body text-on-surface-variant" numberOfLines={1}>
+      {/* 设计稿只读数据格：标签 12px 次要色，数值 20px 粗体（font-num）。 */}
+      <Text className="text-[12px] font-body text-on-surface-variant" numberOfLines={1}>
         {label}
       </Text>
-      <Text className="text-body-sm font-label font-bold mt-0.5" numberOfLines={1}>
+      <Text className="text-[20px] font-label font-bold mt-0.5" numberOfLines={1}>
         <Text className={valueClass}>{value}</Text>
       </Text>
       {sub ? (
@@ -347,11 +355,11 @@ export function ReadoutCell({
     </>
   );
   return active ? (
-    <View className="flex-1 py-1.5 px-1 rounded-box items-center justify-center bg-surface-container-high border border-hairline">
+    <View className="flex-1 p-3.5 min-h-[76px] justify-between rounded-[22px] bg-surface-container-high border border-hairline">
       {body}
     </View>
   ) : (
-    <View className="flex-1 py-1.5 px-1 rounded-box items-center justify-center bg-surface-container">
+    <View className="flex-1 p-3.5 min-h-[76px] justify-between rounded-[22px] bg-inset">
       {body}
     </View>
   );
@@ -376,33 +384,48 @@ export function BottomNav({
 }) {
   return (
     <View
-      className="absolute bottom-0 left-0 right-0 mx-4 flex-row items-center justify-between rounded-full bg-ink border border-hairline px-3 pt-1.5"
+      /* 稿子容器是 flex justify-around：每个入口按自身内容宽度排布、四周均分留白，
+         不是等分（flex-1）。等分会让三个入口的图标与文字落在不同基线上。 */
+      className="absolute bottom-0 left-0 right-0 mx-4 flex-row items-center justify-around rounded-full bg-inverse-surface px-4 py-2.5 mb-3"
       style={{ paddingBottom: Math.max(insetBottom, 8) }}>
-      {TABS.map((t) =>
-        t.key === active ? (
+      {TABS.map((t) => {
+        const on = t.key === active;
+        return (
           <Pressable
             key={t.key}
             onPress={() => onChange(t.key)}
-            className="w-14 h-14 rounded-full bg-primary-container items-center justify-center active:scale-95">
-            <Text className="text-[22px] font-icon text-on-primary-fixed">{Icon[t.icon]}</Text>
-            <Text className="text-[11px] font-label font-bold text-on-primary-fixed mt-0.5">
-              {t.label}
-            </Text>
+            accessibilityRole="tab"
+            accessibilityState={{ selected: on }}
+            accessibilityLabel={t.label}
+            className="items-center justify-center active:scale-95">
+            {/* 设计稿：选中项是「图标+文字」整体包成一个胶囊（px-4 py-1.5 rounded-full），
+                不是只把图标套个圆；图标 19px、文字 12px（text-xs）。 */}
+            <View
+              className={
+                on
+                  ? 'items-center justify-center rounded-full bg-primary-container px-4 py-1.5'
+                  : 'items-center justify-center px-3 py-1.5'
+              }>
+              <Text
+                className={
+                  on
+                    ? 'text-[19px] font-icon text-on-primary-fixed'
+                    : 'text-[19px] font-icon text-surface-variant'
+                }>
+                {Icon[t.icon]}
+              </Text>
+              <Text
+                className={
+                  on
+                    ? 'text-[12px] font-label font-bold text-on-primary-fixed mt-0.5'
+                    : 'text-[12px] font-label font-medium text-surface-variant mt-0.5'
+                }>
+                {t.label}
+              </Text>
+            </View>
           </Pressable>
-        ) : (
-          <Pressable
-            key={t.key}
-            onPress={() => onChange(t.key)}
-            className="flex-1 flex-col items-center justify-center p-2 active:scale-95">
-            <Text className="text-[22px] font-icon text-surface-container-highest">
-              {Icon[t.icon]}
-            </Text>
-            <Text className="text-[11px] font-label font-medium text-surface-container-highest mt-0.5">
-              {t.label}
-            </Text>
-          </Pressable>
-        ),
-      )}
+        );
+      })}
     </View>
   );
 }
@@ -512,6 +535,15 @@ export function PrimaryButton({
   );
 }
 
+
+/** 蓝牙指示点：已连接用状态绿，未连接用中性描边色。 */
+function BluetoothDot({ ready }: { ready: boolean }) {
+  return ready ? (
+    <View className="w-1.5 h-1.5 rounded-full bg-positive" />
+  ) : (
+    <View className="w-1.5 h-1.5 rounded-full bg-outline" />
+  );
+}
 export function TopBar({
   title,
   vehicleLabel,
@@ -565,16 +597,10 @@ export function TopBar({
               <Text className="text-[13px] font-icon text-on-surface-variant">
                 {Icon.bluetooth}
               </Text>
-              <View className="w-1.5 h-1.5 rounded-full bg-positive" />
-              {bluetoothReady ? (
-                <Text className="text-[11px] font-body font-medium text-on-surface-variant">
-                  已就绪
-                </Text>
-              ) : (
-                <Text className="text-[11px] font-body font-medium text-on-surface-variant">
-                  未就绪
-                </Text>
-              )}
+              <BluetoothDot ready={bluetoothReady} />
+              <Text className="text-[11px] font-body font-medium text-on-surface-variant">
+                {bluetoothReady ? '已连接' : '未连接'}
+              </Text>
             </View>
           </View>
         </View>
@@ -599,7 +625,7 @@ export function ScreenScroll({
   return (
     <ScrollView
       className="flex-1 bg-background"
-      contentContainerClassName="px-3.5 pt-3 gap-3.5"
+      contentContainerClassName="px-4 pt-2.5 gap-4"
       contentContainerStyle={{ paddingBottom: bottomInset }}
       showsVerticalScrollIndicator={false}>
       {children}
