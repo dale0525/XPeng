@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=390, user-scalable=no, initial-scale=1.0, maximum-scale=1.0" name="viewport"/>
+<title>车辆状态</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Fonts: Space Grotesk & Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-primary-fixed-variant": "#4b4900",
+            "secondary-fixed-dim": "#39e197",
+            "on-tertiary-container": "#007476",
+            "surface-tint": "#636100",
+            "tertiary-fixed-dim": "#54d9dc",
+            "on-surface-variant": "#494832",
+            "surface-dim": "#dbd9dc",
+            "background": "#faf9fb",
+            "surface-variant": "#e3e2e4",
+            "surface-container-lowest": "#ffffff",
+            "on-background": "#1b1c1e",
+            "on-primary": "#ffffff",
+            "inverse-primary": "#d0cc00",
+            "surface-container-high": "#e9e7ea",
+            "secondary-container": "#5efeb1",
+            "on-tertiary-fixed": "#002021",
+            "inverse-on-surface": "#f2f0f3",
+            "on-surface": "#1b1c1e",
+            "error": "#ba1a1a",
+            "error-container": "#ffdad6",
+            "surface-bright": "#faf9fb",
+            "on-secondary": "#ffffff",
+            "surface-container-low": "#f5f3f6",
+            "secondary": "#006d44",
+            "outline": "#7a785f",
+            "tertiary": "#00696b",
+            "primary-fixed-dim": "#d0cc00",
+            "primary-fixed": "#eee900",
+            "on-primary-container": "#6d6b00",
+            "tertiary-fixed": "#75f6f9",
+            "on-error-container": "#93000a",
+            "surface": "#faf9fb",
+            "on-tertiary": "#ffffff",
+            "on-primary-fixed": "#1d1d00",
+            "secondary-fixed": "#5efeb1",
+            "tertiary-container": "#7cfcff",
+            "on-secondary-fixed-variant": "#005232",
+            "primary": "#636100",
+            "on-secondary-fixed": "#002111",
+            "outline-variant": "#cbc8ab",
+            "on-error": "#ffffff",
+            "on-secondary-container": "#007348",
+            "on-tertiary-fixed-variant": "#004f51",
+            "surface-container": "#efedf0",
+            "surface-container-highest": "#e3e2e4",
+            "primary-container": "#f4ef00",
+            "inverse-surface": "#17181a"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "fontFamily": {
+            "headline": ["Space Grotesk", "sans-serif"],
+            "display": ["Space Grotesk", "sans-serif"],
+            "body": ["Plus Jakarta Sans", "sans-serif"],
+            "label": ["Space Grotesk", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      background-color: #F2F2F4;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-[#F2F2F4] text-[#111214] flex justify-center selection:bg-[#F4EF00] selection:text-[#111214]">
+<!-- Mobile Viewport Container: strictly 390px edge-to-edge -->
+<div class="w-[390px] min-h-screen bg-[#F2F2F4] flex flex-col relative pb-32">
+<!-- 1. Top Bar / Header -->
+<header class="w-full pt-4 pb-2 px-5 sticky top-0 bg-[#F2F2F4] z-40">
+<div class="flex items-center justify-between">
+<!-- Left: 36px circular button -->
+<div class="w-9 h-9 rounded-full bg-[#EDEDEF] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[#111214] text-[20px]" data-icon="directions_car">directions_car</span>
+</div>
+<!-- Middle: Title & Status Badges -->
+<div class="flex flex-col items-center">
+<div class="flex items-center gap-1.5">
+<h1 class="font-headline text-[18px] font-bold text-[#111214] tracking-tight">状态</h1>
+<!-- Online status capsule -->
+<div class="inline-flex items-center gap-1 bg-[#EDEDEF] rounded-full px-2 py-0.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#12CE86]"></span>
+<span class="text-[11px] font-medium text-[#8A8D93]">在线联机</span>
+</div>
+<!-- Bluetooth capsule -->
+<div class="inline-flex items-center gap-1 bg-[#EDEDEF] rounded-full px-2 py-0.5">
+<span class="material-symbols-outlined text-[13px] text-[#8A8D93]" data-icon="bluetooth">bluetooth</span>
+<span class="w-1.5 h-1.5 rounded-full bg-[#12CE86]"></span>
+<span class="text-[11px] font-medium text-[#8A8D93]">已连接</span>
+</div>
+</div>
+<div class="text-[12px] font-medium text-[#8A8D93] mt-0.5 tabular-nums">
+            车牌 — · 车型 —
+          </div>
+</div>
+<!-- Right: 36px circular button -->
+<div class="w-9 h-9 rounded-full bg-[#EDEDEF] flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[#111214] text-[20px]" data-icon="refresh">refresh</span>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="px-5 space-y-4 pt-2 flex-1">
+<!-- 2. 电池状态卡 (Battery Status Card) -->
+<section class="bg-surface-container-lowest rounded-[28px] p-5 shadow-none">
+<!-- Card Header -->
+<div class="flex items-center justify-between mb-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#111214] text-[22px]" data-icon="battery_charging_full">battery_charging_full</span>
+<h2 class="font-headline text-[17px] font-bold text-[#111214]">电池状态</h2>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 text-xs font-semibold font-headline text-[#8A8D93] tabular-nums">
+            SOC: — %
+          </div>
+</div>
+<!-- 2x2 Primary Data Grid -->
+<div class="grid grid-cols-2 gap-3 mb-3">
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">SOC</span>
+<span class="font-headline font-bold text-[20px] text-[#111214] mt-1 tabular-nums">— %</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">剩余续航</span>
+<span class="font-headline font-bold text-[20px] text-[#111214] mt-1 tabular-nums">— km</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">总里程</span>
+<span class="font-headline font-bold text-[20px] text-[#111214] mt-1 tabular-nums">— km</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">充电枪连接</span>
+<span class="font-headline font-bold text-[20px] text-[#111214] mt-1 tabular-nums">—</span>
+</div>
+</div>
+<!-- Secondary 2x2 Grid -->
+<div class="grid grid-cols-2 gap-3">
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">快/慢充接口</span>
+<span class="font-headline font-semibold text-[15px] text-[#111214] mt-1 tabular-nums">—</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">预计充满</span>
+<span class="font-headline font-semibold text-[15px] text-[#111214] mt-1 tabular-nums">— 分钟</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">预约充电</span>
+<span class="font-headline font-semibold text-[15px] text-[#111214] mt-1 tabular-nums">—</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">电池保温</span>
+<span class="font-headline font-semibold text-[15px] text-[#111214] mt-1 tabular-nums">—</span>
+</div>
+</div>
+</section>
+<!-- 3. 上次充电记录卡 (Recent Charge History Card) -->
+<section class="bg-surface-container-lowest rounded-[28px] p-5 shadow-none">
+<!-- Card Header -->
+<div class="flex items-center gap-2 mb-3">
+<span class="material-symbols-outlined text-[#111214] text-[22px]" data-icon="history">history</span>
+<h2 class="font-headline text-[17px] font-bold text-[#111214]">上次充电记录</h2>
+</div>
+<!-- 4 Read-only rows -->
+<div class="divide-y divide-[#EDEDEF]">
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">用电量</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">— kWh</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">充电时长</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">—</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">完成时间</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">—</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">增加续航</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">— km</span>
+</div>
+</div>
+</section>
+<!-- 4. 充电限制卡 (Charge Limit Card) -->
+<section class="bg-surface-container-lowest rounded-[28px] p-5 shadow-none">
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#111214] text-[22px]" data-icon="tune">tune</span>
+<h2 class="font-headline text-[17px] font-bold text-[#111214]">充电限制</h2>
+</div>
+<span class="font-headline text-[22px] font-bold text-[#111214] tabular-nums tracking-tight">— %</span>
+</div>
+<!-- Read-only Progress Track -->
+<div class="relative my-4">
+<div class="w-full h-2 bg-[#EDEDEF] rounded-full overflow-hidden">
+<div class="h-full bg-[#F4EF00] rounded-full w-1/2"></div>
+</div>
+<!-- Centered indicator thumb at 50% -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-[#F4EF00] border border-[#D8D400] pointer-events-none"></div>
+</div>
+<!-- Scale Labels -->
+<div class="flex justify-between items-center text-[12px] font-medium text-[#8A8D93] tabular-nums px-0.5">
+<span>0%</span>
+<span>50%</span>
+<span>100%</span>
+</div>
+</section>
+<!-- 5. 胎压监测卡 (TPMS Card) -->
+<section class="bg-surface-container-lowest rounded-[28px] p-5 shadow-none">
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-[#111214] text-[22px]" data-icon="speed">speed</span>
+<h2 class="font-headline text-[17px] font-bold text-[#111214]">胎压监测</h2>
+</div>
+<!-- Deep dark #17181A container with minimal wireframe chassis -->
+<div class="h-44 w-full bg-[#17181A] rounded-[22px] flex items-center justify-center relative mb-3">
+<!-- Minimalist Vector Wireframe Chassis Contour -->
+<svg class="w-32 h-36" fill="none" viewbox="0 0 120 160" xmlns="http://www.w3.org/2000/svg">
+<!-- Outer Car Contour -->
+<path d="M 40 12 C 50 8 70 8 80 12 C 92 18 96 32 96 52 L 96 112 C 96 132 92 146 80 152 C 70 156 50 156 40 152 C 28 146 24 132 24 112 L 24 52 C 24 32 28 18 40 12 Z" stroke="#3A3C40" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+<!-- Windshield Line Front -->
+<path d="M 32 44 C 44 40 76 40 88 44" stroke="#2A2C30" stroke-linecap="round" stroke-width="1.5"></path>
+<!-- Windshield Line Rear -->
+<path d="M 34 118 C 44 122 76 122 86 118" stroke="#2A2C30" stroke-linecap="round" stroke-width="1.5"></path>
+<!-- Roof Frame Subtle -->
+<line stroke="#232427" stroke-width="1.5" x1="38" x2="38" y1="56" y2="108"></line>
+<line stroke="#232427" stroke-width="1.5" x1="82" x2="82" y1="56" y2="108"></line>
+<!-- Wheel Markers (4 small white dots) -->
+<!-- Front Left -->
+<circle cx="24" cy="38" fill="#FFFFFF" r="3.5"></circle>
+<!-- Front Right -->
+<circle cx="96" cy="38" fill="#FFFFFF" r="3.5"></circle>
+<!-- Rear Left -->
+<circle cx="24" cy="126" fill="#FFFFFF" r="3.5"></circle>
+<!-- Rear Right -->
+<circle cx="96" cy="126" fill="#FFFFFF" r="3.5"></circle>
+</svg>
+</div>
+<!-- 4 Read-only grid cells for wheel pressures -->
+<div class="grid grid-cols-2 gap-3">
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">左前轮</span>
+<span class="font-headline font-bold text-[17px] text-[#111214] mt-1 tabular-nums">— bar</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">右前轮</span>
+<span class="font-headline font-bold text-[17px] text-[#111214] mt-1 tabular-nums">— bar</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">左后轮</span>
+<span class="font-headline font-bold text-[17px] text-[#111214] mt-1 tabular-nums">— bar</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-[22px] p-3.5 flex flex-col justify-between">
+<span class="text-[12px] font-medium text-[#8A8D93]">右后轮</span>
+<span class="font-headline font-bold text-[17px] text-[#111214] mt-1 tabular-nums">— bar</span>
+</div>
+</div>
+</section>
+<!-- 6. 里程与定位卡 (Odometer & Location Card) -->
+<section class="bg-surface-container-lowest rounded-[28px] p-5 shadow-none mb-4">
+<div class="flex items-center gap-2 mb-3">
+<span class="material-symbols-outlined text-[#111214] text-[22px]" data-icon="explore">explore</span>
+<h2 class="font-headline text-[17px] font-bold text-[#111214]">里程与定位</h2>
+</div>
+<!-- 7 Read-only rows -->
+<div class="divide-y divide-[#EDEDEF]">
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">经纬度</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">—</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">航向角</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">—</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">车速</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">— km/h</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">坐标系</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">—</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">电源/点火状态</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">—</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">总里程</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">— km</span>
+</div>
+<div class="flex items-center justify-between py-3">
+<span class="text-[13px] font-medium text-[#8A8D93]">剩余可用综合续航</span>
+<span class="font-headline text-[14px] font-semibold text-[#111214] tabular-nums">— km</span>
+</div>
+</div>
+</section>
+</main>
+<!-- 7. Bottom Navigation Bar (Fixed capsule pill aligned with Shared Components JSON) -->
+<nav class="fixed bottom-0 left-0 right-0 w-full z-50 flex justify-center pb-4 px-4 max-w-[390px] mx-auto pointer-events-none">
+<div class="w-full bg-[#17181A] rounded-full px-3 py-2 flex items-center justify-around shadow-lg shadow-black/10 pointer-events-auto">
+<!-- Tab 1: 车控 (Inactive) -->
+<div class="flex flex-col items-center justify-center p-2 text-[#8A8D93] transition-all">
+<span class="material-symbols-outlined text-[22px]" data-icon="tune">tune</span>
+<span class="font-label text-[11px] font-medium mt-0.5 tracking-tight">车控</span>
+</div>
+<!-- Tab 2: 状态 (ACTIVE: #F4EF00 circle background + #111214 icon + yellow text) -->
+<div class="flex flex-col items-center justify-center bg-[#F4EF00] text-[#111214] rounded-full w-14 h-14 p-2 transition-all shadow-sm">
+<span class="material-symbols-outlined text-[24px]" data-icon="speed" data-weight="fill" style="font-variation-settings: 'FILL' 1;">speed</span>
+<span class="font-label text-[11px] font-bold tracking-tight">状态</span>
+</div>
+<!-- Tab 3: 设置 (Inactive) -->
+<div class="flex flex-col items-center justify-center p-2 text-[#8A8D93] transition-all">
+<span class="material-symbols-outlined text-[22px]" data-icon="settings">settings</span>
+<span class="font-label text-[11px] font-medium mt-0.5 tracking-tight">设置</span>
+</div>
+</div>
+</nav>
+</div>
+</body></html>

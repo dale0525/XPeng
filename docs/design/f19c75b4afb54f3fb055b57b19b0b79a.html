@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>手机号登录</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "outline-variant": "#494832",
+            "on-secondary-container": "#005439",
+            "on-error-container": "#ffdad6",
+            "surface-bright": "#38393b",
+            "primary-container": "#e8e400",
+            "on-tertiary-fixed": "#001f23",
+            "tertiary-fixed-dim": "#5ad7e7",
+            "surface-container-high": "#292a2c",
+            "inverse-on-surface": "#303033",
+            "surface-tint": "#d0cc00",
+            "on-tertiary": "#00363c",
+            "tertiary-fixed": "#90f1ff",
+            "on-tertiary-fixed-variant": "#004f57",
+            "on-primary-container": "#666400",
+            "outline": "#949278",
+            "error-container": "#93000a",
+            "surface-container-low": "#1b1c1e",
+            "primary-fixed-dim": "#d0cc00",
+            "secondary-fixed-dim": "#2ce1a0",
+            "on-error": "#690005",
+            "tertiary": "#effdff",
+            "surface": "#121315",
+            "primary-fixed": "#ede910",
+            "background": "#121315",
+            "on-secondary-fixed": "#002114",
+            "on-secondary-fixed-variant": "#005237",
+            "surface-container-lowest": "#0d0e10",
+            "surface-container": "#1f2022",
+            "error": "#ffb4ab",
+            "surface-variant": "#343537",
+            "inverse-surface": "#e3e2e4",
+            "on-primary-fixed": "#1d1d00",
+            "on-secondary": "#003825",
+            "secondary": "#43efae",
+            "on-surface": "#e3e2e4",
+            "on-primary-fixed-variant": "#4a4900",
+            "secondary-fixed": "#57febb",
+            "on-background": "#e3e2e4",
+            "secondary-container": "#00d294",
+            "inverse-primary": "#636100",
+            "tertiary-container": "#75efff",
+            "on-surface-variant": "#cac8ab",
+            "primary": "#fffbdc",
+            "on-tertiary-container": "#006c76",
+            "on-primary": "#333200",
+            "surface-container-highest": "#343537",
+            "surface-dim": "#121315"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "fontFamily": {
+            "headline": ["Space Grotesk", "sans-serif"],
+            "display": ["Space Grotesk", "sans-serif"],
+            "body": ["Plus Jakarta Sans", "sans-serif"],
+            "label": ["Space Grotesk", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      line-height: 1;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .cursor-blink {
+      animation: blink 1.1s infinite;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-lowest text-on-surface font-body antialiased min-h-screen selection:bg-primary-container selection:text-on-primary">
+<div class="w-full max-w-md mx-auto min-h-screen flex flex-col justify-between p-6 relative">
+<!-- Top Nav / Back Action (Linear/Transactional task header mapped from TopAppBar anchor) -->
+<div>
+<header class="flex justify-between items-center w-full max-w-md mx-auto pt-2 pb-6">
+<button aria-label="返回" class="w-12 h-12 rounded-full bg-surface-container-low text-on-surface flex items-center justify-center border border-surface-variant active:scale-95 transition-transform duration-150" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="arrow_back">arrow_back</span>
+</button>
+</header>
+<!-- Title Section -->
+<div class="mt-2 mb-8">
+<h1 class="text-2xl font-bold font-headline text-on-surface tracking-tight">手机号登录</h1>
+<p class="text-sm text-outline mt-2 font-medium">使用手机号验证码登录</p>
+</div>
+<!-- Form Section -->
+<div class="space-y-3.5">
+<!-- Phone Input Capsule -->
+<div class="h-14 bg-surface-container-low border border-surface-variant rounded-full px-5 flex items-center gap-3">
+<div class="flex items-center gap-1 text-on-surface font-headline font-semibold text-sm shrink-0 pr-2 border-r border-surface-variant">
+<span>+86</span>
+<span class="material-symbols-outlined text-[16px] text-outline" data-icon="arrow_drop_down">arrow_drop_down</span>
+</div>
+<div class="flex items-center flex-1 overflow-hidden">
+<span class="text-outline text-sm select-none">请输入 11 位手机号</span>
+<span class="w-[1.5px] h-4 bg-primary-container ml-0.5 cursor-blink"></span>
+</div>
+</div>
+<!-- Captcha Input & Action Capsule -->
+<div class="h-14 bg-surface-container-low border border-surface-variant rounded-full px-5 flex items-center justify-between">
+<span class="text-outline text-sm select-none">请输入 4 位验证码</span>
+<div class="flex items-center gap-3 shrink-0">
+<div class="w-[1px] h-4 bg-surface-variant"></div>
+<button class="text-sm font-semibold font-headline text-primary-container active:opacity-75 transition-opacity" type="button">获取验证码</button>
+<span class="text-xs font-label text-outline bg-surface-container-high px-2 py-0.5 rounded-full tabular-nums">60s 后重发</span>
+</div>
+</div>
+<!-- Slider Security Verification Card -->
+<div class="h-14 bg-surface-container-low border border-surface-variant rounded-full px-4 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-on-primary">
+<span class="material-symbols-outlined text-[18px]" data-icon="shield" data-weight="fill" style="font-variation-settings: 'FILL' 1;">shield</span>
+</div>
+<span class="text-sm font-medium text-on-surface">请验证滑块</span>
+</div>
+<div class="flex items-center gap-2 pr-1">
+<svg class="animate-spin h-4 w-4 text-primary-container" fill="none" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+<path class="opacity-75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" fill="currentColor"></path>
+</svg>
+<span class="text-xs text-outline font-label">验证中</span>
+</div>
+</div>
+<!-- Primary Action -->
+<div class="pt-3 space-y-4">
+<button class="w-full py-4 rounded-full bg-primary-container text-on-primary font-headline font-bold text-base shadow-lg shadow-primary-container/20 active:scale-[0.99] transition-transform duration-150 flex items-center justify-center" type="button">
+            登录
+          </button>
+<div class="text-center">
+<button class="text-xs text-outline font-medium hover:text-on-surface active:underline transition-colors" type="button">
+              换一个手机号
+            </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Privacy & Status Disclaimers -->
+<div class="pt-8 pb-2 space-y-2.5">
+<!-- Privacy Capsule 1 -->
+<div class="h-10 bg-surface-container border border-surface-variant rounded-full px-3.5 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline shrink-0" data-icon="shield">shield</span>
+<span class="text-xs text-outline truncate">仅使用本人账号，不收集第三方数据</span>
+</div>
+<!-- Privacy Capsule 2 -->
+<div class="h-10 bg-surface-container border border-surface-variant rounded-full px-3.5 flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-outline shrink-0" data-icon="info">info</span>
+<span class="text-xs text-outline truncate">登录会把官方 App 踢下线</span>
+</div>
+<!-- Service Status Indicator -->
+<div class="pt-2 flex items-center justify-center gap-1.5 text-xs text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary-fixed shadow-[0_0_8px_rgba(87,254,187,0.8)]"></span>
+<span class="font-label">服务连接正常</span>
+</div>
+</div>
+</div>
+</body></html>

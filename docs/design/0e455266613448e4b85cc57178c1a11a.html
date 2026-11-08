@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>设置 - Volt Lime 亮色手机竖屏规范版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            canvas: '#F2F2F4',
+            surface: '#FFFFFF',
+            inset: '#EDEDEF',
+            ink: '#17181A',
+            primary: '#F4EF00',
+            primaryBorder: '#D8D400',
+            statusGreen: '#12CE86',
+            textMain: '#111214',
+            textSub: '#8A8D93',
+            textMuted: '#B9BBC0',
+            borderLine: '#E5E7EB',
+          },
+          fontFamily: {
+            heading: ['"Space Grotesk"', 'system-ui', '-apple-system', 'sans-serif'],
+            body: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background-color: #F2F2F4;
+      color: #111214;
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .font-num {
+      font-family: 'Space Grotesk', system-ui, -apple-system, monospace;
+      font-feature-settings: 'tnum';
+    }
+  </style>
+</head>
+<body class="bg-canvas flex justify-center w-full">
+  <!-- 390px 边缘到边缘手机竖屏长页面容器 -->
+  <main class="w-[390px] min-w-[390px] max-w-[390px] min-h-screen bg-canvas px-[20px] pt-[20px] pb-[120px] relative flex flex-col gap-[16px]">
+    
+    <!-- 1. 顶栏 -->
+    <header class="w-full flex items-center justify-between pt-2">
+      <div class="flex items-center gap-[10px]">
+        <!-- 左侧 36px 圆形按钮（#EDEDEF 圆底、方向盘细线图标） -->
+        <button class="w-[36px] h-[36px] rounded-full bg-inset flex items-center justify-center text-textMain shrink-0">
+          <svg class="w-[20px] h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/>
+            <circle cx="12" cy="12" r="2.5"/>
+            <path d="M12 9.5V3"/>
+            <path d="M9.8 13.5L4.5 16.5"/>
+            <path d="M14.2 13.5L19.5 16.5"/>
+          </svg>
+        </button>
+        <div>
+          <div class="flex items-center gap-[8px]">
+            <h1 class="text-[18px] font-[600] text-textMain font-heading leading-tight tracking-tight">设置</h1>
+            <!-- 胶囊：在线联机 -->
+            <div class="h-[22px] px-[8px] bg-inset rounded-full flex items-center gap-[5px]">
+              <span class="w-[6px] h-[6px] rounded-full bg-statusGreen"></span>
+              <span class="text-[11px] font-[500] text-textSub">在线联机</span>
+            </div>
+            <!-- 胶囊：蓝牙已连接 -->
+            <div class="h-[22px] px-[8px] bg-inset rounded-full flex items-center gap-[4px]">
+              <span class="w-[6px] h-[6px] rounded-full bg-statusGreen"></span>
+              <svg class="w-[12px] h-[12px] text-textSub" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m7 7 10 10-5 5V2l5 5L7 17"/>
+              </svg>
+              <span class="text-[11px] font-[500] text-textSub">已连接</span>
+            </div>
+          </div>
+          <!-- 第二行小字 -->
+          <div class="text-[12px] text-textSub font-heading mt-[3px]">车牌 — ｜ 车型 —</div>
+        </div>
+      </div>
+      <!-- 最右 36px 圆形刷新按钮 -->
+      <button class="w-[36px] h-[36px] rounded-full bg-inset flex items-center justify-center text-textMain shrink-0">
+        <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+          <path d="M16 21h5v-5"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- 2. 一行灰字副标题与车辆胶囊行 -->
+    <section class="w-full flex flex-col gap-[8px] px-1">
+      <div class="text-[13px] text-textSub font-[400] leading-snug">自研车控节点设置与车辆参数面板</div>
+      <div class="flex items-center justify-between pt-1">
+        <div class="h-[26px] px-[12px] bg-surface rounded-full flex items-center gap-[6px] border border-borderLine/60">
+          <span class="w-[6px] h-[6px] rounded-full bg-primary"></span>
+          <span class="text-[12px] font-[600] text-textMain font-heading">车辆 —</span>
+        </div>
+        <div class="flex items-center gap-[6px] bg-surface px-[10px] py-[3px] rounded-full border border-borderLine/60">
+          <span class="w-[6px] h-[6px] rounded-full bg-statusGreen"></span>
+          <span class="text-[12px] font-[500] text-textSub">已同步</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. SOC 卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[16px]">
+      <div class="flex items-center justify-between">
+        <span class="text-[14px] font-[600] text-textMain">SOC 荷电状态</span>
+        <span class="text-[26px] font-[600] text-textMain font-num tracking-tight">— %</span>
+      </div>
+      <!-- 进度条轨道 -->
+      <div class="w-full flex flex-col gap-[8px]">
+        <div class="w-full h-[8px] bg-inset rounded-full relative flex items-center">
+          <div class="h-full bg-primary rounded-full w-1/2"></div>
+          <!-- 圆形黄色滑块（1px #D8D400 描边） -->
+          <div class="absolute left-1/2 -translate-x-1/2 w-[18px] h-[18px] rounded-full bg-primary border border-primaryBorder shadow-none"></div>
+        </div>
+        <!-- 刻度 0 / 50 / 100 -->
+        <div class="w-full flex justify-between text-[11px] text-textSub font-num font-[500] px-0.5">
+          <span>0</span>
+          <span>50</span>
+          <span>100</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 状态清单卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[14px]">
+      <div class="flex items-center gap-[8px]">
+        <svg class="w-[18px] h-[18px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m9 11 3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        <span class="text-[15px] font-[600] text-textMain font-heading">状态清单</span>
+      </div>
+      <div class="w-full flex flex-col">
+        <!-- 行 1 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">整车闭锁</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 2 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">五门状态</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 3 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">哨兵录像</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 4 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">远程启动只读</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. 账户信息卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[14px]">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-[8px]">
+          <svg class="w-[18px] h-[18px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span class="text-[15px] font-[600] text-textMain font-heading">账户信息</span>
+        </div>
+        <div class="h-[22px] px-[10px] bg-inset rounded-full flex items-center gap-[4px]">
+          <span class="w-[5px] h-[5px] rounded-full bg-statusGreen"></span>
+          <span class="text-[11px] font-[500] text-textSub">已登录</span>
+        </div>
+      </div>
+      <div class="w-full flex flex-col">
+        <!-- 行 1 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">车主昵称</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 2 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">手机号</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 3 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">令牌剩余</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+      </div>
+      <!-- 全宽 #EDEDEF 圆角胶囊按钮「退出登录」 -->
+      <button class="w-full h-[46px] rounded-full bg-inset flex items-center justify-center gap-[6px] text-textMain font-[600] text-[14px] mt-1 active:opacity-80 transition-opacity">
+        <svg class="w-[16px] h-[16px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        <span>退出登录</span>
+      </button>
+    </section>
+
+    <!-- 6. 车辆档案卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[14px]">
+      <div class="flex items-center gap-[8px]">
+        <svg class="w-[18px] h-[18px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="18" height="14" x="3" y="5" rx="2"/>
+          <path d="M7 15h4M15 15h2M7 11h2M13 11h4"/>
+        </svg>
+        <span class="text-[15px] font-[600] text-textMain font-heading">车辆档案</span>
+      </div>
+      <div class="w-full flex flex-col">
+        <!-- 行 1 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">车牌</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 2 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">车型代码</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 3 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">VIN 车架号</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 4 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">总里程</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">— km</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. 已就绪能力卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[14px]">
+      <div class="flex items-center gap-[8px]">
+        <svg class="w-[18px] h-[18px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+        <span class="text-[15px] font-[600] text-textMain font-heading">已就绪能力</span>
+      </div>
+      <div class="w-full flex flex-col">
+        <!-- 项 1 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <div class="flex items-center gap-[10px]">
+            <svg class="w-[18px] h-[18px] text-statusGreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span class="text-[14px] font-[500] text-textMain">远程车控</span>
+          </div>
+          <span class="text-[12px] text-statusGreen font-[500]">就绪</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 项 2 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <div class="flex items-center gap-[10px]">
+            <svg class="w-[18px] h-[18px] text-statusGreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span class="text-[14px] font-[500] text-textMain">哨兵模式</span>
+          </div>
+          <span class="text-[12px] text-statusGreen font-[500]">就绪</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 项 3 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <div class="flex items-center gap-[10px]">
+            <svg class="w-[18px] h-[18px] text-statusGreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span class="text-[14px] font-[500] text-textMain">胎压监测</span>
+          </div>
+          <span class="text-[12px] text-statusGreen font-[500]">就绪</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 项 4 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <div class="flex items-center gap-[10px]">
+            <svg class="w-[18px] h-[18px] text-statusGreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span class="text-[14px] font-[500] text-textMain">遮阳帘</span>
+          </div>
+          <span class="text-[12px] text-statusGreen font-[500]">就绪</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 项 5 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <div class="flex items-center gap-[10px]">
+            <svg class="w-[18px] h-[18px] text-statusGreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <span class="text-[14px] font-[500] text-textMain">蓝牙钥匙</span>
+          </div>
+          <span class="text-[12px] text-statusGreen font-[500]">就绪</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. 通讯与遥测连接卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[14px]">
+      <div class="flex items-center gap-[8px]">
+        <svg class="w-[18px] h-[18px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 2v7M12 15v7M2 12h7M15 12h7"/>
+        </svg>
+        <span class="text-[15px] font-[600] text-textMain font-heading">通讯与遥测连接</span>
+      </div>
+      <div class="w-full flex flex-col">
+        <!-- 行 1 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">云端状态</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 2 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">往返延迟</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">— ms</span>
+        </div>
+        <div class="w-full h-[1px] bg-borderLine"></div>
+        <!-- 行 3 -->
+        <div class="flex items-center justify-between py-[12px]">
+          <span class="text-[13px] text-textSub">MQTT 凭据剩余</span>
+          <span class="text-[14px] font-[500] text-textMain font-num">—</span>
+        </div>
+      </div>
+      <!-- 全宽 #EDEDEF 圆角胶囊按钮「重新连接」 -->
+      <button class="w-full h-[46px] rounded-full bg-inset flex items-center justify-center gap-[6px] text-textMain font-[600] text-[14px] mt-1 active:opacity-80 transition-opacity">
+        <svg class="w-[16px] h-[16px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        <span>重新连接</span>
+      </button>
+    </section>
+
+    <!-- 9. 外观与主题卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[14px]">
+      <div class="flex items-center gap-[8px]">
+        <svg class="w-[18px] h-[18px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+          <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+          <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+          <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+          <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.563-2.512 5.563-5.563C22 6.5 17.5 2 12 2Z"/>
+        </svg>
+        <span class="text-[15px] font-[600] text-textMain font-heading">外观与主题</span>
+      </div>
+      <!-- 一行三个等宽胶囊 -->
+      <div class="w-full grid grid-cols-3 gap-[8px] mt-1">
+        <!-- 选中态：#F4EF00 底 + 近黑字 -->
+        <button class="h-[42px] rounded-full bg-primary flex items-center justify-center text-ink font-[600] text-[13px]">
+          跟随系统
+        </button>
+        <!-- 未选中态：#EDEDEF 底 + 灰字 -->
+        <button class="h-[42px] rounded-full bg-inset flex items-center justify-center text-textSub font-[500] text-[13px]">
+          浅色
+        </button>
+        <button class="h-[42px] rounded-full bg-inset flex items-center justify-center text-textSub font-[500] text-[13px]">
+          深色
+        </button>
+      </div>
+    </section>
+
+    <!-- 10. 关于客户端卡 -->
+    <section class="w-full bg-surface rounded-[28px] p-[20px] flex flex-col gap-[14px]">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-[8px]">
+          <svg class="w-[18px] h-[18px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span class="text-[15px] font-[600] text-textMain font-heading">关于客户端</span>
+        </div>
+        <div class="h-[22px] px-[10px] bg-inset rounded-full flex items-center gap-[4px]">
+          <span class="w-[5px] h-[5px] rounded-full bg-statusGreen"></span>
+          <span class="text-[11px] font-[500] text-textSub">已最新</span>
+        </div>
+      </div>
+      <div class="w-full flex flex-col py-1">
+        <div class="flex items-center justify-between">
+          <span class="text-[14px] font-[600] text-textMain">版本号 —</span>
+          <svg class="w-[16px] h-[16px] text-statusGreen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <div class="text-[12px] text-textSub font-heading mt-[3px]">自研客户端 Releases</div>
+      </div>
+      <!-- 全宽 #EDEDEF 圆角胶囊按钮「检查更新」 -->
+      <button class="w-full h-[46px] rounded-full bg-inset flex items-center justify-center gap-[6px] text-textMain font-[600] text-[14px] mt-1 active:opacity-80 transition-opacity">
+        <svg class="w-[16px] h-[16px] text-textMain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+          <path d="M16 21h5v-5"/>
+        </svg>
+        <span>检查更新</span>
+      </button>
+    </section>
+
+    <!-- 11. 底栏：贴屏幕底部一条 #17181A 全圆角胶囊导航 -->
+    <nav class="fixed bottom-[16px] left-1/2 -translate-x-1/2 w-[350px] h-[64px] bg-ink rounded-full px-[18px] flex items-center justify-between shadow-2xl z-50">
+      <!-- 项 1：车控 (未选中、灰白) -->
+      <a href="javascript:void(0)" class="flex flex-col items-center justify-center w-[70px] gap-[3px] text-[#A6A9B0] active:scale-95 transition-transform">
+        <svg class="w-[20px] h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <circle cx="12" cy="12" r="2.5"/>
+          <path d="M12 9.5V3"/>
+          <path d="M9.8 13.5L4.5 16.5"/>
+          <path d="M14.2 13.5L19.5 16.5"/>
+        </svg>
+        <span class="text-[11px] font-[500]">车控</span>
+      </a>
+
+      <!-- 项 2：状态 (未选中、灰白) -->
+      <a href="javascript:void(0)" class="flex flex-col items-center justify-center w-[70px] gap-[3px] text-[#A6A9B0] active:scale-95 transition-transform">
+        <svg class="w-[20px] h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m12 14 4-4"/>
+          <path d="M3.34 19a10 10 0 1 1 17.32 0"/>
+        </svg>
+        <span class="text-[11px] font-[500]">状态</span>
+      </a>
+
+      <!-- 项 3：设置 (选中：#F4EF00 实心圆 + 近黑图标 + #F4EF00 中文) -->
+      <a href="javascript:void(0)" class="flex flex-col items-center justify-center w-[70px] gap-[3px] active:scale-95 transition-transform">
+        <div class="w-[32px] h-[32px] rounded-full bg-primary flex items-center justify-center text-ink shadow-sm">
+          <svg class="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <span class="text-[11px] font-[600] text-primary">设置</span>
+      </a>
+    </nav>
+
+  </main>
+</body>
+</html>

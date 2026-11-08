@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Volt Lime 车控</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Fonts: Space Grotesk & Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "inverse-surface": "#303032",
+            "primary-container": "#f4ef00",
+            "on-secondary": "#ffffff",
+            "surface-variant": "#e3e2e4",
+            "on-primary-fixed": "#1d1d00",
+            "surface-bright": "#faf9fb",
+            "on-secondary-fixed-variant": "#005232",
+            "on-secondary-container": "#007348",
+            "on-background": "#1b1c1e",
+            "primary": "#636100",
+            "tertiary-fixed": "#75f6f9",
+            "on-tertiary-fixed": "#002021",
+            "surface-container": "#efedf0",
+            "outline-variant": "#cbc8ab",
+            "on-surface": "#1b1c1e",
+            "on-primary-container": "#6d6b00",
+            "tertiary-container": "#7cfcff",
+            "on-tertiary-fixed-variant": "#004f51",
+            "surface": "#faf9fb",
+            "surface-container-highest": "#e3e2e4",
+            "surface-dim": "#dbd9dc",
+            "secondary-container": "#5efeb1",
+            "inverse-on-surface": "#f2f0f3",
+            "error-container": "#ffdad6",
+            "inverse-primary": "#d0cc00",
+            "on-secondary-fixed": "#002111",
+            "on-primary-fixed-variant": "#4b4900",
+            "on-tertiary-container": "#007476",
+            "on-tertiary": "#ffffff",
+            "secondary-fixed-dim": "#39e197",
+            "on-surface-variant": "#494832",
+            "surface-container-high": "#e9e7ea",
+            "outline": "#7a785f",
+            "background": "#faf9fb",
+            "secondary-fixed": "#5efeb1",
+            "tertiary": "#00696b",
+            "primary-fixed-dim": "#d0cc00",
+            "error": "#ba1a1a",
+            "on-primary": "#ffffff",
+            "surface-container-low": "#f5f3f6",
+            "primary-fixed": "#eee900",
+            "surface-container-lowest": "#ffffff",
+            "tertiary-fixed-dim": "#54d9dc",
+            "secondary": "#006d44",
+            "surface-tint": "#636100",
+            "on-error-container": "#93000a",
+            "on-error": "#ffffff"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "fontFamily": {
+            "headline": ["Space Grotesk", "sans-serif"],
+            "display": ["Space Grotesk", "sans-serif"],
+            "body": ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+            "label": ["Space Grotesk", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      background-color: #F2F2F4;
+      color: #111214;
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+      font-size: 22px;
+      line-height: 1;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    @keyframes subtleWave {
+      0%, 100% { transform: translateY(0px) scaleY(1); }
+      50% { transform: translateY(-4px) scaleY(1.04); }
+    }
+    .animate-wave {
+      animation: subtleWave 4.5s ease-in-out infinite;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="min-h-screen flex justify-center bg-[#F2F2F4]">
+<!-- Mobile Portrait Shell (390px canonical width max) -->
+<main class="w-full max-w-[390px] min-h-screen bg-[#F2F2F4] flex flex-col pb-28 relative select-none">
+<!-- 1. TopAppBar (Shared Component Implementation) -->
+<header class="bg-surface sticky top-0 z-40 flex justify-between items-center w-full px-5 py-3 transition-all duration-200">
+<div class="flex items-center space-x-2.5">
+<div class="w-9 h-9 rounded-full bg-surface-container flex items-center justify-center text-on-surface">
+<span class="material-symbols-outlined text-[20px]" data-icon="directions_car">directions_car</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center space-x-2">
+<h1 class="font-headline text-lg font-bold tracking-tight text-on-surface">车控</h1>
+<div class="flex items-center space-x-1 bg-surface-container px-2 py-0.5 rounded-full">
+<span class="w-1.5 h-1.5 rounded-full bg-[#12CE86]"></span>
+<span class="text-[11px] font-medium text-text-secondary">在线联机</span>
+</div>
+<div class="flex items-center space-x-0.5 bg-surface-container px-1.5 py-0.5 rounded-full">
+<span class="material-symbols-outlined text-[12px] text-[#12CE86]" data-icon="bluetooth">bluetooth</span>
+<span class="text-[11px] font-medium text-text-secondary">已连接</span>
+</div>
+</div>
+<div class="flex items-center space-x-2 text-[11px] text-text-tertiary font-body">
+<span>车牌 —</span>
+<span>·</span>
+<span>车型 —</span>
+</div>
+</div>
+</div>
+<button aria-label="刷新状态" class="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-highest flex items-center justify-center text-on-surface transition-all duration-200 active:scale-95" onclick="handleRefresh(this)">
+<span class="material-symbols-outlined text-[19px]" data-icon="refresh" id="refresh-icon">refresh</span>
+</button>
+</header>
+<!-- Scrollable Body Content -->
+<div class="px-4 pt-2.5 space-y-4">
+<!-- 2. Vehicle Hero Main Card -->
+<section class="relative w-full rounded-[28px] bg-[#17181A] overflow-hidden text-white p-5 flex flex-col justify-between min-h-[380px]">
+<!-- Vehicle Studio Photography Background -->
+<div class="absolute inset-0 z-0">
+<img class="w-full h-full object-cover object-center opacity-85 brightness-90 grayscale contrast-125" data-alt="A striking minimalist studio photograph of a modern electric vehicle body in monochrome high contrast black and white lighting. The vehicle sits elegantly against a deep matte black void with soft precision rim light highlighting its aerodynamic roofline and sculpted sides, creating a pristine futuristic tech aura." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC9dXc6NLGzRN1YygSWdQMzpyoEy3Gsj_-ZInRikHLzfTRW6LSc018U9tpKc_Kz4TIypB-aNFJFxCez56-zcM8zXkGEhhpextLTXyAUs35Jj_jIHICXWpuhWaXQUOB4JJg8Ql-Q5zol73rTjTHQ65MNlE-p9b_2bG4VUqYGP4QkkRSNbsExqcd6OugiqctnbQrNyMOwgjJVhoVJaHTmpieoVKk3iMyvVvt_vlTEWMn2ucT_GOoVJ-YM-nj_9bQ7eXrM3f3EAVx93ug"/>
+<div class="absolute inset-0 bg-gradient-to-t from-[#17181A] via-transparent to-[#17181A]/40"></div>
+</div>
+<!-- Subtle Liquid Charging Water Level Visual Effect (Lower Layer, Non-Obstructive) -->
+<div class="absolute bottom-0 left-0 right-0 h-28 pointer-events-none z-[1] overflow-hidden">
+<div class="w-full h-full bg-gradient-to-t from-[#12CE86]/25 to-transparent animate-wave origin-bottom"></div>
+</div>
+<!-- Hero Header -->
+<div class="relative z-10 flex justify-between items-start">
+<div class="flex flex-col space-y-1">
+<div class="flex items-center space-x-2">
+<span class="font-headline font-semibold text-lg text-white tracking-wide">—</span>
+<div class="flex items-center space-x-1 bg-white/10 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/10">
+<span class="w-1.5 h-1.5 rounded-full bg-[#12CE86]"></span>
+<span class="text-[11px] font-medium text-white/90">已布防</span>
+</div>
+</div>
+<!-- Status mini pills -->
+<div class="flex items-center space-x-1.5 text-[11px] text-white/60">
+<span>整车闭锁 —</span>
+<span>·</span>
+<span>五门 —</span>
+<span>·</span>
+<span>哨兵 —</span>
+</div>
+</div>
+<!-- Top-Right Circular Action Buttons -->
+<div class="flex items-center space-x-1.5">
+<button aria-label="更多参数" class="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-all active:scale-95">
+<span class="material-symbols-outlined text-[18px]" data-icon="tune">tune</span>
+</button>
+<button aria-label="菜单选项" class="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center text-white transition-all active:scale-95">
+<span class="material-symbols-outlined text-[18px]" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Hero Bottom: Battery Readout & Charging Details -->
+<div class="relative z-10 mt-28 flex flex-col justify-end">
+<div class="flex items-baseline space-x-1">
+<span class="font-headline font-bold text-6xl text-white tracking-tighter tabular-nums">—</span>
+<span class="font-headline font-bold text-3xl text-white/80">%</span>
+<div class="ml-3 flex items-center space-x-1 px-2.5 py-1 rounded-full bg-[#12CE86]/20 border border-[#12CE86]/40 text-[#12CE86] text-[11px] font-medium">
+<span class="material-symbols-outlined text-[14px]" data-icon="bolt">bolt</span>
+<span>充电中</span>
+</div>
+</div>
+<div class="mt-2 pt-2 border-t border-white/10 flex justify-between items-center text-xs text-white/70">
+<div class="flex items-center space-x-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#12CE86]"></span>
+<span>预计 — 分钟后充满</span>
+</div>
+<div class="font-headline font-medium text-white/90">
+              电量 —
+            </div>
+</div>
+</div>
+</section>
+<!-- 3. Shortcut Actions Section (4 Grid Items) -->
+<section class="space-y-2.5">
+<div class="flex justify-between items-center px-1">
+<h2 class="font-headline font-semibold text-[15px] text-[#111214] tracking-tight">快捷指令</h2>
+<button class="flex items-center space-x-0.5 text-xs text-text-secondary hover:text-[#111214] transition-colors">
+<span>自定义</span>
+<span class="material-symbols-outlined text-[14px]" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+<div class="grid grid-cols-4 gap-2.5">
+<!-- 1. 解锁/锁车 (Interactive State Toggle) -->
+<button class="rounded-[22px] bg-white p-3 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95 hover:bg-surface-container-lowest" id="lock-btn" onclick="toggleLockState()">
+<div class="w-11 h-11 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] mb-2 transition-colors" id="lock-icon-bg">
+<span class="material-symbols-outlined text-[20px]" data-icon="lock" id="lock-icon">lock</span>
+</div>
+<span class="text-xs font-semibold text-[#111214]" id="lock-text">已锁车</span>
+</button>
+<!-- 2. 远程解锁 -->
+<button class="rounded-[22px] bg-white p-3 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95 hover:bg-surface-container-lowest" onclick="triggerHaptic(this)">
+<div class="w-11 h-11 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] mb-2">
+<span class="material-symbols-outlined text-[20px]" data-icon="vpn_key">vpn_key</span>
+</div>
+<span class="text-xs font-semibold text-[#111214]">远程解锁</span>
+</button>
+<!-- 3. 开启空调 -->
+<button class="rounded-[22px] bg-white p-3 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95 hover:bg-surface-container-lowest" id="ac-quick-btn" onclick="toggleACQuick()">
+<div class="w-11 h-11 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] mb-2 transition-colors" id="ac-quick-bg">
+<span class="material-symbols-outlined text-[20px]" data-icon="mode_fan">mode_fan</span>
+</div>
+<span class="text-xs font-semibold text-[#111214]" id="ac-quick-text">开启空调</span>
+</button>
+<!-- 4. 闪灯 (Volt Lime Accent Highlighted) -->
+<button class="rounded-[22px] bg-white p-3 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95 hover:bg-surface-container-lowest" onclick="triggerFlashLight(this)">
+<div class="w-11 h-11 rounded-full bg-[#F4EF00] flex items-center justify-center text-[#111214] mb-2">
+<span class="material-symbols-outlined text-[20px]" data-icon="lightbulb">lightbulb</span>
+</div>
+<span class="text-xs font-semibold text-[#111214]">闪灯</span>
+</button>
+</div>
+</section>
+<!-- 4. Extended Feature Entry Points (3 Action Pill Cards) -->
+<section class="space-y-2">
+<div class="grid grid-cols-3 gap-2">
+<!-- Entry 1: 远程查看 -->
+<button class="rounded-[22px] bg-white p-3 flex flex-col items-start justify-between min-h-[92px] transition-all duration-200 active:scale-95 text-left" onclick="openFeatureNotice('远程查看')">
+<div class="w-8 h-8 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[18px]" data-icon="videocam">videocam</span>
+</div>
+<div class="mt-2">
+<div class="text-xs font-bold text-[#111214] leading-tight">远程查看</div>
+<div class="text-[10px] text-text-secondary mt-0.5 truncate">车身全景环视</div>
+</div>
+</button>
+<!-- Entry 2: 直线召唤 -->
+<button class="rounded-[22px] bg-white p-3 flex flex-col items-start justify-between min-h-[92px] transition-all duration-200 active:scale-95 text-left" onclick="openFeatureNotice('直线召唤')">
+<div class="w-8 h-8 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[18px]" data-icon="swap_vertical_circle">swap_vertical_circle</span>
+</div>
+<div class="mt-2">
+<div class="text-xs font-bold text-[#111214] leading-tight">直线召唤</div>
+<div class="text-[10px] text-text-secondary mt-0.5 truncate">前后遥控泊车</div>
+</div>
+</button>
+<!-- Entry 3: 连接充电桩 -->
+<button class="rounded-[22px] bg-white p-3 flex flex-col items-start justify-between min-h-[92px] transition-all duration-200 active:scale-95 text-left" onclick="openFeatureNotice('连接充电桩')">
+<div class="w-8 h-8 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[18px]" data-icon="ev_station">ev_station</span>
+</div>
+<div class="mt-2">
+<div class="text-xs font-bold text-[#111214] leading-tight">连接充电桩</div>
+<div class="text-[10px] text-text-secondary mt-0.5 truncate">智慧家充桩配对</div>
+</div>
+</button>
+</div>
+</section>
+<!-- 5. Doors & Central Locking (车门与中控锁) -->
+<section class="rounded-[28px] bg-white p-5 space-y-4">
+<div class="flex justify-between items-center">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-text-secondary text-[20px]" data-icon="lock_clock">lock_clock</span>
+<h3 class="font-headline font-semibold text-[16px] text-[#111214]">车门与中控锁</h3>
+</div>
+<div class="flex items-center space-x-1.5 text-xs text-text-secondary">
+<span class="px-2 py-0.5 rounded-full bg-[#EDEDEF]">门锁 —</span>
+<span class="px-2 py-0.5 rounded-full bg-[#EDEDEF]">五门 —</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-2.5 pt-1">
+<!-- Button 1: 中控门锁 (Single button toggle) -->
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] px-4 py-2.5 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95" onclick="toggleCentralLock(this)">
+<span class="text-xs font-bold text-[#111214]">中控门锁</span>
+<span class="text-[10px] text-text-secondary">MQTT + BLE 双通道</span>
+</button>
+<!-- Button 2: 远程解锁 -->
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] px-4 py-2.5 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+<span class="text-xs font-bold text-[#111214]">远程解锁</span>
+<span class="text-[10px] text-text-secondary">仅远程下发</span>
+</button>
+<!-- Button 3: 电动尾门 (Single button toggle) -->
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] px-4 py-2.5 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95" id="trunk-btn" onclick="toggleTrunk(this)">
+<span class="text-xs font-bold text-[#111214]" id="trunk-btn-text">打开尾门</span>
+<span class="text-[10px] text-text-secondary">BLE 直连</span>
+</button>
+<!-- Button 4: 开启临停 (Single trigger button only) -->
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] px-4 py-2.5 flex flex-col items-center justify-center text-center transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+<span class="text-xs font-bold text-[#111214]">开启临停</span>
+<span class="text-[10px] text-text-secondary">单次触发</span>
+</button>
+</div>
+</section>
+<!-- 6. Windows & Sunshade (车窗与遮阳帘) -->
+<section class="rounded-[28px] bg-white p-5 space-y-4">
+<div class="flex justify-between items-center">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-text-secondary text-[20px]" data-icon="roller_shades">roller_shades</span>
+<h3 class="font-headline font-semibold text-[16px] text-[#111214]">车窗与遮阳帘</h3>
+</div>
+</div>
+<!-- Readout stats pills -->
+<div class="grid grid-cols-2 gap-2 text-[11px] text-text-secondary font-medium">
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>四窗开度</span>
+<span class="text-[#111214] font-semibold tabular-nums">—%</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>天幕开度</span>
+<span class="text-[#111214] font-semibold tabular-nums">—%</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>太阳能天窗</span>
+<span class="text-[#111214] font-semibold">—</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>电动尾门状态</span>
+<span class="text-[#111214] font-semibold">—</span>
+</div>
+</div>
+<!-- 4 Action buttons -->
+<div class="grid grid-cols-2 gap-2.5 pt-1">
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-3 text-xs font-semibold text-[#111214] transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+            全车车窗通风
+          </button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-3 text-xs font-semibold text-[#111214] transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+            全车车窗关闭
+          </button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-3 text-xs font-semibold text-[#111214] transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+            打开遮阳帘
+          </button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-3 text-xs font-semibold text-[#111214] transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+            关闭遮阳帘
+          </button>
+</div>
+</section>
+<!-- 7. Climate & Seats (空调与座椅) -->
+<section class="rounded-[28px] bg-white p-5 space-y-4">
+<div class="flex justify-between items-center">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-text-secondary text-[20px]" data-icon="ac_unit">ac_unit</span>
+<h3 class="font-headline font-semibold text-[16px] text-[#111214]">空调与座椅</h3>
+</div>
+</div>
+<!-- Readout stats -->
+<div class="grid grid-cols-2 gap-2 text-[11px] text-text-secondary">
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>目标/实测</span>
+<span class="text-[#111214] font-semibold tabular-nums">— °C / — °C</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>风量</span>
+<span class="text-[#111214] font-semibold tabular-nums">—</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>AUTO 模式</span>
+<span class="text-[#111214] font-semibold">—</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-3 py-1 flex justify-between">
+<span>座椅加热通风</span>
+<span class="text-[#111214] font-semibold">—</span>
+</div>
+</div>
+<!-- Climate Control Action Cluster -->
+<div class="space-y-2 pt-1">
+<div class="grid grid-cols-2 gap-2.5">
+<button class="rounded-full bg-[#111214] text-white py-2.5 px-3 text-xs font-semibold transition-all duration-200 active:scale-95 flex items-center justify-center space-x-1" onclick="triggerHaptic(this)">
+<span class="material-symbols-outlined text-[16px]" data-icon="power_settings_new">power_settings_new</span>
+<span>打开空调</span>
+</button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-3 text-xs font-semibold text-[#111214] transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+              关闭空调
+            </button>
+</div>
+<div class="grid grid-cols-2 gap-2.5">
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2 px-3 text-xs font-semibold text-[#111214] flex items-center justify-center space-x-1 transition-all active:scale-95" onclick="triggerHaptic(this)">
+<span class="material-symbols-outlined text-[16px]" data-icon="remove">remove</span>
+<span>温度 -</span>
+</button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2 px-3 text-xs font-semibold text-[#111214] flex items-center justify-center space-x-1 transition-all active:scale-95" onclick="triggerHaptic(this)">
+<span class="material-symbols-outlined text-[16px]" data-icon="add">add</span>
+<span>温度 +</span>
+</button>
+</div>
+<div class="grid grid-cols-3 gap-2 pt-1">
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2 px-1 text-[11px] font-semibold text-[#111214] text-center transition-all active:scale-95" onclick="triggerHaptic(this)">
+              极速降温 (18°C)
+            </button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2 px-1 text-[11px] font-semibold text-[#111214] text-center transition-all active:scale-95" onclick="triggerHaptic(this)">
+              极速升温 (32°C)
+            </button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2 px-1 text-[11px] font-semibold text-[#111214] text-center transition-all active:scale-95" onclick="triggerHaptic(this)">
+              高温抑菌 (32°C)
+            </button>
+</div>
+</div>
+</section>
+<!-- 8. Lights & Horn (灯光与提示) -->
+<section class="rounded-[28px] bg-white p-5 space-y-4">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-text-secondary text-[20px]" data-icon="campaign">campaign</span>
+<h3 class="font-headline font-semibold text-[16px] text-[#111214]">灯光与提示</h3>
+</div>
+<div class="grid grid-cols-2 gap-2.5">
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-4 text-xs font-bold text-[#111214] flex items-center justify-center space-x-1.5 transition-all duration-200 active:scale-95" onclick="triggerFlashLight(this)">
+<span class="material-symbols-outlined text-[18px]" data-icon="lightbulb">lightbulb</span>
+<span>闪灯</span>
+</button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-4 text-xs font-bold text-[#111214] flex items-center justify-center space-x-1.5 transition-all duration-200 active:scale-95" onclick="triggerHorn(this)">
+<span class="material-symbols-outlined text-[18px]" data-icon="volume_up">volume_up</span>
+<span>鸣笛</span>
+</button>
+</div>
+</section>
+<!-- 9. Sentry Mode (哨兵模式) -->
+<section class="rounded-[28px] bg-white p-5 space-y-4 mb-6">
+<div class="flex justify-between items-center">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-text-secondary text-[20px]" data-icon="shield">shield</span>
+<h3 class="font-headline font-semibold text-[16px] text-[#111214]">哨兵模式</h3>
+</div>
+</div>
+<div class="grid grid-cols-3 gap-2 text-[11px] text-text-secondary">
+<div class="bg-[#EDEDEF] rounded-full px-2 py-1 text-center truncate">
+            录像使能: <span class="font-semibold text-[#111214]">—</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-2 py-1 text-center truncate">
+            维修模式: <span class="font-semibold text-[#111214]">—</span>
+</div>
+<div class="bg-[#EDEDEF] rounded-full px-2 py-1 text-center truncate">
+            灵敏度: <span class="font-semibold text-[#111214]">—</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-2.5 pt-1">
+<button class="rounded-full bg-[#111214] text-white py-2.5 px-3 text-xs font-bold transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+            开启哨兵模式
+          </button>
+<button class="rounded-full bg-[#EDEDEF] hover:bg-[#E3E2E4] py-2.5 px-3 text-xs font-bold text-[#111214] transition-all duration-200 active:scale-95" onclick="triggerHaptic(this)">
+            关闭哨兵模式
+          </button>
+</div>
+</section>
+</div>
+<!-- 10. BottomNavBar (Shared Component JSON Implementation) -->
+<!-- Destination count: 3, Label texts: ["车控", "状态", "设置"], Active: "车控" -->
+<nav aria-label="底栏主导航" class="fixed bottom-0 left-0 right-0 z-50 flex justify-around items-center px-4 py-2.5 max-w-md mx-auto bg-inverse-surface dark:bg-inverse-surface rounded-full mb-3 mx-4 shadow-sm">
+<!-- 1. 车控 (ACTIVE TAB - Exactly follows style_active_navigation) -->
+<a class="flex flex-col items-center justify-center bg-primary-container text-on-primary-fixed rounded-full px-4 py-1.5 transition-all active:scale-95" href="#">
+<span class="material-symbols-outlined text-[19px]" data-icon="tune" style="font-variation-settings: 'FILL' 1;">tune</span>
+<span class="font-label text-xs font-bold mt-0.5">车控</span>
+</a>
+<!-- 2. 状态 (INACTIVE TAB - Exactly follows style_inactive_navigation) -->
+<a class="flex flex-col items-center justify-center text-surface-variant dark:text-surface-variant px-3 py-1.5 transition-all hover:opacity-90 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[19px]" data-icon="speed">speed</span>
+<span class="font-label text-xs font-medium mt-0.5">状态</span>
+</a>
+<!-- 3. 设置 (INACTIVE TAB - Exactly follows style_inactive_navigation) -->
+<a class="flex flex-col items-center justify-center text-surface-variant dark:text-surface-variant px-3 py-1.5 transition-all hover:opacity-90 active:scale-95" href="#">
+<span class="material-symbols-outlined text-[19px]" data-icon="settings">settings</span>
+<span class="font-label text-xs font-medium mt-0.5">设置</span>
+</a>
+</nav>
+</main>
+<script>
+    // Micro-interactions and feedback handlers
+    let isLocked = true;
+    let trunkOpen = false;
+    let acOn = false;
+
+    function triggerHaptic(btn) {
+      btn.classList.add('scale-95');
+      setTimeout(() => btn.classList.remove('scale-95'), 140);
+    }
+
+    function toggleLockState() {
+      isLocked = !isLocked;
+      const icon = document.getElementById('lock-icon');
+      const text = document.getElementById('lock-text');
+      const bg = document.getElementById('lock-icon-bg');
+      
+      if (isLocked) {
+        icon.innerText = 'lock';
+        text.innerText = '已锁车';
+        bg.classList.remove('bg-[#F4EF00]');
+        bg.classList.add('bg-[#EDEDEF]');
+      } else {
+        icon.innerText = 'lock_open';
+        text.innerText = '已解锁';
+        bg.classList.remove('bg-[#EDEDEF]');
+        bg.classList.add('bg-[#F4EF00]');
+      }
+    }
+
+    function toggleCentralLock(btn) {
+      triggerHaptic(btn);
+      toggleLockState();
+    }
+
+    function toggleTrunk(btn) {
+      triggerHaptic(btn);
+      trunkOpen = !trunkOpen;
+      const text = document.getElementById('trunk-btn-text');
+      text.innerText = trunkOpen ? '关闭尾门' : '打开尾门';
+    }
+
+    function toggleACQuick() {
+      acOn = !acOn;
+      const bg = document.getElementById('ac-quick-bg');
+      const text = document.getElementById('ac-quick-text');
+      if (acOn) {
+        bg.classList.remove('bg-[#EDEDEF]');
+        bg.classList.add('bg-[#12CE86]/20');
+        text.innerText = '空调运行中';
+      } else {
+        bg.classList.remove('bg-[#12CE86]/20');
+        bg.classList.add('bg-[#EDEDEF]');
+        text.innerText = '开启空调';
+      }
+    }
+
+    function triggerFlashLight(btn) {
+      triggerHaptic(btn);
+      btn.classList.add('ring-2', 'ring-[#F4EF00]');
+      setTimeout(() => btn.classList.remove('ring-2', 'ring-[#F4EF00]'), 500);
+    }
+
+    function triggerHorn(btn) {
+      triggerHaptic(btn);
+    }
+
+    function handleRefresh(btn) {
+      const icon = document.getElementById('refresh-icon');
+      icon.classList.add('animate-spin');
+      setTimeout(() => {
+        icon.classList.remove('animate-spin');
+      }, 700);
+    }
+
+    function openFeatureNotice(featureName) {
+      // Interactive cue without violating modal exclusions
+      const toast = document.createElement('div');
+      toast.className = 'fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#17181A] text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg transition-all duration-300 pointer-events-none opacity-95';
+      toast.innerText = '指令已就绪：' + featureName;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 1600);
+    }
+  </script>
+</body></html>

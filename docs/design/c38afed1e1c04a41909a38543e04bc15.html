@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>设置 - Volt Lime (暗色手机竖屏规范版)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background-color: #0E0F11;
+      color: #F5F6F7;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .font-num {
+      font-family: 'Space Grotesk', -apple-system, monospace;
+      font-feature-settings: "tnum" 1;
+    }
+    /* Thin icon strokes */
+    .icon-thin {
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+  </style>
+</head>
+<body class="bg-[#0E0F11] text-[#F5F6F7] min-h-screen flex flex-col justify-between selection:bg-[#E8E400] selection:text-[#0E0F11]">
+
+  <!-- Main Container: Exactly 390px, edge-to-edge, zero desktop margin or canvas wrapper -->
+  <main class="w-full max-w-[390px] mx-auto px-5 pt-4 pb-28 flex flex-col gap-4">
+
+    <!-- 1. Top Bar -->
+    <header class="flex flex-col gap-2 pt-2">
+      <div class="flex items-center justify-between">
+        <!-- Left 36px circle with thin steering wheel icon -->
+        <button type="button" aria-label="车控" class="w-9 h-9 rounded-full bg-[#26282C] flex items-center justify-center text-[#F5F6F7] active:scale-95 transition-transform">
+          <svg class="w-5 h-5 icon-thin stroke-current" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 3v6M3 12h6M15 12h6M6.5 17.5l4-3.5M17.5 17.5l-4-3.5"/>
+          </svg>
+        </button>
+
+        <!-- Title & Status Pills -->
+        <div class="flex items-center gap-2">
+          <span class="text-[18px] font-semibold text-[#F5F6F7]">设置</span>
+          
+          <!-- Online Pill -->
+          <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#26282C] border border-[#2E3035]">
+            <span class="w-1.5 h-1.5 rounded-full bg-[#2BE0A0]"></span>
+            <span class="text-[11px] font-medium text-[#9A9DA3]">在线联机</span>
+          </div>
+
+          <!-- Bluetooth Pill -->
+          <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#26282C] border border-[#2E3035]">
+            <svg class="w-3 h-3 icon-thin stroke-[#2BE0A0]" viewBox="0 0 24 24">
+              <path d="m7 7 10 10-5 5V2l5 5L7 17"/>
+            </svg>
+            <span class="w-1.5 h-1.5 rounded-full bg-[#2BE0A0]"></span>
+            <span class="text-[11px] font-medium text-[#9A9DA3]">已连接</span>
+          </div>
+        </div>
+
+        <!-- Right 36px circle with refresh icon -->
+        <button type="button" aria-label="刷新" class="w-9 h-9 rounded-full bg-[#26282C] flex items-center justify-center text-[#9A9DA3] active:scale-95 transition-transform hover:text-[#F5F6F7]">
+          <svg class="w-4 h-4 icon-thin stroke-current" viewBox="0 0 24 24">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+            <path d="M16 21h5v-5"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Second row small grey -->
+      <div class="flex items-center justify-between px-1">
+        <span class="text-xs text-[#9A9DA3] font-num">车牌 — ｜ 车型 —</span>
+      </div>
+
+      <!-- Description line under it -->
+      <p class="text-xs text-[#6C6F75] px-1 m-0">自研车控节点设置与车辆参数面板</p>
+    </header>
+
+    <!-- 2. Summary Row -->
+    <section class="flex items-center justify-between px-1">
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-[#E8E400]"></span>
+        <span class="text-sm font-semibold text-[#F5F6F7]">车辆 —</span>
+      </div>
+      <div class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#26282C] border border-[#2E3035]">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#2BE0A0]"></span>
+        <span class="text-xs text-[#9A9DA3]">已同步</span>
+      </div>
+    </section>
+
+    <!-- 3. SOC Card -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-medium text-[#9A9DA3]">SOC 荷电状态</span>
+        <span class="text-2xl font-semibold font-num text-[#F5F6F7]">— %</span>
+      </div>
+
+      <!-- Read-only Progress bar with thumb -->
+      <div class="relative w-full flex flex-col gap-2">
+        <div class="relative w-full h-2 rounded-full bg-[#26282C] overflow-hidden">
+          <div class="absolute top-0 left-0 h-full bg-[#E8E400] rounded-full" style="width: 50%;"></div>
+        </div>
+        <!-- Center positioned thumb indicator (50%) -->
+        <div class="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-[#E8E400] border border-[#C9C600] pointer-events-none"></div>
+
+        <!-- Scale Labels -->
+        <div class="flex justify-between items-center text-[11px] font-num text-[#6C6F75] pt-1">
+          <span>0</span>
+          <span>50</span>
+          <span>100</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Status List Card (状态清单) -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col">
+      <div class="flex items-center gap-2 pb-3 border-b border-[#2E3035]">
+        <svg class="w-4 h-4 icon-thin stroke-[#E8E400]" viewBox="0 0 24 24">
+          <path d="m9 11 3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        <span class="text-sm font-semibold text-[#F5F6F7]">状态清单</span>
+      </div>
+
+      <div class="flex flex-col">
+        <!-- Row 1 -->
+        <div class="flex items-center justify-between py-3 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">整车闭锁</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <!-- Row 2 -->
+        <div class="flex items-center justify-between py-3 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">五门状态</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <!-- Row 3 -->
+        <div class="flex items-center justify-between py-3 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">哨兵录像</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <!-- Row 4 -->
+        <div class="flex items-center justify-between py-3">
+          <span class="text-sm text-[#9A9DA3]">远程启动只读</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Account Card (账户信息) -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col gap-4">
+      <div class="flex items-center justify-between pb-3 border-b border-[#2E3035]">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 icon-thin stroke-[#E8E400]" viewBox="0 0 24 24">
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span class="text-sm font-semibold text-[#F5F6F7]">账户信息</span>
+        </div>
+        <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#26282C] border border-[#2E3035]">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#2BE0A0]"></span>
+          <span class="text-[11px] text-[#9A9DA3]">已登录</span>
+        </div>
+      </div>
+
+      <div class="flex flex-col">
+        <div class="flex items-center justify-between py-2.5 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">车主昵称</span>
+          <span class="text-sm font-medium text-[#F5F6F7]">—</span>
+        </div>
+        <div class="flex items-center justify-between py-2.5 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">手机号</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <div class="flex items-center justify-between py-2.5">
+          <span class="text-sm text-[#9A9DA3]">令牌剩余</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+      </div>
+
+      <!-- Button 退出登录 -->
+      <button type="button" class="w-full h-11 rounded-full bg-[#26282C] border border-[#2E3035] flex items-center justify-center gap-2 text-sm font-medium text-[#F5F6F7] active:scale-[0.98] transition-transform hover:bg-[#2A2C31]">
+        <svg class="w-4 h-4 icon-thin stroke-current" viewBox="0 0 24 24">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        <span>退出登录</span>
+      </button>
+    </section>
+
+    <!-- 6. Vehicle Profile Card (车辆档案) -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col">
+      <div class="flex items-center gap-2 pb-3 border-b border-[#2E3035]">
+        <svg class="w-4 h-4 icon-thin stroke-[#E8E400]" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="16" rx="2"/>
+          <path d="M7 8h10M7 12h10M7 16h6"/>
+        </svg>
+        <span class="text-sm font-semibold text-[#F5F6F7]">车辆档案</span>
+      </div>
+
+      <div class="flex flex-col">
+        <div class="flex items-center justify-between py-3 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">车牌</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <div class="flex items-center justify-between py-3 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">车型代码</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <div class="flex items-center justify-between py-3 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">VIN 车架号</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <div class="flex items-center justify-between py-3">
+          <span class="text-sm text-[#9A9DA3]">总里程</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">— km</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Ready Capabilities Card (就绪能力) -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col gap-3">
+      <div class="flex items-center gap-2 pb-2 border-b border-[#2E3035]">
+        <svg class="w-4 h-4 icon-thin stroke-[#E8E400]" viewBox="0 0 24 24">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
+        <span class="text-sm font-semibold text-[#F5F6F7]">已就绪能力</span>
+      </div>
+
+      <div class="flex flex-col gap-2.5 pt-1">
+        <!-- Capability 1 -->
+        <div class="flex items-center gap-2.5 py-1">
+          <svg class="w-4 h-4 icon-thin stroke-[#2BE0A0]" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-sm text-[#F5F6F7]">远程车控</span>
+        </div>
+        <!-- Capability 2 -->
+        <div class="flex items-center gap-2.5 py-1">
+          <svg class="w-4 h-4 icon-thin stroke-[#2BE0A0]" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-sm text-[#F5F6F7]">哨兵模式</span>
+        </div>
+        <!-- Capability 3 -->
+        <div class="flex items-center gap-2.5 py-1">
+          <svg class="w-4 h-4 icon-thin stroke-[#2BE0A0]" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-sm text-[#F5F6F7]">胎压监测</span>
+        </div>
+        <!-- Capability 4 -->
+        <div class="flex items-center gap-2.5 py-1">
+          <svg class="w-4 h-4 icon-thin stroke-[#2BE0A0]" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-sm text-[#F5F6F7]">遮阳帘</span>
+        </div>
+        <!-- Capability 5 -->
+        <div class="flex items-center gap-2.5 py-1">
+          <svg class="w-4 h-4 icon-thin stroke-[#2BE0A0]" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-sm text-[#F5F6F7]">蓝牙钥匙</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. Connectivity Card (通讯与遥测连接) -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col gap-4">
+      <div class="flex items-center gap-2 pb-3 border-b border-[#2E3035]">
+        <svg class="w-4 h-4 icon-thin stroke-[#E8E400]" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3"/>
+          <circle cx="19" cy="5" r="2"/>
+          <circle cx="5" cy="19" r="2"/>
+          <path d="M10.5 10.5 6.5 17.5M13.5 13.5l4-7"/>
+        </svg>
+        <span class="text-sm font-semibold text-[#F5F6F7]">通讯与遥测连接</span>
+      </div>
+
+      <div class="flex flex-col">
+        <div class="flex items-center justify-between py-2.5 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">云端状态</span>
+          <span class="text-sm font-medium text-[#F5F6F7]">—</span>
+        </div>
+        <div class="flex items-center justify-between py-2.5 border-b border-[#2E3035]">
+          <span class="text-sm text-[#9A9DA3]">往返延迟</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">— ms</span>
+        </div>
+        <div class="flex items-center justify-between py-2.5">
+          <span class="text-sm text-[#9A9DA3]">MQTT 凭据剩余</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+      </div>
+
+      <!-- Button 重新连接 -->
+      <button type="button" class="w-full h-11 rounded-full bg-[#26282C] border border-[#2E3035] flex items-center justify-center gap-2 text-sm font-medium text-[#F5F6F7] active:scale-[0.98] transition-transform hover:bg-[#2A2C31]">
+        <svg class="w-4 h-4 icon-thin stroke-current" viewBox="0 0 24 24">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        <span>重新连接</span>
+      </button>
+    </section>
+
+    <!-- 9. Appearance Card (外观与主题) -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col gap-4">
+      <div class="flex items-center gap-2 pb-3 border-b border-[#2E3035]">
+        <svg class="w-4 h-4 icon-thin stroke-[#E8E400]" viewBox="0 0 24 24">
+          <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+          <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+          <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+          <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+          <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.563-2.512 5.563-5.563C22 6.5 17.5 2 12 2z"/>
+        </svg>
+        <span class="text-sm font-semibold text-[#F5F6F7]">外观与主题</span>
+      </div>
+
+      <!-- One row of three equal pills -->
+      <div class="grid grid-cols-3 gap-2">
+        <!-- Active Pill: 跟随系统 -->
+        <button type="button" class="h-10 rounded-full bg-[#E8E400] text-[#0E0F11] font-semibold text-xs flex items-center justify-center transition-all">
+          跟随系统
+        </button>
+        <!-- Inactive Pill: 浅色 -->
+        <button type="button" class="h-10 rounded-full bg-[#26282C] text-[#9A9DA3] font-medium text-xs flex items-center justify-center border border-[#2E3035] hover:text-[#F5F6F7] transition-all">
+          浅色
+        </button>
+        <!-- Inactive Pill: 深色 -->
+        <button type="button" class="h-10 rounded-full bg-[#26282C] text-[#9A9DA3] font-medium text-xs flex items-center justify-center border border-[#2E3035] hover:text-[#F5F6F7] transition-all">
+          深色
+        </button>
+      </div>
+    </section>
+
+    <!-- 10. About Card (关于客户端) -->
+    <section class="bg-[#1B1D20] border border-[#2E3035] rounded-[28px] p-5 flex flex-col gap-4">
+      <div class="flex items-center justify-between pb-3 border-b border-[#2E3035]">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 icon-thin stroke-[#E8E400]" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="16" x2="12" y2="12"/>
+            <line x1="12" y1="8" x2="12.01" y2="8"/>
+          </svg>
+          <span class="text-sm font-semibold text-[#F5F6F7]">关于客户端</span>
+        </div>
+        <div class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#26282C] border border-[#2E3035]">
+          <span class="w-1.5 h-1.5 rounded-full bg-[#2BE0A0]"></span>
+          <span class="text-[11px] text-[#9A9DA3]">已最新</span>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-1 py-1">
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-[#9A9DA3]">版本号</span>
+          <span class="text-sm font-medium font-num text-[#F5F6F7]">—</span>
+        </div>
+        <p class="text-xs text-[#6C6F75] m-0">自研客户端 Releases</p>
+      </div>
+
+      <!-- Button 检查更新 -->
+      <button type="button" class="w-full h-11 rounded-full bg-[#26282C] border border-[#2E3035] flex items-center justify-center gap-2 text-sm font-medium text-[#F5F6F7] active:scale-[0.98] transition-transform hover:bg-[#2A2C31]">
+        <svg class="w-4 h-4 icon-thin stroke-current" viewBox="0 0 24 24">
+          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+          <path d="M16 21h5v-5"/>
+        </svg>
+        <span>检查更新</span>
+      </button>
+    </section>
+
+  </main>
+
+  <!-- 11. Bottom Nav Bar: Docked #1B1D20 full-rounded capsule with 1px #2E3035 -->
+  <nav class="fixed bottom-3 left-0 right-0 z-50 flex justify-center px-5 pointer-events-none">
+    <div class="w-full max-w-[350px] h-[68px] rounded-full bg-[#1B1D20] border border-[#2E3035] flex items-center justify-around px-2 pointer-events-auto">
+      
+      <!-- Tab 1: 车控 (Inactive) -->
+      <button type="button" class="flex-1 flex flex-col items-center justify-center gap-1 text-[#9A9DA3] active:scale-95 transition-transform hover:text-[#F5F6F7]">
+        <svg class="w-5 h-5 icon-thin stroke-current" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9"/>
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 3v6M3 12h6M15 12h6M6.5 17.5l4-3.5M17.5 17.5l-4-3.5"/>
+        </svg>
+        <span class="text-[11px] font-medium leading-none">车控</span>
+      </button>
+
+      <!-- Tab 2: 状态 (Inactive) -->
+      <button type="button" class="flex-1 flex flex-col items-center justify-center gap-1 text-[#9A9DA3] active:scale-95 transition-transform hover:text-[#F5F6F7]">
+        <svg class="w-5 h-5 icon-thin stroke-current" viewBox="0 0 24 24">
+          <path d="M12 2a10 10 0 1 0 10 10H12V2Z"/>
+          <path d="M12 12 2.5 7.5"/>
+        </svg>
+        <span class="text-[11px] font-medium leading-none">状态</span>
+      </button>
+
+      <!-- Tab 3: 设置 (ACTIVE: #E8E400 solid circle + near-black icon + #E8E400 label) -->
+      <button type="button" class="flex-1 flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform">
+        <div class="w-10 h-7 rounded-full bg-[#E8E400] flex items-center justify-center text-[#0E0F11]">
+          <svg class="w-4 h-4 icon-thin stroke-current" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </div>
+        <span class="text-[11px] font-semibold text-[#E8E400] leading-none">设置</span>
+      </button>
+
+    </div>
+  </nav>
+
+</body>
+</html>

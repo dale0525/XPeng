@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>远程查看</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS v3 with Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "tertiary-fixed": "#90f1ff",
+            "surface-tint": "#d0cc00",
+            "outline": "#949278",
+            "secondary": "#43efae",
+            "on-error-container": "#ffdad6",
+            "secondary-fixed": "#57febb",
+            "on-secondary-container": "#005439",
+            "surface": "#121315",
+            "error": "#ffb4ab",
+            "inverse-surface": "#e3e2e4",
+            "on-tertiary-fixed-variant": "#004f57",
+            "on-primary": "#333200",
+            "primary-fixed": "#ede910",
+            "tertiary-fixed-dim": "#5ad7e7",
+            "surface-container-highest": "#343537",
+            "tertiary-container": "#75efff",
+            "on-background": "#e3e2e4",
+            "secondary-fixed-dim": "#2ce1a0",
+            "surface-container-high": "#292a2c",
+            "on-tertiary-container": "#006c76",
+            "primary-fixed-dim": "#d0cc00",
+            "error-container": "#93000a",
+            "on-secondary": "#003825",
+            "secondary-container": "#00d294",
+            "surface-container": "#1f2022",
+            "on-tertiary": "#00363c",
+            "on-secondary-fixed-variant": "#005237",
+            "surface-variant": "#343537",
+            "on-primary-fixed": "#1d1d00",
+            "on-surface-variant": "#cac8ab",
+            "on-secondary-fixed": "#002114",
+            "on-primary-container": "#666400",
+            "surface-container-lowest": "#0d0e10",
+            "on-primary-fixed-variant": "#4a4900",
+            "inverse-on-surface": "#303033",
+            "surface-dim": "#121315",
+            "tertiary": "#effdff",
+            "primary": "#fffbdc",
+            "on-error": "#690005",
+            "inverse-primary": "#636100",
+            "on-tertiary-fixed": "#001f23",
+            "surface-bright": "#38393b",
+            "outline-variant": "#494832",
+            "surface-container-low": "#1b1c1e",
+            "background": "#121315",
+            "primary-container": "#e8e400",
+            "on-surface": "#e3e2e4"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "fontFamily": {
+            "headline": [
+              "Space Grotesk",
+              "system-ui",
+              "sans-serif"
+            ],
+            "display": [
+              "Space Grotesk",
+              "system-ui",
+              "sans-serif"
+            ],
+            "body": [
+              "Plus Jakarta Sans",
+              "PingFang SC",
+              "Heiti SC",
+              "sans-serif"
+            ],
+            "label": [
+              "Space Grotesk",
+              "system-ui",
+              "sans-serif"
+            ]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      background-color: #0E0F11;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-[#0E0F11] text-[#F5F6F7] min-h-screen w-full flex flex-col justify-end overflow-hidden select-none">
+<!-- 上方纯净深色遮罩背景（严格遵循不渲染任何多余卡片、数据与文字） -->
+<div class="fixed inset-0 bg-black/60 pointer-events-none z-0"></div>
+<!-- 贴底抽屉容器 -->
+<main class="relative z-10 w-full bg-[#1B1D20] rounded-t-[28px] border-t border-[#2E3035] px-6 pt-3 pb-6 flex flex-col box-border">
+<!-- 1. 居中拖拽指示条 -->
+<div class="w-9 h-1 rounded-full bg-[#33363B] mx-auto mb-4 shrink-0"></div>
+<!-- 2. 标题行 -->
+<div class="flex items-center justify-between mb-4 shrink-0">
+<h1 class="text-[20px] font-semibold text-[#F5F6F7] tracking-tight font-headline">远程查看</h1>
+<button aria-label="关闭" class="w-9 h-9 rounded-full bg-[#26282C] border border-[#33363B] flex items-center justify-center text-[#9A9DA3] hover:text-[#F5F6F7] active:scale-95 transition-transform duration-150 focus:outline-none" type="button">
+<span class="material-symbols-outlined text-lg leading-none" data-icon="close">close</span>
+</button>
+</div>
+<!-- 3. 视频画面占位框 -->
+<div class="w-full aspect-video rounded-[22px] bg-[#222428] border border-[#33363B] relative overflow-hidden mb-3 flex items-center justify-center shrink-0">
+<!-- 取景器四角发丝角标 -->
+<div class="absolute top-3 left-3 w-3.5 h-3.5 border-t border-l border-[#6C6F75] pointer-events-none"></div>
+<div class="absolute top-3 right-3 w-3.5 h-3.5 border-t border-r border-[#6C6F75] pointer-events-none"></div>
+<div class="absolute bottom-3 left-3 w-3.5 h-3.5 border-b border-l border-[#6C6F75] pointer-events-none"></div>
+<div class="absolute bottom-3 right-3 w-3.5 h-3.5 border-b border-r border-[#6C6F75] pointer-events-none"></div>
+<!-- 左上角实时状态徽标 -->
+<div class="absolute top-3 left-3 ml-1 mt-1 px-2 py-0.5 rounded-full bg-black/40 flex items-center gap-1.5 backdrop-blur-[2px]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#2BE0A0] animate-pulse"></span>
+<span class="text-[11px] leading-tight text-white font-medium">实时</span>
+</div>
+<!-- 正中心占位图标与状态说明 -->
+<div class="flex flex-col items-center justify-center gap-1 text-[#6C6F75] pointer-events-none">
+<span class="material-symbols-outlined text-[26px]" data-icon="videocam">videocam</span>
+<span class="text-xs text-[#6C6F75] font-normal tracking-wide">视频画面</span>
+</div>
+</div>
+<!-- 4. 视角切换胶囊栏 -->
+<div class="grid grid-cols-4 gap-2 mb-3 shrink-0">
+<!-- 前视：高亮选中态 -->
+<button class="bg-[#E8E400] text-[#121316] font-semibold text-xs py-2 rounded-full text-center active:scale-95 transition-transform duration-150 focus:outline-none shadow-sm" type="button">
+        前视
+      </button>
+<!-- 后视：未选中态 -->
+<button class="bg-[#26282C] text-[#9A9DA3] text-xs py-2 rounded-full text-center hover:text-[#F5F6F7] active:scale-95 transition-all duration-150 focus:outline-none" type="button">
+        后视
+      </button>
+<!-- 左视：未选中态 -->
+<button class="bg-[#26282C] text-[#9A9DA3] text-xs py-2 rounded-full text-center hover:text-[#F5F6F7] active:scale-95 transition-all duration-150 focus:outline-none" type="button">
+        左视
+      </button>
+<!-- 右视：未选中态 -->
+<button class="bg-[#26282C] text-[#9A9DA3] text-xs py-2 rounded-full text-center hover:text-[#F5F6F7] active:scale-95 transition-all duration-150 focus:outline-none" type="button">
+        右视
+      </button>
+</div>
+<!-- 5. 双格状态条 -->
+<div class="bg-[#26282C] rounded-[20px] py-2.5 px-4 flex items-center justify-between mb-4 border border-[#2E3035]/50 shrink-0">
+<!-- 左格：连接状态 -->
+<div class="flex-1 flex items-center justify-center gap-1.5">
+<span class="text-[#9A9DA3] text-xs">连接状态</span>
+<span class="w-1.5 h-1.5 rounded-full bg-[#2BE0A0]"></span>
+<span class="text-[#F5F6F7] text-xs font-medium">已连接</span>
+</div>
+<!-- 竖向发丝分割线 -->
+<div class="w-px h-3.5 bg-[#33363B]"></div>
+<!-- 右格：画面状态 -->
+<div class="flex-1 flex items-center justify-center gap-1.5">
+<span class="text-[#9A9DA3] text-xs">画面状态</span>
+<span class="text-[#F5F6F7] text-xs font-medium tabular-nums">—</span>
+</div>
+</div>
+<!-- 6. 全宽主操作按钮 -->
+<button class="w-full h-[52px] rounded-full bg-[#E8E400] text-[#121316] font-semibold text-sm flex items-center justify-center mb-3 active:scale-[0.98] transition-transform duration-150 focus:outline-none shrink-0 shadow-sm" type="button">
+      关闭查看
+    </button>
+<!-- 7. 底部系统指示条 (Home Indicator) -->
+<div class="w-32 h-1 bg-[#33363B] rounded-full mx-auto shrink-0 mt-1"></div>
+</main>
+</body></html>
