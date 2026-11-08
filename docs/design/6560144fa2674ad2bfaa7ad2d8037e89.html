@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=390, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>直线召唤 - 底部弹窗</title>
+<!-- Google Fonts: Space Grotesk & Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "on-surface-variant": "#494832",
+            "surface-container-highest": "#e3e2e4",
+            "primary-fixed": "#eee900",
+            "surface-container-low": "#f5f3f6",
+            "error-container": "#ffdad6",
+            "surface-container-high": "#e9e7ea",
+            "tertiary-container": "#7cfcff",
+            "surface-bright": "#faf9fb",
+            "surface-dim": "#dbd9dc",
+            "primary": "#636100",
+            "surface-variant": "#e3e2e4",
+            "primary-fixed-dim": "#d0cc00",
+            "on-primary": "#ffffff",
+            "on-tertiary": "#ffffff",
+            "surface": "#faf9fb",
+            "surface-tint": "#636100",
+            "on-secondary-fixed": "#002111",
+            "inverse-on-surface": "#f2f0f3",
+            "secondary-fixed": "#5efeb1",
+            "surface-container": "#efedf0",
+            "on-primary-fixed": "#1d1d00",
+            "on-tertiary-fixed-variant": "#004f51",
+            "on-secondary-container": "#007348",
+            "secondary-container": "#5efeb1",
+            "on-primary-container": "#6d6b00",
+            "tertiary-fixed-dim": "#54d9dc",
+            "on-tertiary-container": "#007476",
+            "on-error-container": "#93000a",
+            "tertiary-fixed": "#75f6f9",
+            "on-tertiary-fixed": "#002021",
+            "inverse-surface": "#303032",
+            "error": "#ba1a1a",
+            "outline": "#7a785f",
+            "secondary-fixed-dim": "#39e197",
+            "primary-container": "#f4ef00",
+            "background": "#faf9fb",
+            "secondary": "#006d44",
+            "on-secondary-fixed-variant": "#005232",
+            "inverse-primary": "#d0cc00",
+            "on-error": "#ffffff",
+            "outline-variant": "#cbc8ab",
+            "on-primary-fixed-variant": "#4b4900",
+            "on-secondary": "#ffffff",
+            "on-surface": "#1b1c1e",
+            "surface-container-lowest": "#ffffff",
+            "tertiary": "#00696b",
+            "on-background": "#1b1c1e"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "fontFamily": {
+            "headline": ["Space Grotesk", "sans-serif"],
+            "display": ["Space Grotesk", "sans-serif"],
+            "body": ["Plus Jakarta Sans", "sans-serif"],
+            "label": ["Space Grotesk", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="m-0 p-0 w-[390px] min-h-screen bg-black/45 relative overflow-hidden flex flex-col justify-end text-on-surface antialiased">
+<!-- Background Dim Overlay Area (Tappable area) -->
+<div aria-hidden="true" class="flex-1 w-full"></div>
+<!-- Bottom Sheet Drawer -->
+<main class="w-full bg-surface-container-lowest rounded-t-[32px] px-6 pt-3 pb-3 flex flex-col z-10 transition-transform shadow-2xl">
+<!-- 1. Drag Handle Pill -->
+<div class="flex justify-center w-full mb-3">
+<div class="w-10 h-1 bg-[#D1D3D8] rounded-full"></div>
+</div>
+<!-- Modal Header -->
+<header class="flex justify-between items-center w-full py-1">
+<h1 class="font-headline font-semibold text-[20px] tracking-tight text-[#111214]">直线召唤</h1>
+<button aria-label="关闭" class="w-9 h-9 rounded-full bg-[#EDEDEF] text-[#111214] flex items-center justify-center active:scale-95 duration-150" type="button">
+<span class="material-symbols-outlined text-[20px] text-[#111214]" data-icon="close">close</span>
+</button>
+</header>
+<!-- 2. Status Card (Readonly) -->
+<section aria-label="通道状态" class="bg-[#EDEDEF] rounded-[22px] p-4 my-4 flex flex-col gap-3">
+<!-- Row 1 -->
+<div class="flex items-center justify-between">
+<span class="text-[#8A8D93] text-[14px] font-normal">蓝牙通道</span>
+<div class="flex items-center">
+<span class="w-2 h-2 rounded-full bg-[#12CE86] inline-block mr-1.5"></span>
+<span class="text-[#111214] text-[14px] font-medium">已连接</span>
+</div>
+</div>
+<!-- Subtle Divider -->
+<div class="border-t border-[#E2E3E6] w-full"></div>
+<!-- Row 2 -->
+<div class="flex items-center justify-between">
+<span class="text-[#8A8D93] text-[14px] font-normal">当前通道</span>
+<span class="text-[#111214] text-[14px] font-semibold">蓝牙</span>
+</div>
+</section>
+<!-- 3. Direction Controls -->
+<section aria-label="召唤控制" class="flex flex-col w-full">
+<!-- Forward Action -->
+<button class="w-full bg-primary-container text-[#111214] font-semibold text-[16px] h-14 rounded-full flex items-center justify-center gap-2 active:opacity-90 active:scale-[0.99] duration-150 select-none" type="button">
+<span class="material-symbols-outlined text-[20px] font-semibold text-[#111214]" data-icon="arrow_upward">arrow_upward</span>
+<span>向前</span>
+</button>
+<!-- Helper Caption -->
+<div class="py-2.5 flex items-center justify-center text-center">
+<span class="text-[#8A8D93] text-[12px] tracking-wide">按住不放，松开即停</span>
+</div>
+<!-- Backward Action -->
+<button class="w-full bg-primary-container text-[#111214] font-semibold text-[16px] h-14 rounded-full flex items-center justify-center gap-2 active:opacity-90 active:scale-[0.99] duration-150 select-none" type="button">
+<span class="material-symbols-outlined text-[20px] font-semibold text-[#111214]" data-icon="arrow_downward">arrow_downward</span>
+<span>向后</span>
+</button>
+</section>
+<!-- 4. Vehicle & Summon Status Row (Readonly) -->
+<section aria-label="系统状态" class="grid grid-cols-2 gap-3 my-4">
+<!-- Left Cell -->
+<div class="bg-[#EDEDEF] rounded-[20px] p-3.5 flex flex-col gap-1.5">
+<span class="text-[#8A8D93] text-[12px]">车辆状态</span>
+<span class="font-headline text-[#111214] text-[18px] font-bold leading-none tabular-nums">—</span>
+</div>
+<!-- Right Cell -->
+<div class="bg-[#EDEDEF] rounded-[20px] p-3.5 flex flex-col gap-1.5">
+<span class="text-[#8A8D93] text-[12px]">召唤状态</span>
+<span class="font-headline text-[#111214] text-[18px] font-bold leading-none tabular-nums">—</span>
+</div>
+</section>
+<!-- 5. Footer / Exit Action -->
+<footer class="flex flex-col w-full pt-0.5">
+<button class="w-full bg-[#EDEDEF] text-[#111214] font-medium text-[15px] h-12 rounded-full flex items-center justify-center active:scale-[0.99] duration-150" type="button">
+        退出召唤
+      </button>
+<!-- iOS Home Indicator -->
+<div aria-hidden="true" class="w-32 h-1 bg-[#C7C9CE] rounded-full mx-auto mt-4 mb-1"></div>
+</footer>
+</main>
+</body></html>

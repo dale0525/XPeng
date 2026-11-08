@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>手机号登录</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-low": "#f5f3f6",
+            "on-background": "#111214",
+            "surface-bright": "#faf9fb",
+            "secondary": "#006d44",
+            "background": "#F2F2F4",
+            "surface-dim": "#dbd9dc",
+            "secondary-fixed": "#5efeb1",
+            "outline-variant": "#cbc8ab",
+            "on-error-container": "#93000a",
+            "tertiary": "#00696b",
+            "primary": "#111214",
+            "on-tertiary-container": "#007476",
+            "on-surface": "#111214",
+            "surface-variant": "#EDEDEF",
+            "surface-container": "#EDEDEF",
+            "on-secondary-fixed-variant": "#005232",
+            "tertiary-fixed-dim": "#54d9dc",
+            "surface-container-highest": "#e3e2e4",
+            "inverse-primary": "#d0cc00",
+            "on-surface-variant": "#8A8D93",
+            "on-tertiary-fixed-variant": "#004f51",
+            "on-secondary": "#ffffff",
+            "tertiary-fixed": "#75f6f9",
+            "on-primary-container": "#111214",
+            "on-primary": "#ffffff",
+            "on-primary-fixed": "#1d1d00",
+            "secondary-container": "#12CE86",
+            "error": "#ba1a1a",
+            "primary-fixed": "#F4EF00",
+            "on-secondary-container": "#007348",
+            "on-error": "#ffffff",
+            "surface-tint": "#636100",
+            "on-tertiary": "#ffffff",
+            "primary-fixed-dim": "#d0cc00",
+            "on-primary-fixed-variant": "#4b4900",
+            "tertiary-container": "#7cfcff",
+            "outline": "#7a785f",
+            "on-secondary-fixed": "#002111",
+            "inverse-surface": "#17181A",
+            "error-container": "#ffdad6",
+            "surface-container-high": "#e9e7ea",
+            "inverse-on-surface": "#f2f0f3",
+            "surface": "#FFFFFF",
+            "secondary-fixed-dim": "#39e197",
+            "on-tertiary-fixed": "#002021",
+            "primary-container": "#F4EF00",
+            "surface-container-lowest": "#ffffff"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1.375rem",
+            "3xl": "1.75rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Space Grotesk", "sans-serif"],
+            display: ["Space Grotesk", "sans-serif"],
+            body: ["Plus Jakarta Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "sans-serif"],
+            label: ["Space Grotesk", "sans-serif"]
+          }
+        },
+      },
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    @keyframes cursor-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .animate-blink {
+      animation: cursor-blink 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes spin-slow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .animate-spin-slow {
+      animation: spin-slow 1.6s linear infinite;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body antialiased min-h-screen flex flex-col justify-between selection:bg-primary-container selection:text-on-surface select-none">
+<!-- Single Viewport Mobile Wrapper -->
+<main class="w-full max-w-md mx-auto min-h-screen px-6 pt-5 pb-6 flex flex-col justify-between box-border">
+<!-- Top & Title Area -->
+<header class="w-full flex flex-col">
+<!-- 1. Top Bar: Single Circular Back Button -->
+<div class="flex items-center justify-between w-full h-11">
+<button aria-label="返回" class="w-11 h-11 rounded-full bg-surface flex items-center justify-center text-on-surface shadow-[0_2px_8px_rgba(0,0,0,0.04)] active:scale-95 transition-transform duration-150" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="arrow_back">arrow_back</span>
+</button>
+</div>
+<!-- 2. Header Typography -->
+<div class="mt-8 mb-2">
+<h1 class="text-[32px] leading-tight font-headline font-bold text-on-surface tracking-tight">
+          手机号登录
+        </h1>
+<p class="mt-2 text-[14px] font-body text-on-surface-variant font-normal">
+          使用手机号验证码登录
+        </p>
+</div>
+</header>
+<!-- 3. Form Core Section -->
+<section class="w-full flex flex-col space-y-3.5 my-auto py-2">
+<!-- Phone Input Capsule -->
+<div class="w-full bg-surface rounded-full h-[62px] px-5 flex items-center shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-surface-container transition-all">
+<!-- Area Code Dropdown -->
+<div class="flex items-center space-x-1 pr-3 border-r border-surface-variant cursor-pointer">
+<span class="font-headline font-semibold text-[15px] text-on-surface">+86</span>
+<span class="material-symbols-outlined text-on-surface-variant text-[18px]" data-icon="expand_more">expand_more</span>
+</div>
+<!-- Input Text & Blinking Cursor Placeholder -->
+<div class="flex items-center pl-4 flex-1 overflow-hidden">
+<span class="text-on-surface-variant text-[15px] tracking-normal font-normal select-none">
+            请输入 11 位手机号
+          </span>
+<span class="inline-block w-[1.5px] h-4 bg-on-surface ml-1 animate-blink rounded-full"></span>
+</div>
+</div>
+<!-- SMS Code Input Capsule -->
+<div class="w-full bg-surface rounded-full h-[62px] pl-5 pr-2.5 flex items-center justify-between shadow-[0_2px_12px_rgba(0,0,0,0.03)] border border-surface-container">
+<!-- Code Placeholder -->
+<div class="flex items-center flex-1">
+<span class="text-on-surface-variant text-[15px] tracking-normal font-normal select-none">
+            请输入 4 位验证码
+          </span>
+</div>
+<!-- Divider & Right Action Controls -->
+<div class="flex items-center space-x-2 pl-2">
+<span class="w-[1px] h-5 bg-surface-variant"></span>
+<button class="text-[13px] font-body font-semibold text-on-surface px-1 py-1 hover:opacity-80 active:scale-95 transition-all" type="button">
+            获取验证码
+          </button>
+<span class="h-7 px-2.5 rounded-full bg-surface-variant text-on-surface-variant text-[11px] font-headline font-medium flex items-center justify-center tracking-tight">
+            60s 后重发
+          </span>
+</div>
+</div>
+<!-- Secondary Security Verification Slot -->
+<div class="w-full bg-surface rounded-full h-[52px] px-4 flex items-center justify-between shadow-[0_2px_8px_rgba(0,0,0,0.02)] border border-surface-container">
+<div class="flex items-center space-x-2.5">
+<div class="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center text-on-surface">
+<span class="material-symbols-outlined text-[16px] font-bold" data-icon="priority_high">priority_high</span>
+</div>
+<span class="text-[13px] font-body font-medium text-on-surface">
+            请验证滑块
+          </span>
+</div>
+<!-- Verified Spinner & State -->
+<div class="flex items-center space-x-2 pr-1">
+<span class="text-[12px] font-body text-on-surface-variant font-normal">
+            验证中
+          </span>
+<div class="w-4 h-4 rounded-full border-2 border-surface-variant border-t-on-surface animate-spin-slow"></div>
+</div>
+</div>
+</section>
+<!-- 4. Action Area -->
+<section class="w-full flex flex-col items-center mt-2 mb-4">
+<!-- Main Login Capsule Button -->
+<button class="w-full h-[56px] rounded-full bg-primary-container text-on-surface font-headline font-bold text-[16px] tracking-wide flex items-center justify-center shadow-[0_4px_16px_rgba(244,239,0,0.36)] hover:brightness-105 active:scale-[0.98] transition-all" type="button">
+        登录
+      </button>
+<!-- Auxiliary Text Action -->
+<button class="mt-4 text-[13px] font-body text-on-surface-variant font-medium hover:text-on-surface active:scale-95 transition-colors" type="button">
+        换一个手机号
+      </button>
+</section>
+<!-- 5. Bottom Security & Disclaimer Area -->
+<footer class="w-full flex flex-col items-center space-y-2 pb-1">
+<!-- Pill 1: Data Statement -->
+<div class="w-full max-w-[340px] bg-surface rounded-full py-2 px-3.5 flex items-center justify-center space-x-1.5 shadow-[0_1px_4px_rgba(0,0,0,0.02)]">
+<span class="material-symbols-outlined text-[15px] text-on-surface-variant" data-icon="shield">shield</span>
+<span class="text-[12px] font-body text-on-surface-variant font-normal leading-none tracking-tight">
+          仅使用本人账号，不收集第三方数据
+        </span>
+</div>
+<!-- Pill 2: Session Disclaimer -->
+<div class="w-full max-w-[340px] bg-surface rounded-full py-2 px-3.5 flex items-center justify-center space-x-1.5 shadow-[0_1px_4px_rgba(0,0,0,0.02)]">
+<span class="material-symbols-outlined text-[15px] text-on-surface-variant" data-icon="info">info</span>
+<span class="text-[12px] font-body text-on-surface-variant font-normal leading-none tracking-tight">
+          登录会把官方 App 踢下线
+        </span>
+</div>
+<!-- Service Status Indicator -->
+<div class="pt-2 flex items-center space-x-1.5">
+<span class="w-2 h-2 rounded-full bg-secondary-container"></span>
+<span class="text-[12px] font-body font-medium text-on-surface-variant">
+          服务连接正常
+        </span>
+</div>
+</footer>
+</main>
+</body></html>

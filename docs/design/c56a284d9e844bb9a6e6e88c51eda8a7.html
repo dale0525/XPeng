@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=390, height=844, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>自定义快捷指令 - Volt Lime</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-high": "#e9e7ea",
+            "on-primary-fixed-variant": "#4b4900",
+            "on-primary-container": "#6d6b00",
+            "on-primary": "#ffffff",
+            "tertiary": "#00696b",
+            "on-secondary": "#ffffff",
+            "outline-variant": "#cbc8ab",
+            "inverse-primary": "#d0cc00",
+            "tertiary-container": "#7cfcff",
+            "tertiary-fixed": "#75f6f9",
+            "on-tertiary": "#ffffff",
+            "surface-container-low": "#f5f3f6",
+            "primary-fixed": "#eee900",
+            "surface-container-highest": "#e3e2e4",
+            "surface-variant": "#e3e2e4",
+            "secondary-container": "#5efeb1",
+            "on-tertiary-fixed-variant": "#004f51",
+            "on-primary-fixed": "#1d1d00",
+            "surface-container-lowest": "#ffffff",
+            "on-secondary-fixed-variant": "#005232",
+            "surface": "#faf9fb",
+            "tertiary-fixed-dim": "#54d9dc",
+            "secondary-fixed-dim": "#39e197",
+            "surface-bright": "#faf9fb",
+            "primary-fixed-dim": "#d0cc00",
+            "inverse-on-surface": "#f2f0f3",
+            "primary-container": "#f4ef00",
+            "on-error": "#ffffff",
+            "surface-dim": "#dbd9dc",
+            "on-tertiary-container": "#007476",
+            "primary": "#636100",
+            "surface-container": "#efedf0",
+            "on-surface": "#1b1c1e",
+            "error": "#ba1a1a",
+            "outline": "#7a785f",
+            "secondary": "#006d44",
+            "on-tertiary-fixed": "#002021",
+            "on-secondary-container": "#007348",
+            "surface-tint": "#636100",
+            "inverse-surface": "#303032",
+            "background": "#faf9fb",
+            "secondary-fixed": "#5efeb1",
+            "on-error-container": "#93000a",
+            "on-surface-variant": "#494832",
+            "error-container": "#ffdad6",
+            "on-secondary-fixed": "#002111",
+            "on-background": "#1b1c1e"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "2xl": "1.375rem",
+            "3xl": "1.75rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Space Grotesk", "sans-serif"],
+            display: ["Space Grotesk", "sans-serif"],
+            body: ["Plus Jakarta Sans", "sans-serif"],
+            label: ["Space Grotesk", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    /* Custom scrollbar suppression for pure mobile app look */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 350, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-[#F2F2F4] text-on-surface font-body antialiased m-0 p-0 overflow-hidden select-none">
+<!-- Mobile Container: strictly 390px by 844px portrait -->
+<div class="relative w-[390px] h-[844px] mx-auto flex flex-col justify-end overflow-hidden bg-black/45">
+<!-- Bottom Sheet Modal Drawer -->
+<section class="w-full h-[78%] bg-surface-container-lowest rounded-t-[28px] flex flex-col overflow-hidden relative" style="box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.04);">
+<!-- Top Drag Handle -->
+<div class="w-full pt-3 pb-1 flex justify-center items-center">
+<div class="w-9 h-1 rounded-full bg-[#D1D3D8]"></div>
+</div>
+<!-- Header Row -->
+<header class="px-5 pt-3 pb-2 flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<h2 class="font-headline text-[20px] font-semibold text-[#111214] tracking-tight">自定义快捷指令</h2>
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#EDEDEF] text-xs font-semibold text-[#111214]">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>
+<span class="tabular-nums">4 / 4</span>
+</span>
+</div>
+<button aria-label="关闭" class="w-9 h-9 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] hover:bg-surface-container-high active:scale-95 transition-all" type="button">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</header>
+<!-- Subtitle Hint Row -->
+<div class="px-5 pb-3 flex items-center justify-between text-xs text-[#8A8D93]">
+<span>选择要显示在快捷区的指令（最多 4 个）</span>
+<span class="font-medium">已达上限</span>
+</div>
+<!-- Scrollable List Area -->
+<main class="flex-1 overflow-y-auto px-5 space-y-2.5 pb-4 no-scrollbar">
+<!-- 1. 门锁 (SELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">lock</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">门锁（解锁/锁车）</div>
+<div class="text-[11px] text-[#8A8D93] truncate">一键开锁与全车布防</div>
+</div>
+<div class="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[16px] font-bold">check</span>
+</div>
+</div>
+<!-- 2. 远程解锁 (SELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">vpn_key</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">远程解锁</div>
+<div class="text-[11px] text-[#8A8D93] truncate">授权无钥匙应急解闭</div>
+</div>
+<div class="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[16px] font-bold">check</span>
+</div>
+</div>
+<!-- 3. 打开空调 (SELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">mode_fan</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">打开空调</div>
+<div class="text-[11px] text-[#8A8D93] truncate">预设舒适座舱温度</div>
+</div>
+<div class="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[16px] font-bold">check</span>
+</div>
+</div>
+<!-- 4. 闪灯 (SELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">lightbulb</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">闪灯</div>
+<div class="text-[11px] text-[#8A8D93] truncate">鸣笛与日行灯双闪找车</div>
+</div>
+<div class="w-6 h-6 rounded-full bg-primary-container flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[16px] font-bold">check</span>
+</div>
+</div>
+<!-- 5. 全车车窗关闭 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">vertical_align_bottom</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">全车车窗关闭</div>
+<div class="text-[11px] text-[#8A8D93] truncate">关闭四门侧窗</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 6. 全车车窗通风 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">air</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">全车车窗通风</div>
+<div class="text-[11px] text-[#8A8D93] truncate">微开缝隙自然换气</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 7. 打开遮阳帘 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">wb_sunny</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">打开遮阳帘</div>
+<div class="text-[11px] text-[#8A8D93] truncate">展开全景天幕采光</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 8. 关闭遮阳帘 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">shield</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">关闭遮阳帘</div>
+<div class="text-[11px] text-[#8A8D93] truncate">完全遮蔽隔绝热量</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 9. 极速降温 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">severe_cold</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">极速降温</div>
+<div class="text-[11px] text-[#8A8D93] truncate">最大功率送冷风与座舱对流</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 10. 极速升温 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">local_fire_department</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">极速升温</div>
+<div class="text-[11px] text-[#8A8D93] truncate">方向盘与座椅同步加热</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 11. 高温抑菌 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">clean_hands</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">高温抑菌</div>
+<div class="text-[11px] text-[#8A8D93] truncate">座舱净化与深度防霉循环</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 12. 开启哨兵模式 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">security</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">开启哨兵模式</div>
+<div class="text-[11px] text-[#8A8D93] truncate">周边环境实时警戒监控</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 13. 关闭哨兵模式 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">gpp_bad</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">关闭哨兵模式</div>
+<div class="text-[11px] text-[#8A8D93] truncate">解除车周主动探测防卫</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 14. 打开电动尾门 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">airport_shuttle</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">打开电动尾门</div>
+<div class="text-[11px] text-[#8A8D93] truncate">后备箱电动解锁抬升</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+<!-- 15. 临停开关 (UNSELECTED) -->
+<div class="h-16 px-4 rounded-[22px] bg-[#F8F9FA] flex items-center justify-between active:scale-[0.99] transition-transform">
+<div class="w-10 h-10 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214]">
+<span class="material-symbols-outlined text-[22px]">power</span>
+</div>
+<div class="flex-1 ml-3.5 mr-2">
+<div class="text-[14px] font-semibold text-[#111214]">临停开关</div>
+<div class="text-[11px] text-[#8A8D93] truncate">锁车状态下维持车内供电</div>
+</div>
+<div class="w-6 h-6 rounded-full border-2 border-[#EDEDEF] bg-transparent"></div>
+</div>
+</main>
+<!-- Fixed Bottom Action Bar -->
+<footer class="w-full bg-surface-container-lowest pt-3 pb-2 px-5 border-t border-[#EDEDEF]/80">
+<div class="flex items-center gap-3">
+<!-- Cancel Button -->
+<button class="flex-1 h-[50px] rounded-full bg-[#EDEDEF] text-[#111214] font-headline text-[15px] font-semibold flex items-center justify-center active:scale-95 transition-transform" type="button">
+            取消
+          </button>
+<!-- Save Button -->
+<button class="flex-1 h-[50px] rounded-full bg-primary-container text-[#111214] font-headline text-[15px] font-semibold flex items-center justify-center gap-1.5 active:scale-95 transition-transform" type="button">
+<span>保存配置</span>
+<span class="material-symbols-outlined text-[18px]">arrow_forward</span>
+</button>
+</div>
+<!-- iOS Home Indicator bar -->
+<div class="w-32 h-1 bg-[#D1D3D8] rounded-full mx-auto mt-2.5"></div>
+</footer>
+</section>
+</div>
+</body></html>

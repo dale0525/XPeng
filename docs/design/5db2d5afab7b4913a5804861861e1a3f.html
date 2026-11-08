@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>远程查看 - Volt Lime</title>
+<!-- Google Fonts: Space Grotesk & Plus Jakarta Sans -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "surface-container-low": "#f5f3f6",
+            "error-container": "#ffdad6",
+            "secondary": "#006d44",
+            "error": "#ba1a1a",
+            "surface-container-highest": "#e3e2e4",
+            "inverse-primary": "#d0cc00",
+            "on-primary": "#ffffff",
+            "surface-container-high": "#e9e7ea",
+            "primary-fixed-dim": "#d0cc00",
+            "surface-container-lowest": "#ffffff",
+            "surface-container": "#efedf0",
+            "secondary-fixed": "#5efeb1",
+            "outline-variant": "#cbc8ab",
+            "tertiary": "#00696b",
+            "surface-variant": "#e3e2e4",
+            "on-surface-variant": "#494832",
+            "background": "#faf9fb",
+            "primary-fixed": "#eee900",
+            "tertiary-fixed-dim": "#54d9dc",
+            "on-tertiary-fixed": "#002021",
+            "on-secondary-fixed-variant": "#005232",
+            "tertiary-fixed": "#75f6f9",
+            "on-surface": "#1b1c1e",
+            "surface": "#faf9fb",
+            "secondary-fixed-dim": "#39e197",
+            "surface-tint": "#636100",
+            "surface-dim": "#dbd9dc",
+            "on-tertiary": "#ffffff",
+            "on-primary-container": "#111214",
+            "on-background": "#1b1c1e",
+            "inverse-on-surface": "#f2f0f3",
+            "primary-container": "#f4ef00",
+            "secondary-container": "#5efeb1",
+            "on-error": "#ffffff",
+            "on-secondary-container": "#007348",
+            "on-error-container": "#93000a",
+            "on-tertiary-fixed-variant": "#004f51",
+            "on-tertiary-container": "#007476",
+            "inverse-surface": "#17181A",
+            "on-primary-fixed": "#1d1d00",
+            "on-secondary-fixed": "#002111",
+            "primary": "#636100",
+            "on-secondary": "#ffffff",
+            "tertiary-container": "#7cfcff",
+            "surface-bright": "#faf9fb",
+            "outline": "#7a785f",
+            "on-primary-fixed-variant": "#4b4900"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Space Grotesk", "sans-serif"],
+            display: ["Space Grotesk", "sans-serif"],
+            body: ["Plus Jakarta Sans", "sans-serif"],
+            label: ["Space Grotesk", "sans-serif"]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    body {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-[#F2F2F4] text-[#111214] font-body m-0 p-0 overflow-hidden flex justify-center items-center antialiased">
+<!-- Mobile Viewport Canvas: 390px x 844px Full-Bleed -->
+<main class="relative w-full max-w-[390px] h-[844px] bg-[#F2F2F4] overflow-hidden flex flex-col justify-end">
+<!-- Top Semi-transparent Dark Backdrop Overlay covering pure canvas background -->
+<div class="absolute inset-0 bg-black/45 pointer-events-auto"></div>
+<!-- Docked Bottom White Drawer (Volt Lime Light design system) -->
+<section class="relative z-10 w-full bg-[#FFFFFF] rounded-t-[28px] px-6 pt-3 pb-6 flex flex-col box-border">
+<!-- 1. Centered Drag Handle -->
+<div class="w-[36px] h-[4px] rounded-full bg-[#D1D3D8] mx-auto mb-4"></div>
+<!-- 2. Title Row -->
+<header class="flex justify-between items-center mb-4">
+<h1 class="text-[20px] font-bold text-[#111214] tracking-tight font-headline">远程查看</h1>
+<button aria-label="关闭" class="w-[36px] h-[36px] rounded-full bg-[#EDEDEF] text-[#111214] flex items-center justify-center transition-transform active:scale-90" type="button">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</header>
+<!-- 3. Video Feed Placeholder Area -->
+<div class="relative w-full aspect-[16/9] rounded-[22px] bg-[#17181A] overflow-hidden flex items-center justify-center">
+<!-- Corner Viewfinder Framing Marks (1.5px delicate borders) -->
+<div class="absolute top-3 left-3 w-4 h-4 border-t-[1.5px] border-l-[1.5px] border-white/30 rounded-tl-[4px] pointer-events-none"></div>
+<div class="absolute top-3 right-3 w-4 h-4 border-t-[1.5px] border-r-[1.5px] border-white/30 rounded-tr-[4px] pointer-events-none"></div>
+<div class="absolute bottom-3 left-3 w-4 h-4 border-b-[1.5px] border-l-[1.5px] border-white/30 rounded-bl-[4px] pointer-events-none"></div>
+<div class="absolute bottom-3 right-3 w-4 h-4 border-b-[1.5px] border-r-[1.5px] border-white/30 rounded-br-[4px] pointer-events-none"></div>
+<!-- Top-left Live Indicator Pill -->
+<div class="absolute top-3 left-3 ml-2 mt-2 bg-black/50 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1.5 z-10">
+<span class="w-1.5 h-1.5 rounded-full bg-[#12CE86]"></span>
+<span class="text-white text-[12px] font-medium leading-none tracking-wider">实时</span>
+</div>
+<!-- Center Camera Icon & Subtext -->
+<div class="flex flex-col items-center justify-center gap-1.5 select-none pointer-events-none">
+<span class="material-symbols-outlined text-[28px] text-[#8A8D93]">videocam</span>
+<span class="text-[#8A8D93] text-[13px] font-normal tracking-wide">视频画面</span>
+</div>
+</div>
+<!-- 4. Perspective Switcher Row -->
+<div class="mt-[14px] mb-3 grid grid-cols-4 gap-2">
+<!-- 前视 (Selected) -->
+<button class="bg-[#F4EF00] text-[#111214] font-semibold py-2 text-center rounded-full text-xs transition-transform active:scale-95 font-label" type="button">
+          前视
+        </button>
+<!-- 后视 -->
+<button class="bg-[#EDEDEF] text-[#8A8D93] font-medium py-2 text-center rounded-full text-xs transition-transform active:scale-95 font-label" type="button">
+          后视
+        </button>
+<!-- 左视 -->
+<button class="bg-[#EDEDEF] text-[#8A8D93] font-medium py-2 text-center rounded-full text-xs transition-transform active:scale-95 font-label" type="button">
+          左视
+        </button>
+<!-- 右视 -->
+<button class="bg-[#EDEDEF] text-[#8A8D93] font-medium py-2 text-center rounded-full text-xs transition-transform active:scale-95 font-label" type="button">
+          右视
+        </button>
+</div>
+<!-- 5. Dual-Cell Status Pill Bar -->
+<div class="mb-4 bg-[#EDEDEF] rounded-[20px] px-5 py-3 flex items-center justify-between text-xs">
+<!-- Left Cell: Connection Status -->
+<div class="flex items-center gap-2">
+<span class="text-[#8A8D93]">连接状态</span>
+<div class="flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-[#12CE86]"></span>
+<span class="text-[#111214] font-medium">已连接</span>
+</div>
+</div>
+<!-- Middle Vertical Divider -->
+<div class="w-[1px] h-[14px] bg-[#D1D3D8]"></div>
+<!-- Right Cell: Feed Status -->
+<div class="flex items-center gap-2">
+<span class="text-[#8A8D93]">画面状态</span>
+<span class="text-[#111214] font-medium">—</span>
+</div>
+</div>
+<!-- 6. Main CTA Button -->
+<button class="w-full h-[52px] bg-[#F4EF00] text-[#111214] font-bold text-base rounded-full flex items-center justify-center transition-transform active:scale-[0.98] font-headline tracking-tight" type="button">
+        关闭查看
+      </button>
+<!-- 7. Bottom Home Indicator -->
+<div class="mt-4 flex justify-center">
+<div class="w-[128px] h-[4px] rounded-full bg-[#D1D3D8]"></div>
+</div>
+</section>
+</main>
+<script>
+    // Lightweight perspective toggle interaction
+    document.querySelectorAll('.grid-cols-4 button').forEach(button => {
+      button.addEventListener('click', function() {
+        document.querySelectorAll('.grid-cols-4 button').forEach(b => {
+          b.className = 'bg-[#EDEDEF] text-[#8A8D93] font-medium py-2 text-center rounded-full text-xs transition-transform active:scale-95 font-label';
+        });
+        this.className = 'bg-[#F4EF00] text-[#111214] font-semibold py-2 text-center rounded-full text-xs transition-transform active:scale-95 font-label';
+      });
+    });
+  </script>
+</body></html>

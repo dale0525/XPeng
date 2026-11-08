@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="zh-CN"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<title>直线召唤 - 底部弹窗 (Volt Lime 暗色手机竖屏规范版)</title>
+<!-- Material Symbols Outlined -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "tertiary-fixed": "#90f1ff",
+            "surface-container": "#1f2022",
+            "outline-variant": "#494832",
+            "secondary-fixed-dim": "#2ce1a0",
+            "primary": "#fffbdc",
+            "inverse-surface": "#e3e2e4",
+            "inverse-primary": "#636100",
+            "tertiary-fixed-dim": "#5ad7e7",
+            "surface-dim": "#121315",
+            "surface-container-highest": "#343537",
+            "primary-container": "#e8e400",
+            "on-primary-container": "#666400",
+            "surface-variant": "#343537",
+            "primary-fixed": "#ede910",
+            "on-primary-fixed": "#1d1d00",
+            "surface-bright": "#38393b",
+            "secondary-container": "#00d294",
+            "secondary": "#43efae",
+            "on-secondary-container": "#005439",
+            "background": "#121315",
+            "surface-tint": "#d0cc00",
+            "surface-container-high": "#292a2c",
+            "on-tertiary": "#00363c",
+            "on-surface-variant": "#cac8ab",
+            "on-tertiary-fixed-variant": "#004f57",
+            "primary-fixed-dim": "#d0cc00",
+            "on-tertiary-container": "#006c76",
+            "on-secondary-fixed-variant": "#005237",
+            "on-error-container": "#ffdad6",
+            "on-primary": "#333200",
+            "on-background": "#e3e2e4",
+            "on-primary-fixed-variant": "#4a4900",
+            "on-tertiary-fixed": "#001f23",
+            "error-container": "#93000a",
+            "surface": "#121315",
+            "tertiary": "#effdff",
+            "on-secondary-fixed": "#002114",
+            "secondary-fixed": "#57febb",
+            "on-surface": "#e3e2e4",
+            "surface-container-low": "#1b1c1e",
+            "outline": "#949278",
+            "on-secondary": "#003825",
+            "inverse-on-surface": "#303033",
+            "tertiary-container": "#75efff",
+            "on-error": "#690005",
+            "surface-container-lowest": "#0d0e10",
+            "error": "#ffb4ab",
+            /* App System Custom Mappings */
+            "canvas-dark": "#0E0F11",
+            "surface-dark": "#1B1D20",
+            "surface-inset": "#26282C",
+            "ink-block": "#222428",
+            "accent-volt": "#E8E400",
+            "positive-green": "#2BE0A0",
+            "hairline-dark": "#2E3035",
+            "hairline-card": "#33363B",
+            "text-main": "#F5F6F7",
+            "text-sub": "#9A9DA3",
+            "text-muted": "#6C6F75"
+          },
+          borderRadius: {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          fontFamily: {
+            headline: ["Space Grotesk", "sans-serif"],
+            display: ["Space Grotesk", "sans-serif"],
+            body: ["Plus Jakarta Sans", "sans-serif"],
+            label: ["Space Grotesk", "sans-serif"]
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+      display: inline-block;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    body {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-canvas-dark text-text-main font-body antialiased m-0 p-0 overflow-hidden w-full h-screen min-h-screen relative flex flex-col justify-end">
+<!-- Fullscreen Dimmed Modal Backdrop -->
+<div aria-hidden="true" class="fixed inset-0 bg-black/60 z-0 pointer-events-auto"></div>
+<!-- Bottom Sheet Modal (Strictly docked bottom, 100% full width, edge-to-edge) -->
+<aside class="relative z-10 w-full bg-surface-dark rounded-t-[28px] border-t border-hairline-dark flex flex-col shadow-2xl transition-transform duration-300">
+<!-- Drag Handle -->
+<div aria-hidden="true" class="w-full flex justify-center pt-3 pb-1">
+<div class="w-9 h-1 rounded-full bg-hairline-card"></div>
+</div>
+<!-- Modal Header -->
+<header class="flex justify-between items-center px-6 pt-3 pb-2">
+<h1 class="font-headline text-[20px] font-semibold text-text-main tracking-tight leading-snug">
+        直线召唤
+      </h1>
+<button aria-label="关闭" class="w-9 h-9 rounded-full bg-surface-inset border border-hairline-card flex items-center justify-center text-text-sub active:scale-95 transition-transform" type="button">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</header>
+<!-- Status Section (Pre-check) -->
+<section class="rounded-[22px] bg-ink-block border border-hairline-card p-4 mx-6 my-2">
+<!-- Row 1 -->
+<div class="flex items-center justify-between pb-3">
+<span class="text-text-sub text-[14px] font-normal leading-tight">蓝牙通道</span>
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-positive-green shrink-0"></span>
+<span class="text-text-main text-[14px] font-medium leading-tight">已连接</span>
+</div>
+</div>
+<!-- Hairline divider -->
+<div class="h-px w-full bg-hairline-card/60"></div>
+<!-- Row 2 -->
+<div class="flex items-center justify-between pt-3">
+<span class="text-text-sub text-[14px] font-normal leading-tight">当前通道</span>
+<span class="text-text-main text-[14px] font-semibold leading-tight font-headline">蓝牙</span>
+</div>
+</section>
+<!-- Direction Controls -->
+<div class="mx-6 mt-2 flex flex-col items-center">
+<!-- Button: Forward -->
+<button class="w-full h-[56px] rounded-full bg-accent-volt text-canvas-dark font-semibold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform select-none shadow-none focus:outline-none" id="btn-forward" type="button">
+<span class="font-headline font-bold text-lg leading-none">↑</span>
+<span class="font-headline font-semibold tracking-wide">向前</span>
+</button>
+<!-- Helper caption -->
+<p class="text-center text-xs text-text-sub font-normal my-2 select-none">
+        按住不放，松开即停
+      </p>
+<!-- Button: Backward -->
+<button class="w-full h-[56px] rounded-full bg-accent-volt text-canvas-dark font-semibold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform select-none shadow-none focus:outline-none" id="btn-backward" type="button">
+<span class="font-headline font-bold text-lg leading-none">↓</span>
+<span class="font-headline font-semibold tracking-wide">向后</span>
+</button>
+</div>
+<!-- Status Readout (Dual Card/Grid) -->
+<div class="mx-6 mt-4 grid grid-cols-2 gap-3">
+<!-- Left Box -->
+<div class="rounded-[18px] bg-surface-inset p-3.5 border border-hairline-dark/40 flex flex-col justify-between">
+<span class="text-xs text-text-sub leading-none mb-1.5 font-normal">车辆状态</span>
+<span class="text-base font-semibold text-text-main font-headline leading-snug tabular-nums">—</span>
+</div>
+<!-- Right Box -->
+<div class="rounded-[18px] bg-surface-inset p-3.5 border border-hairline-dark/40 flex flex-col justify-between">
+<span class="text-xs text-text-sub leading-none mb-1.5 font-normal">召唤状态</span>
+<span class="text-base font-semibold text-text-main font-headline leading-snug tabular-nums">—</span>
+</div>
+</div>
+<!-- Bottom Action -->
+<div class="mx-6 mt-4 mb-2">
+<button class="w-full h-[52px] rounded-full bg-surface-inset border border-hairline-card/70 text-text-main font-medium text-sm flex items-center justify-center active:scale-[0.98] transition-all select-none" type="button">
+        退出召唤
+      </button>
+</div>
+<!-- Bottom Home Indicator Bar (iOS style safe margin anchor) -->
+<div aria-hidden="true" class="w-full flex justify-center pt-2 pb-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+<div class="w-32 h-1 bg-[#4A4D53] rounded-full"></div>
+</div>
+</aside>
+<script>
+    // Micro-interactions for touch & hold on direction buttons
+    const bindHoldFeedback = (id) => {
+      const btn = document.getElementById(id);
+      if (!btn) return;
+      const startHold = () => {
+        btn.classList.add('opacity-90', 'scale-[0.97]');
+      };
+      const endHold = () => {
+        btn.classList.remove('opacity-90', 'scale-[0.97]');
+      };
+      btn.addEventListener('touchstart', startHold, { passive: true });
+      btn.addEventListener('touchend', endHold, { passive: true });
+      btn.addEventListener('touchcancel', endHold, { passive: true });
+      btn.addEventListener('mousedown', startHold);
+      btn.addEventListener('mouseup', endHold);
+      btn.addEventListener('mouseleave', endHold);
+    };
+
+    bindHoldFeedback('btn-forward');
+    bindHoldFeedback('btn-backward');
+  </script>
+</body></html>
