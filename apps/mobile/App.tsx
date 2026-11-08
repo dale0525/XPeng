@@ -1,14 +1,11 @@
 /**
- * 应用外壳：登录态路由 + 两个标签页（车控 / 设置）。
+ * 应用外壳：登录态路由 + 三个标签页（车控 / 状态 / 设置）。
  *
- * 没有引 react-navigation：只有「登录 / 两个平级标签」这一层结构，用 useState
- * 切换即可，省掉 ~300 KB 依赖和一整套导航容器。
- *
- * 令牌续期在 `sessionStore` 里做：每次业务调用前检查剩余有效期，快到期就先换票；
- * 换票失败会把会话落到 `relogin`，这里负责把提示条和登录页显示出来。
+ * 没有引 react-navigation：只有「登录 / 三个平级标签」这一层结构，用 useState
+ * 切换即可，省掉一整套导航容器。快捷指令配置存在原生 SharedPreferences 里。
  */
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StatusBar, Text, View } from 'react-native';
+import { StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { carLink, type LinkState } from './src/core/car';
@@ -16,11 +13,21 @@ import { bleLink } from './src/core/ble';
 import { sessionStore, type SessionState } from './src/core/session';
 import { themeVars, useThemeMode } from './src/core/theme';
 import { useUpdater } from './src/core/update';
+import { native, StorageKey } from './src/core/native';
+import { DEFAULT_CUSTOM_COMMAND_IDS, parseQuickCommands, type CustomCommandId } from './src/core/quick-commands';
 import { Banner, BottomNav, TopBar, type TabKey } from './src/ui/components';
-import { Icon } from './src/ui/icons';
+import { SpinnerIcon } from './src/ui/atoms';
 import { ControlScreen } from './src/ui/screens/Control';
+import { CustomCommandSheet } from './src/ui/screens/CustomCommandSheet';
 import { LoginScreen } from './src/ui/screens/Login';
 import { SettingsScreen } from './src/ui/screens/Settings';
+import { StatusScreen } from './src/ui/screens/Status';
+
+const PAGE_TITLE: Record<TabKey, string> = {
+  control: '车控',
+  status: '状态',
+  settings: '设置',
+};
 
 export default function App() {
   return (
@@ -39,6 +46,10 @@ function Shell() {
   const [link, setLink] = useState<LinkState>('idle');
   const [linkReason, setLinkReason] = useState<string | undefined>();
   const [latency, setLatency] = useState<number | null>(null);
+  const [bluetoothReady, setBluetoothReady] = useState(false);
+  const [quickCommands, setQuickCommands] = useState<readonly CustomCommandId[]>(DEFAULT_CUSTOM_COMMAND_IDS);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [unsupported, setUnsupported] = useState<string | null>(null);
   const [theme, setTheme, scheme] = useThemeMode();
   const updater = useUpdater();
 
@@ -48,13 +59,24 @@ function Shell() {
     return unsub;
   }, []);
 
-  // 登录后：取车辆 → 连 MQTT → 读状态
+  useEffect(() => {
+    native.storageGet(StorageKey.quickCommands)
+      .then((saved) => setQuickCommands(parseQuickCommands(saved)))
+      .catch(() => {});
+    return bleLink.subscribe((state) => setBluetoothReady(state.phase === 'ready'));
+  }, []);
+
+  useEffect(() => {
+    if (!unsupported) return;
+    const timer = setTimeout(() => setUnsupported(null), 2400);
+    return () => clearTimeout(timer);
+  }, [unsupported]);
+
   useEffect(() => {
     if (session.kind !== 'active') return;
     let alive = true;
     (async () => {
       try {
-        // myVehicles 的 data 是 { vehicles: [...] }，不是裸数组
         const data = await sessionStore.call<{ vehicles: Vehicle[] }>(
           '/biz/v5/vehicle/v2/myVehicles',
           {},
@@ -67,7 +89,6 @@ function Shell() {
         });
         await carLink.connect(first.vin, session.session.uid);
       } catch (e) {
-        // 失败时留在「离线」，用户可在设置页重新连接；原因必须进日志，否则只能猜
         console.warn('[shell] 读取车辆失败:', e instanceof Error ? e.message : String(e));
       }
     })();
@@ -77,7 +98,6 @@ function Shell() {
     });
     const unsubStatus = carLink.subscribeStatus((s) => {
       setStatus(s);
-      // 往返延迟由 readStatus 量出来；订阅时同步一次，否则首次连接后设置页一直显示「— ms」
       setLatency(carLink.latencyMs);
     });
     return () => {
@@ -97,14 +117,18 @@ function Shell() {
     [],
   );
 
-  // 三个分支都要注入主题变量，否则登录页永远是亮色。
-  // 必须放进 style 数组：themeVars() 返回的对象靠引用携带变量元数据，展开会丢。
+  const saveQuickCommands = (ids: CustomCommandId[]) => {
+    setQuickCommands(ids);
+    setSheetVisible(false);
+    native.storageSet(StorageKey.quickCommands, JSON.stringify(ids)).catch(() => {});
+  };
+
   const themed = themeVars(scheme);
 
   if (session.kind === 'loading') {
     return (
       <View style={[themed, { flex: 1 }]} className="bg-background items-center justify-center">
-        <ActivityIndicator color={scheme === 'dark' ? '#93ccff' : '#006194'} />
+        <SpinnerIcon />
       </View>
     );
   }
@@ -125,34 +149,54 @@ function Shell() {
     );
   }
 
-  const title =
-    vehicle?.plateNo && vehicle.vehicleTypeName
-      ? `${vehicle.plateNo} · ${vehicle.vehicleTypeName}`
-      : '小鹏友';
+  const plateNo = vehicle?.plateNo || '—';
+  const modelName = vehicle?.vehicleTypeName || '—';
+  const vehicleLabel = `车牌 ${plateNo} ｜ 车型 ${modelName}`;
 
   return (
     <View style={[themed, { flex: 1, paddingTop: insets.top }]} className="bg-background">
-      {/* 状态栏图标要与背景反色，否则暗色下看不见 */}
       <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
-      <TopBar title={title} online={link === 'online'} onRefresh={refresh} />
+      <TopBar
+        title={PAGE_TITLE[tab]}
+        vehicleLabel={vehicleLabel}
+        online={link === 'online'}
+        bluetoothReady={bluetoothReady}
+        onRefresh={refresh}
+      />
 
       {link === 'offline' && linkReason ? (
         <Banner tone="error" text={`连接断开：${linkReason}`} tag="RETRY" />
+      ) : null}
+      {unsupported ? (
+        <View className="absolute top-16 left-5 right-5 z-50 rounded-full bg-ink px-4 py-2.5">
+          <Text className="text-[12px] font-body text-on-surface">{`${unsupported} 尚未打通`}</Text>
+        </View>
       ) : null}
 
       <View className="flex-1">
         {!vehicle ? (
           <View className="flex-1 items-center justify-center gap-2">
-            <Text className="text-primary text-[32px] font-icon">{Icon.directions_car}</Text>
+            <SpinnerIcon />
             <Text className="text-[14px] text-on-surface-variant">正在读取车辆信息…</Text>
           </View>
         ) : tab === 'control' ? (
-          <ControlScreen vehicle={vehicle} status={status} onRefresh={refresh} bottomInset={108 + insets.bottom} />
+          <ControlScreen
+            vehicle={vehicle}
+            status={status}
+            onRefresh={refresh}
+            bottomInset={108 + insets.bottom}
+            quickCommands={quickCommands}
+            onCustomize={() => setSheetVisible(true)}
+            onUnsupported={setUnsupported}
+          />
+        ) : tab === 'status' ? (
+          <StatusScreen status={status} bottomInset={108 + insets.bottom} />
         ) : (
           <SettingsScreen
             bottomInset={108 + insets.bottom}
             session={session.session}
             vehicle={vehicle}
+            status={status}
             linkState={link}
             latencyMs={latency ?? carLink.latencyMs}
             mqttExpireAt={carLink.credentialsExpireAt}
@@ -169,6 +213,12 @@ function Shell() {
       </View>
 
       <BottomNav active={tab} onChange={setTab} insetBottom={insets.bottom} />
+      <CustomCommandSheet
+        visible={sheetVisible}
+        selected={quickCommands}
+        onCancel={() => setSheetVisible(false)}
+        onSave={saveQuickCommands}
+      />
     </View>
   );
 }

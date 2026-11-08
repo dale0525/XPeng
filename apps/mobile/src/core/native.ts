@@ -75,4 +75,5 @@ export const StorageKey = {
   deviceId: 'device.id',
   lastRefresh: 'session.lastRefresh',
   theme: 'ui.theme',
+  quickCommands: 'ui.quickCommands',
 } as const;

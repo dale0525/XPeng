@@ -1,30 +1,16 @@
-/**
- * 车控页（对应 `docs/design/control-light.html` / `control-dark.html`）。
- *
- * 设计稿把原来的首页、车控、状态三屏合成一屏，九个模块从上到下排到「里程与定位」。
- * 这里逐模块照抄设计稿的顺序与字段，不做删减，也不自行加设计稿没有的模块。
- *
- * 按钮不硬编码：全部从 `COMMANDS` 表按 `group` 渲染。加一条指令只需往那张表里加一项，
- * 这个文件不用动——这是「后续可扩展」的具体落点。
- *
- * 三处与设计稿不同的地方（设计稿的写法取不到数据，按实测语义改）：
- * 1. 舞台徽章只写「整车已闭锁」，去掉「防盗已布防」——没有对应的布防字段；
- * 2. 哨兵徽章按 `sentinel_mode_video_enable` 显示「录像已启用/已关闭」，不写「防御监视中」；
- * 3. 「上次充电」四项来自 `chargeStatistics`，是最近一次充电的记录，不是累计值。
- */
-import { useEffect, useState } from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import type * as React from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Image, Pressable, Text, View } from 'react-native';
 import {
   COMMANDS,
-  setSentinelSensitivity,
   setTemperature,
   type CommandDef,
 } from '@xpeng/protocol/src/commands';
 import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import type { CustomCommandId } from './CustomCommandSheet';
 import { carLink } from '../../core/car';
 import { bleLink } from '../../core/ble';
-import { isP5BleV2Vehicle } from '@xpeng/protocol/src/ble-v2-context';
-import { BLE_ONLY_V2_COMMAND_IDS, sendVehicleCommand } from '@xpeng/protocol/src/ble-v2-routing';
+import { sendVehicleCommand } from '@xpeng/protocol/src/ble-v2-routing';
 import {
   CapsTag,
   Card,
@@ -36,63 +22,108 @@ import {
   StatusStrip,
   type CommandVisualState,
 } from '../components';
-import { SegmentBar } from '../atoms';
+import { LiveDot, SegmentBar } from '../atoms';
 import { Icon, type IconName } from '../icons';
 
 const CAR_IMAGE = require('../../assets/car/d55a.png');
+const DASH = '—';
 
-type GroupKey = CommandDef['group'];
+type Outcome = CommandVisualState | 'unconfirmed';
 
-/** 分组标题、右上角英文小标与短条配色，照抄设计稿 2–6 区的写法。 */
-const GROUP_META: Record<
-  GroupKey,
-  { title: string; caps: string; accent: 'primary' | 'secondary' | 'tertiary' }
-> = {
-  door: { title: '车门与锁', caps: 'DOOR SYSTEM', accent: 'primary' },
-  window: { title: '车窗与遮阳帘', caps: '', accent: 'secondary' },
-  hvac: { title: '空调与座椅', caps: '', accent: 'primary' },
-  light: { title: '灯光与寻车', caps: 'LOCATE VEHICLE', accent: 'primary' },
-  sentinel: { title: '哨兵模式', caps: '', accent: 'tertiary' },
+const COMMAND_DEFS: Record<string, CommandDef> = Object.fromEntries(
+  COMMANDS.map((def) => [def.id, def]),
+);
+
+const REAL_COMMANDS: Record<CustomCommandId, string | undefined> = {
+  doorLock: 'door.unlock',
+  remoteUnlock: undefined,
+  acOn: 'hvac.on',
+  flash: 'light.flash',
+  windowClose: 'window.up',
+  windowVent: 'window.down',
+  shadeOpen: 'shade.open',
+  shadeClose: 'shade.close',
+  quickCool: 'hvac.quickCool',
+  quickWarm: 'hvac.quickWarm',
+  highTempSterilize: 'hvac.highTemp',
+  sentinelOn: 'sentinel.on',
+  sentinelOff: 'sentinel.off',
+  tailgateOpen: undefined,
+  tempPark: undefined,
 };
 
-/** 每条指令的图标，照抄设计稿按钮上的字形。 */
-const CMD_ICONS: Record<string, IconName> = {
-  'door.unlock': 'lock_open',
-  'door.lock': 'lock',
-  'shade.open': 'expand_less',
-  'shade.close': 'expand_more',
+const QUICK_META: Record<CustomCommandId, {
+  label: string;
+  note: string;
+  icon: IconName;
+}> = {
+  doorLock: { label: '解锁', note: '门锁', icon: 'lock_open' },
+  remoteUnlock: { label: '远程解锁', note: '应急启动', icon: 'vpn_key' },
+  acOn: { label: '开启空调', note: '速冷恒温', icon: 'ac_unit' },
+  flash: { label: '已闪灯', note: '已响应', icon: 'highlight' },
+  windowClose: { label: '全车车窗关闭', note: '一键闭窗', icon: 'window' },
+  windowVent: { label: '全车车窗通风', note: '微开换气', icon: 'air' },
+  shadeOpen: { label: '打开遮阳帘', note: '天幕采光', icon: 'vertical_shades' },
+  shadeClose: { label: '关闭遮阳帘', note: '遮蔽隔热', icon: 'vertical_shades_closed' },
+  quickCool: { label: '极速降温', note: '18°C', icon: 'severe_cold' },
+  quickWarm: { label: '极速升温', note: '32°C', icon: 'heat_pump' },
+  highTempSterilize: { label: '高温抑菌', note: '32°C', icon: 'sanitizer' },
+  sentinelOn: { label: '开启哨兵模式', note: '录像警戒', icon: 'security' },
+  sentinelOff: { label: '关闭哨兵模式', note: '解除警戒', icon: 'gpp_maybe' },
+  tailgateOpen: { label: '打开尾门', note: '电动尾门', icon: 'sensor_door' },
+  tempPark: { label: '临停', note: '保持供电', icon: 'power_settings_new' },
+};
+
+const SENSOR_ICONS: Record<string, IconName> = {
+  door: 'sensor_door',
+  window: 'window',
+  hvac: 'mode_fan',
+  light: 'lightbulb',
+  sentinel: 'security',
+};
+
+const ACTION_ICONS: Record<string, IconName> = {
   'window.down': 'air',
   'window.up': 'check_box_outline_blank',
+  'shade.open': 'expand_less',
+  'shade.close': 'expand_more',
   'hvac.on': 'power_settings_new',
   'hvac.off': 'mode_standby',
   'hvac.quickCool': 'ac_unit',
   'hvac.quickWarm': 'whatshot',
   'hvac.highTemp': 'clean_hands',
-  'light.flash': 'lightbulb',
+  'light.flash': 'flare',
   'light.horn': 'volume_up',
   'sentinel.on': 'security',
   'sentinel.off': 'gpp_bad',
 };
 
-type CommandOutcome = CommandVisualState | 'unconfirmed';
-type States = Record<string, CommandOutcome>;
-
-export function ControlScreen({
-  vehicle,
-  status,
-  onRefresh,
-  bottomInset,
-}: {
+export function ControlScreen(props: {
   vehicle: Vehicle;
   status: VehicleStatus | null;
   onRefresh: () => void;
   bottomInset: number;
-}) {
-  const [states, setStates] = useState<States>({});
+  quickCommands: readonly CustomCommandId[];
+  onCustomize: () => void;
+  onUnsupported: (label: string) => void;
+}): React.JSX.Element {
+  const { vehicle, status, bottomInset, quickCommands, onCustomize, onUnsupported } = props;
+  const [states, setStates] = useState<Record<string, Outcome>>({});
   const [temp, setTemp] = useState<number | null>(null);
   const [bleState, setBleState] = useState(bleLink.uiState);
+  const waterOpacity = useRef(new Animated.Value(0.28)).current;
 
   useEffect(() => bleLink.subscribe(setBleState), []);
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(waterOpacity, { toValue: 0.45, duration: 2600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(waterOpacity, { toValue: 0.28, duration: 2600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [waterOpacity]);
 
   async function run(def: CommandDef) {
     setStates((s) => ({ ...s, [def.id]: 'pending' }));
@@ -101,13 +132,28 @@ export function ControlScreen({
       executePreparedV2: (vin, code) => bleLink.executePreparedV2(vin, code),
     });
     if (!result.ok) console.warn(`[cmd] ${def.id}:`, result.error, 'msgId=', result.msgId);
-    const outcome: CommandOutcome = result.ok ? 'success'
+    const outcome: Outcome = result.ok
+      ? 'success'
       : result.unconfirmed ? 'unconfirmed' : 'failed';
     setStates((s) => ({ ...s, [def.id]: outcome }));
     setTimeout(() => {
       setStates((s) => ({ ...s, [def.id]: 'idle' }));
     }, 3000);
     if (result.ok) carLink.readStatus().catch(() => {});
+  }
+
+  function runId(id: string) {
+    const def = COMMAND_DEFS[id];
+    if (def) run(def);
+  }
+
+  function runQuick(id: CustomCommandId) {
+    const commandId = REAL_COMMANDS[id];
+    if (commandId === undefined) {
+      onUnsupported(QUICK_META[id].label);
+      return;
+    }
+    runId(commandId);
   }
 
   async function changeTemp(delta: number) {
@@ -119,812 +165,447 @@ export function ControlScreen({
     carLink.readStatus().catch(() => {});
   }
 
-  async function changeSensitivity(level: 1 | 2 | 3) {
-    const { serviceType, msgContent } = setSentinelSensitivity(level);
-    await carLink.send({
-      id: `sentinel.sens${level}`,
-      label: `灵敏度${['低', '中', '高'][level - 1]}`,
-      group: 'sentinel',
-      serviceType,
-      msgContent,
-    });
-    carLink.readStatus().catch(() => {});
-  }
-
   const i = status?.instant;
   const d = i?.door;
   const w = i?.window;
   const h = i?.hvac;
   const c = i?.charge;
-  const o = i?.odometer;
-  const t = i?.tpms;
-  const seat = i?.seat;
   const solar = i?.solarRoof;
-  const trunk = i?.trunkPower;
   const ext = i?.ext;
-  const stats = i?.chargeStatistics;
-  const drive = status?.interval?.drive;
-
+  const seat = i?.seat;
   const locked = d?.driver_door_lock_st === 1;
-  const shadePos = w?.sky_sun_shade_position ?? 0;
-  const displayTemp = temp ?? h?.hvac_temp ?? 24;
-  const p5Ble = isP5BleV2Vehicle(vehicle);
-  const defs = (g: GroupKey) => COMMANDS.filter((x) =>
-    x.group === g && (p5Ble || !BLE_ONLY_V2_COMMAND_IDS.includes(x.id as typeof BLE_ONLY_V2_COMMAND_IDS[number])));
-  const st = (id: string): CommandOutcome => states[id] ?? 'idle';
-
-  const doorCells = [
-    { label: '主驾门', v: d?.driver_door_ajar_st },
-    { label: '副驾门', v: d?.passenger_door_ajar_st },
-    { label: '左后门', v: d?.rear_left_door_ajar_st },
-    { label: '右后门', v: d?.rear_right_door_ajar_st },
-    { label: '后备箱', v: d?.trunk_ajar_st },
-  ];
-
   const windowCells = [
-    { label: '左前窗', v: w?.front_left_window_position },
-    { label: '右前窗', v: w?.front_right_window_position },
-    { label: '左后窗', v: w?.rear_left_window_position },
-    { label: '右后窗', v: w?.rear_right_window_position },
+    w?.front_left_window_position,
+    w?.front_right_window_position,
+    w?.rear_left_window_position,
+    w?.rear_right_window_position,
   ];
+  const windowOpening = windowCells.filter((v): v is number => v !== undefined);
+  const windowPercent = windowOpening.length === 0
+    ? DASH
+    : String(Math.round(windowOpening.reduce((sum, v) => sum + v, 0) / windowOpening.length));
+  const shadePercent = w?.sky_sun_shade_position === undefined
+    ? DASH
+    : String(w.sky_sun_shade_position);
+  const solarText = solar === undefined
+    ? DASH
+    : solar.solarWorkStatus === 1 ? '采光发电中' : '待机';
+  const tailgateOpen = d?.trunk_ajar_st === 1;
+  const tailgateText = d?.trunk_ajar_st === undefined
+    ? DASH
+    : tailgateOpen ? '已开启' : '已关闭';
+  const soc = c?.battery_soc === undefined ? DASH : String(c.battery_soc);
+  const chargeMinutes = c?.time_to_complete_charge_min === undefined
+    ? DASH
+    : c.time_to_complete_charge_min > 0 ? String(c.time_to_complete_charge_min) : DASH;
+  const targetTemp = temp ?? h?.hvac_temp;
+  const targetText = targetTemp === undefined ? DASH : String(targetTemp);
+  const innerText = h?.hvac_inner_temp === undefined ? DASH : String(h.hvac_inner_temp);
+  const windText = h?.hvac_wind_speed === undefined ? DASH : String(h.hvac_wind_speed);
+  const autoText = h?.hvac_auto === undefined ? DASH : h.hvac_auto === 1 ? '开启' : '关闭';
+  const seatText = seat === undefined
+    ? DASH
+    : `加热 ${seat.driver_seat_heat} / 通风 ${seat.driver_seat_ventilation}`;
+  const videoText = ext?.sentinel_mode_video_enable === undefined
+    ? DASH
+    : ext.sentinel_mode_video_enable === 1 ? '开启' : '关闭';
+  const repairText = ext?.repairMode === undefined ? DASH : ext.repairMode === 1 ? '开启' : '关闭';
+  const sensitivity = ext?.sentinel_mode_sensitivity;
+  const sensitivityText = sensitivity === undefined
+    ? DASH
+    : (['低', '中', '高'] as const)[sensitivity - 1] ?? String(sensitivity);
+  const doorLockText = d === undefined ? DASH : locked ? '已锁止' : '已解锁';
+  const fiveDoorText = d === undefined ? DASH : [
+    d.driver_door_ajar_st,
+    d.passenger_door_ajar_st,
+    d.rear_left_door_ajar_st,
+    d.rear_right_door_ajar_st,
+    d.trunk_ajar_st,
+  ].every((v) => v === 0) ? '全关' : '未全关';
+  const sentinelVideo = ext?.sentinel_mode_video_enable;
+  const heroVideoText = sentinelVideo === undefined
+    ? DASH
+    : sentinelVideo === 1 ? '已启用' : '已关闭';
+  const st = (id: string): Outcome => states[id] ?? 'idle';
 
   return (
     <ScreenScroll bottomInset={bottomInset}>
-      {/* 1. 车辆舞台 */}
-      <Card>
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-row items-center gap-1 px-2.5 py-1 rounded bg-surface-container border border-outline-variant/50">
-            <Text className="text-[13px] font-icon text-secondary">{Icon.verified_user}</Text>
-            <Text className="text-xs font-semibold text-on-surface">
-              {locked === undefined ? '整车状态未知' : locked ? '整车已闭锁' : '整车已解锁'}
-            </Text>
+      <Card padded={false} className="bg-ink border-hairline overflow-hidden">
+        <View className="relative min-h-[300px] justify-between p-5">
+          <View className="absolute inset-0 items-center justify-center opacity-40">
+            <Image source={CAR_IMAGE} className="w-full h-44" resizeMode="contain" />
           </View>
-          <Text className="text-[10px] font-mono font-bold tracking-wider text-secondary uppercase">
-            TELEMETRICS READY
-          </Text>
-        </View>
+          <Animated.View
+            className="absolute bottom-0 left-0 right-0 h-[48%] bg-positive"
+            style={{ height: '48%', opacity: waterOpacity }}>
+            <View className="h-[2px] w-full bg-positive/70" />
+          </Animated.View>
 
-        <View className="relative w-full rounded-lg overflow-hidden bg-surface-container-low items-center justify-center py-2">
-          <Image source={CAR_IMAGE} className="w-full h-44" resizeMode="contain" />
-          {/* 五个部位浮标：位置照抄设计稿的四角 + 底部居中 */}
-          <DoorTag label="左前门" ajar={d?.driver_door_ajar_st} pos="top-2 left-2" />
-          <DoorTag label="右前门" ajar={d?.passenger_door_ajar_st} pos="top-2 right-2" />
-          <DoorTag label="左后门" ajar={d?.rear_left_door_ajar_st} pos="bottom-9 left-2" />
-          <DoorTag label="右后门" ajar={d?.rear_right_door_ajar_st} pos="bottom-9 right-2" />
-          <DoorTag label="后备箱" ajar={d?.trunk_ajar_st} pos="bottom-2 center" />
-        </View>
-
-        <View className="mt-2.5 pt-2 border-t border-outline-variant/40 flex-row items-center justify-between">
-          <View className="flex-row items-center gap-1">
-            <Text className="text-[13px] font-icon text-secondary">{Icon.check_circle}</Text>
-            <Text className="text-xs text-on-surface">4门+后备箱防盗闭锁就绪</Text>
+          <View className="relative flex-row items-start justify-between">
+            <View>
+              <View className="flex-row items-center gap-2">
+                <Text className="text-lg font-headline font-bold text-surface-container-lowest tracking-tight">
+                  车辆名 —
+                </Text>
+                <View className="flex-row items-center gap-1 px-2 py-0.5 rounded-full bg-ink/80 border border-positive/30">
+                  <View className="w-1.5 h-1.5 rounded-full bg-positive" />
+                  <Text className="text-[11px] font-body font-medium text-positive">已布防</Text>
+                </View>
+              </View>
+              <View className="flex-row items-center gap-2 mt-1">
+                <Text className="text-xs text-surface-container-highest">
+                  整车闭锁 <Text className="font-body font-medium text-surface-container-lowest">{DASH}</Text>
+                </Text>
+                <Text className="text-xs text-surface-container-highest">•</Text>
+                <Text className="text-xs text-surface-container-highest">
+                  五门状态 <Text className="font-body font-medium text-surface-container-lowest">{DASH}</Text>
+                </Text>
+              </View>
+            </View>
+            <View className="flex-row items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10">
+              <Text className="text-[15px] font-icon text-accent">{Icon.shield}</Text>
+              <Text className="text-[11px] text-surface-container-lowest">哨兵录像 —</Text>
+            </View>
           </View>
-          <View className="flex-row items-center gap-1">
-            <View className="w-1.5 h-1.5 rounded-full bg-primary" />
-            <Text className="text-[11px] font-mono font-bold text-primary">
-              哨兵模式：{ext?.sentinel_mode_video_enable === 1 ? '已启用' : '已关闭'}
-            </Text>
+
+          <View className="relative mt-16 pt-4">
+            <View className="flex-row items-baseline gap-2">
+              <Text className="text-display-hero-mobile font-headline font-bold text-surface-container-lowest">{soc}</Text>
+              <Text className="text-2xl font-headline font-bold text-positive">%</Text>
+              <Text className="text-2xl font-icon text-accent">{Icon.bolt}</Text>
+            </View>
+            <View className="flex-row items-center justify-between mt-3 pt-3 border-t border-white/15">
+              <View className="flex-row items-center gap-1.5">
+                <LiveDot colorClass="bg-positive" size={5} />
+                <Text className="text-xs font-body font-medium text-surface-container-lowest">充电中</Text>
+                <Text className="text-xs text-surface-container-highest">
+                  / 预计 {chargeMinutes} 分钟后充满
+                </Text>
+              </View>
+              <Text className="text-[13px] font-headline font-semibold text-surface-container-lowest">
+                电量 {soc}
+              </Text>
+            </View>
           </View>
         </View>
       </Card>
 
-      {/* 2. 车门与锁 */}
       <Card>
-        <SectionHeader
-          title={GROUP_META.door.title}
-          accent={GROUP_META.door.accent}
-          right={<CapsTag text={GROUP_META.door.caps} />}
-        />
-        <View className="flex-row gap-2.5 mb-2.5">
-          {defs('door').map((def) => (
-            <View key={def.id} className="flex-1">
-              <CommandButton
-                icon={CMD_ICONS[def.id] ?? 'lock'}
-                label={def.label}
-                state={st(def.id) !== 'idle' ? st(def.id) : def.id === 'door.lock' && locked ? 'primary' : 'idle'}
-                variant={def.id === 'door.lock' ? 'solid' : 'soft'}
-                tint="primary"
-                onPress={() => run(def)}
-              />
-            </View>
-          ))}
+        <View className="flex-row items-center justify-between mb-3 px-1">
+          <Text className="text-sm font-headline font-semibold text-on-surface">快捷指令</Text>
+          <Pressable
+            onPress={onCustomize}
+            className="flex-row items-center gap-1 active:scale-95">
+            <Text className="text-[15px] font-icon text-on-surface-variant">{Icon.tune}</Text>
+            <Text className="text-xs font-body font-medium text-on-surface-variant">自定义</Text>
+          </Pressable>
         </View>
-        <StatusStrip
-          label="当前门锁状态"
-          value={locked === undefined ? '—' : locked ? '已锁止 · 全部安全' : '已解锁'}
-          className="mb-2.5"
-        />
-        <StatusStrip
-          label="数字钥匙 / 蓝牙"
-          value={Object.values(states).includes('unconfirmed')
-            ? '指令已发送 · 请核对车况'
-            : bleState.error ? `${bleState.label} · ${bleState.error}` : bleState.label}
-          valueClass={bleState.connected ? 'text-primary' : bleState.phase === 'error' ? 'text-error' : 'text-secondary'}
-          className="mb-2.5"
-        />
-        <View className="flex-row gap-1.5">
-          {doorCells.map((cell) => (
-            <ReadoutCell
-              key={cell.label}
-              label={cell.label}
-              value={cell.v === undefined ? '—' : cell.v === 0 ? '闭合' : '未关'}
-              valueClass={cell.v === 0 ? 'text-on-surface' : 'text-error'}
+        <View className="flex-row gap-2.5">
+          {quickCommands.slice(0, 4).map((id) => (
+            <QuickAction
+              key={id}
+              meta={QUICK_META[id]}
+              highlighted={id === 'flash'}
+              onPress={() => runQuick(id)}
             />
           ))}
         </View>
-        <View className="mt-2">
-          <InfoRow
-            label="临时锁车"
-            value={d?.temp_lock_st === undefined ? '—' : d.temp_lock_st === 1 ? '已启用' : '未启用'}
-            small
+      </Card>
+
+      <Card>
+        <SectionHeader
+          title="车门与中控锁"
+          right={
+            <View className="flex-row items-center gap-2">
+              <CapsTag text={`门锁 ${doorLockText}`} />
+              <CapsTag text={`五门 ${fiveDoorText}`} />
+            </View>
+          }
+        />
+        <StatusStrip
+          label="MQTT + BLE 双通道"
+          value={bleState.error ? `${bleState.label} · ${bleState.error}` : bleState.label}
+          valueClass={bleState.connected ? 'text-positive' : 'text-on-surface-variant'}
+          className="mb-2.5"
+        />
+        <View className="bg-inset rounded-box p-3.5 mb-2.5">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-2">
+              <Text className="text-sm font-headline font-semibold text-on-surface">中控门锁</Text>
+              <Text className="text-xs font-body text-on-surface-variant">
+                未解锁显示「解锁」，已解锁切换为「锁车」
+              </Text>
+            </View>
+            {!locked ? (
+              <Pressable
+                onPress={() => runId('door.unlock')}
+                className="flex-row items-center gap-1 px-4 py-2 rounded-full bg-primary-container active:scale-95">
+                <Text className="text-[18px] font-icon text-on-primary-fixed">{Icon.lock_open}</Text>
+                <Text className="text-sm font-headline font-semibold text-on-primary-fixed">解锁</Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => runId('door.lock')}
+                className="flex-row items-center gap-1 px-4 py-2 rounded-full bg-primary-container active:scale-95">
+                <Text className="text-[18px] font-icon text-on-primary-fixed">{Icon.lock}</Text>
+                <Text className="text-sm font-headline font-semibold text-on-primary-fixed">锁车</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+        <View className="bg-inset rounded-box p-3.5 mb-2.5">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-2">
+              <View className="flex-row items-center gap-1.5">
+                <Text className="text-sm font-headline font-semibold text-on-surface">远程解锁</Text>
+                <Text className="text-[10px] font-body text-on-surface-variant bg-surface-container-lowest px-1.5 py-0.5 rounded-full">
+                  仅远程下发
+                </Text>
+              </View>
+              <Text className="text-xs font-body text-on-surface-variant">
+                无钥匙应急 · 解锁后 2 分钟内可踩刹车挂挡启动
+              </Text>
+            </View>
+            <PillAction label="远程解锁" onPress={() => onUnsupported('远程解锁')} />
+          </View>
+        </View>
+        <View className="bg-inset rounded-box p-3.5 mb-2.5">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-2">
+              <View className="flex-row items-center gap-1.5">
+                <Text className="text-sm font-headline font-semibold text-on-surface">电动尾门</Text>
+                <Text className="text-[10px] font-body text-on-surface-variant bg-surface-container-lowest px-1.5 py-0.5 rounded-full">
+                  BLE 直连
+                </Text>
+              </View>
+              <Text className="text-xs font-body text-on-surface-variant">
+                当前已关显示「打开尾门」，开启后切换「关闭尾门」
+              </Text>
+            </View>
+            {tailgateOpen ? (
+              <PillAction label="关闭尾门" onPress={() => onUnsupported('电动尾门')} />
+            ) : (
+              <PillAction label="打开尾门" onPress={() => onUnsupported('电动尾门')} />
+            )}
+          </View>
+        </View>
+        <View className="bg-inset rounded-box p-3.5">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1 pr-2">
+              <Text className="text-sm font-headline font-semibold text-on-surface">临停</Text>
+              <Text className="text-xs font-body text-on-surface-variant">临时停车保持车端动力供电</Text>
+            </View>
+            <Pressable
+              onPress={() => onUnsupported('临停')}
+              className="w-12 h-6 rounded-full bg-surface-container-highest p-0.5">
+              <View className="w-5 h-5 rounded-full bg-surface-container-lowest" />
+            </Pressable>
+          </View>
+        </View>
+      </Card>
+
+      <Card>
+        <SectionHeader title="车窗与遮阳帘" />
+        <View className="flex-row flex-wrap gap-2 mb-2.5">
+          <ReadoutCell label="四窗开度" value={`${windowPercent} %`} />
+          <ReadoutCell label="天幕开度" value={`${shadePercent} %`} />
+          <ReadoutCell label="太阳能天窗" value={solarText} />
+          <ReadoutCell label="电动尾门状态" value={tailgateText} />
+        </View>
+        <View className="flex-row flex-wrap gap-2.5">
+          <CommandButton
+            icon={ACTION_ICONS['window.down']}
+            label="全车车窗通风"
+            state={st('window.down')}
+            className="basis-[48%]"
+            onPress={() => runId('window.down')}
+          />
+          <CommandButton
+            icon={ACTION_ICONS['window.up']}
+            label="全车车窗关闭"
+            state={st('window.up')}
+            className="basis-[48%]"
+            onPress={() => runId('window.up')}
+          />
+          <CommandButton
+            icon={ACTION_ICONS['shade.open']}
+            label="打开遮阳帘"
+            state={st('shade.open')}
+            className="basis-[48%]"
+            onPress={() => runId('shade.open')}
+          />
+          <CommandButton
+            icon={ACTION_ICONS['shade.close']}
+            label="关闭遮阳帘"
+            state={st('shade.close')}
+            className="basis-[48%]"
+            onPress={() => runId('shade.close')}
           />
         </View>
       </Card>
 
-      {/* 3. 车窗与遮阳帘 */}
       <Card>
-        <SectionHeader
-          title={GROUP_META.window.title}
-          accent={GROUP_META.window.accent}
-          right={
-            <Text className="text-xs font-mono font-medium text-on-surface-variant">
-              天幕开度：{shadePos}%（{shadePos >= 100 ? '完全打开' : shadePos <= 0 ? '完全关闭' : '部分打开'}）
-            </Text>
-          }
-        />
+        <SectionHeader title="空调与座椅" />
+        <View className="bg-inset rounded-box p-3.5 mb-2.5">
+          <InfoRow
+            label="设定目标 / 实测温度"
+            value={`目标 ${targetText} °C / 实测 ${innerText} °C`}
+          />
+          <InfoRow label="风量档位" value={windText} small />
+          <InfoRow label="AUTO 恒温" value={autoText} small />
+          <InfoRow label="座椅加热通风" value={seatText} small />
+        </View>
         <View className="flex-row flex-wrap gap-2 mb-2.5">
-          {defs('window').map((def) => (
-            <View key={def.id} style={{ width: '48%' }}>
-              <CommandButton
-                icon={CMD_ICONS[def.id] ?? 'air'}
-                label={def.label}
-                state={st(def.id)}
-                variant="soft"
-                tint={def.id === 'window.down' ? 'secondary' : 'primary'}
-                onPress={() => run(def)}
-              />
-            </View>
-          ))}
-        </View>
-        <View className="flex-row gap-1.5 mb-2.5">
-          {windowCells.map((cell) => {
-            // 100 = 完全关闭，0 = 完全打开；设计稿写「0% (已闭)」，按关闭程度换算
-            const closed = cell.v === undefined ? undefined : cell.v;
-            return (
-              <ReadoutCell
-                key={cell.label}
-                label={cell.label}
-                value={closed === undefined ? '—' : `${closed}%`}
-                sub={closed === undefined ? undefined : closed >= 100 ? '(已闭)' : '(开启)'}
-                valueClass={closed !== undefined && closed >= 100 ? 'text-on-surface' : 'text-secondary'}
-              />
-            );
-          })}
-        </View>
-        <View className="flex-row gap-2">
-          <View className="flex-1 bg-surface-container-low border border-outline-variant/50 p-2.5 rounded-lg">
-            <View className="flex-row items-center gap-1 mb-1">
-              <Text className="text-[13px] font-icon text-primary">{Icon.solar_power}</Text>
-              <Text className="text-xs font-bold text-on-surface">太阳能天窗</Text>
-            </View>
-            <InfoRow
-              label="工作状态"
-              value={solar === undefined ? '—' : solar.solarWorkStatus === 1 ? '采光发电中' : '待机'}
-              valueClass="text-secondary"
-              small
-            />
-            <InfoRow
-              label="故障状态"
-              value={solar === undefined ? '—' : solar.solarFaultStatus === 0 ? '无故障（正常）' : '有故障'}
-              small
-            />
-            <InfoRow label="今日通风次数" value={`${solar?.solarVentilateToday ?? '—'} 次`} small />
-            <InfoRow label="今日通风时长" value={`${solar?.solarVentilateLengthToday ?? '—'} 分钟`} small />
-            <InfoRow
-              label="通风状态"
-              value={
-                solar === undefined ? '—' : solar.solarVentilateStatus === 1 ? '通风中' : '未通风'
-              }
-              valueClass={solar?.solarVentilateStatus === 1 ? 'text-secondary' : 'text-on-surface-variant'}
-              small
-            />
-          </View>
-          <View className="flex-1 bg-surface-container-low border border-outline-variant/50 p-2.5 rounded-lg">
-            <View className="flex-row items-center gap-1 mb-1">
-              <Text className="text-[13px] font-icon text-secondary">{Icon.sensor_door}</Text>
-              <Text className="text-xs font-bold text-on-surface">电动尾门</Text>
-            </View>
-            <InfoRow
-              label="尾门开关"
-              value={trunk === undefined ? '—' : trunk.powerSwitch === 1 ? '已开启' : '已关闭'}
-              valueClass="text-secondary"
-              small
-            />
-            <InfoRow
-              label="自动关闭倒计时"
-              value={
-                trunk === undefined
-                  ? '—'
-                  : trunk.timeToPowerOffInMin > 0
-                    ? `${trunk.timeToPowerOffInMin} 分钟`
-                    : '--（闭锁正常）'
-              }
-              small
-            />
-          </View>
-        </View>
-      </Card>
-
-      {/* 4. 空调与座椅 */}
-      <Card>
-        <SectionHeader
-          title={GROUP_META.hvac.title}
-          accent={GROUP_META.hvac.accent}
-          right={
-            <View className="px-2 py-0.5 rounded bg-surface-container">
-              <Text className="text-xs font-mono font-bold text-secondary">
-                车内温度 {h?.hvac_inner_temp ?? '—'}°C
-              </Text>
-            </View>
-          }
-        />
-        <View className="flex-row gap-1 mb-3">
-          {defs('hvac').map((def) => (
-            <CommandButton
-              key={def.id}
-              icon={CMD_ICONS[def.id] ?? 'power_settings_new'}
-              label={def.label}
-              state={
-                st(def.id) !== 'idle'
-                  ? st(def.id)
-                  : def.id === 'hvac.on' && h?.hvac_on === 1
-                    ? 'primary'
-                    : 'idle'
-              }
-              variant="tile"
-              tint={
-                def.id === 'hvac.quickCool'
-                  ? 'secondary'
-                  : def.id === 'hvac.quickWarm'
-                    ? 'primary'
-                    : def.id === 'hvac.highTemp'
-                      ? 'tertiary'
-                      : undefined
-              }
-              onPress={() => run(def)}
-            />
-          ))}
-        </View>
-
-        <View className="bg-surface-container-low rounded-lg p-3 border border-outline-variant/50 flex-row items-center justify-between mb-2.5">
+          <CommandButton
+            icon={ACTION_ICONS['hvac.on']}
+            label="打开空调"
+            state={st('hvac.on')}
+            variant="solid"
+            className="basis-[23%]"
+            onPress={() => runId('hvac.on')}
+          />
+          <CommandButton
+            icon={ACTION_ICONS['hvac.off']}
+            label="关闭空调"
+            state={st('hvac.off')}
+            className="basis-[23%]"
+            onPress={() => runId('hvac.off')}
+          />
           <Pressable
             onPress={() => changeTemp(-1)}
-            accessibilityLabel="调低温度"
-            className="w-10 h-10 rounded-full bg-surface border border-outline-variant/70 items-center justify-center active:scale-95">
-            <Text className="text-[20px] font-icon text-on-surface">{Icon.remove}</Text>
+            className="basis-[23%] flex-row items-center justify-center gap-1 py-3 px-1 rounded-lg bg-inset border border-hairline active:scale-95">
+            <Text className="text-[16px] font-icon text-on-surface">{Icon.remove}</Text>
+            <Text className="text-xs font-headline font-semibold text-on-surface">温度</Text>
           </Pressable>
-          <View className="items-center">
-            <Text className="font-mono text-3xl font-extrabold text-on-surface tracking-tight">
-              {displayTemp}°C
-            </Text>
-            <Text className="text-[11px] text-on-surface-variant mt-0.5">
-              {h?.hvac_auto === 1 ? '双温区同步 · 自动模式' : '双温区同步 · 手动模式'}
-            </Text>
-          </View>
           <Pressable
             onPress={() => changeTemp(1)}
-            accessibilityLabel="调高温度"
-            className="w-10 h-10 rounded-full bg-surface border border-outline-variant/70 items-center justify-center active:scale-95">
-            <Text className="text-[20px] font-icon text-on-surface">{Icon.add}</Text>
+            className="basis-[23%] flex-row items-center justify-center gap-1 py-3 px-1 rounded-lg bg-inset border border-hairline active:scale-95">
+            <Text className="text-[16px] font-icon text-on-surface">{Icon.add}</Text>
+            <Text className="text-xs font-headline font-semibold text-on-surface">温度</Text>
           </Pressable>
         </View>
-
-        <View className="flex-row bg-surface-container/60 p-1.5 rounded-md border border-outline-variant/40 mb-2.5">
-          <MicroStat label="风量" value={`${h?.hvac_wind_speed ?? '—'}档`} />
-          <MicroStat label="AUTO" value={h?.hvac_auto === 1 ? '开启' : '关闭'} on={h?.hvac_auto === 1} />
-          <MicroStat label="除霜" value={h?.hvac_defrost === 1 ? '开启' : '关闭'} on={h?.hvac_defrost === 1} />
-          <MicroStat
-            label="极速升温"
-            value={h?.hvac_quick_warm_mode === 1 ? '开启' : '关闭'}
-            on={h?.hvac_quick_warm_mode === 1}
+        <View className="flex-row gap-2">
+          <CommandButton
+            icon={ACTION_ICONS['hvac.quickCool']}
+            label="极速降温 (18°C)"
+            state={st('hvac.quickCool')}
+            tint="secondary"
+            className="flex-1"
+            onPress={() => runId('hvac.quickCool')}
           />
-          <MicroStat
-            label="极速降温"
-            value={h?.hvac_quick_cool_mode === 1 ? '开启' : '关闭'}
-            on={h?.hvac_quick_cool_mode === 1}
+          <CommandButton
+            icon={ACTION_ICONS['hvac.quickWarm']}
+            label="极速升温 (32°C)"
+            state={st('hvac.quickWarm')}
+            tint="primary"
+            className="flex-1"
+            onPress={() => runId('hvac.quickWarm')}
           />
-          <MicroStat
-            label="高温抑菌"
-            value={h?.hvac_high_temp_mode === 1 ? '开启' : '关闭'}
-            on={h?.hvac_high_temp_mode === 1}
+          <CommandButton
+            icon={ACTION_ICONS['hvac.highTemp']}
+            label="高温抑菌 (32°C)"
+            state={st('hvac.highTemp')}
+            tint="tertiary"
+            className="flex-1"
+            onPress={() => runId('hvac.highTemp')}
           />
-        </View>
-
-        <View className="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/50">
-          <View className="flex-row items-center justify-between border-b border-outline-variant/40 pb-1.5 mb-2">
-            <View className="flex-row items-center gap-1">
-              <Text className="text-[13px] font-icon text-primary">{Icon.airline_seat_recline_extra}</Text>
-              <Text className="text-xs font-semibold text-on-surface">座椅加热与通风</Text>
-            </View>
-            <Text className="text-[11px] font-mono text-outline">COMFORT MATRIX</Text>
-          </View>
-          <View className="flex-row gap-2">
-            <View className="flex-1">
-              <InfoRow label="主驾加热" value={`${seat?.driver_seat_heat ?? '—'}档`} small />
-              <InfoRow label="副驾加热" value={`${seat?.passenger_seat_heat ?? '—'}档`} small />
-              <InfoRow
-                label="后排加热"
-                value={`左${seat?.left_rear_seat_heat ?? '—'} / 右${seat?.right_rear_seat_heat ?? '—'}`}
-                small
-              />
-            </View>
-            <View className="flex-1 pl-2 border-l border-outline-variant/50">
-              <InfoRow
-                label="主驾通风"
-                value={`${seat?.driver_seat_ventilation ?? '—'}档`}
-                valueClass={seat?.driver_seat_ventilation ? 'text-secondary' : 'text-on-surface-variant'}
-                small
-              />
-              <InfoRow
-                label="副驾通风"
-                value={`${seat?.passenger_seat_ventilation ?? '—'}档`}
-                valueClass={seat?.passenger_seat_ventilation ? 'text-secondary' : 'text-on-surface-variant'}
-                small
-              />
-              <InfoRow
-                label="后排通风"
-                value={`左${seat?.left_rear_seat_ventilation ?? '—'} / 右${seat?.right_rear_seat_ventilation ?? '—'}`}
-                small
-              />
-              <InfoRow
-                label="主驾坐姿"
-                value={seat === undefined ? '—' : seat.driver_seat_state === 1 ? '已占用' : '未占用'}
-                small
-              />
-            </View>
-          </View>
         </View>
       </Card>
 
-      {/* 5. 灯光与寻车 */}
       <Card>
-        <SectionHeader
-          title={GROUP_META.light.title}
-          accent={GROUP_META.light.accent}
-          right={<CapsTag text={GROUP_META.light.caps} />}
-        />
-        <View className="flex-row gap-2.5">
-          {defs('light').map((def) => (
-            <View key={def.id} className="flex-1">
-              <CommandButton
-                icon={CMD_ICONS[def.id] ?? 'lightbulb'}
-                label={def.label}
-                state={st(def.id)}
-                variant="soft"
-                tint="primary"
-                onPress={() => run(def)}
-              />
-            </View>
-          ))}
-        </View>
-      </Card>
-
-      {/* 6. 哨兵模式 */}
-      <Card>
-        <SectionHeader
-          title={GROUP_META.sentinel.title}
-          accent={GROUP_META.sentinel.accent}
-          right={
-            <View className="flex-row items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary/10">
-              <View className="w-1.5 h-1.5 rounded-full bg-tertiary" />
-              <Text className="text-[11px] font-bold font-mono text-tertiary">
-                录像{ext?.sentinel_mode_video_enable === 1 ? '已启用' : '已关闭'}
-              </Text>
-            </View>
-          }
-        />
-        <View className="flex-row gap-2 mb-3">
-          {defs('sentinel').map((def) => {
-            const on = def.id === 'sentinel.on';
-            return (
-              <View key={def.id} className="flex-1">
-                <CommandButton
-                  icon={CMD_ICONS[def.id] ?? 'security'}
-                  label={def.label}
-                  state={
-                    st(def.id) !== 'idle'
-                      ? st(def.id)
-                      : on && ext?.sentinel_mode_video_enable === 1
-                        ? 'primary'
-                        : 'idle'
-                  }
-                  variant="soft"
-                  onPress={() => run(def)}
-                />
-              </View>
-            );
-          })}
-        </View>
-
-        <View className="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/50 mb-2.5">
-          <Text className="text-xs text-on-surface-variant mb-1.5 font-medium">
-            碰撞与靠近感应灵敏度
-          </Text>
-          <View className="flex-row gap-1 bg-surface-container p-1 rounded-md">
-            {(['低', '中', '高'] as const).map((label, idx) => {
-              const on = ext?.sentinel_mode_sensitivity === idx + 1;
-              return (
-                <Pressable
-                  key={label}
-                  onPress={() => changeSensitivity((idx + 1) as 1 | 2 | 3)}
-                  className={`flex-1 py-1 items-center rounded ${on ? 'bg-secondary' : ''} active:scale-95`}>
-                  <Text
-                    className={`text-xs font-medium ${
-                      on ? 'text-white font-bold' : 'text-on-surface-variant'
-                    }`}>
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        <View className="flex-row gap-1.5">
-          <SmallStat
-            label="哨兵影像开关"
-            value={ext?.soldier_camera_status === 1 ? '开启' : '关闭'}
-            on={ext?.soldier_camera_status === 1}
-          />
-          <SmallStat
-            label="录像使能"
-            value={ext?.sentinel_mode_video_enable === 1 ? '开启' : '关闭'}
-            on={ext?.sentinel_mode_video_enable === 1}
-          />
-          <SmallStat label="维修模式" value={ext?.repairMode === 1 ? '开启' : '关闭'} on={ext?.repairMode === 1} />
-        </View>
-      </Card>
-
-      {/* 7. 电池与充电 */}
-      <Card>
-        <SectionHeader title="电池与充电" accent="primary" />
-        <View className="bg-surface-container-low rounded-lg p-3 border border-outline-variant/50 mb-3">
-          <View className="flex-row items-baseline justify-between">
-            <View className="flex-row items-baseline gap-1">
-              <Text className="font-mono text-3xl font-black text-on-surface tracking-tight">
-                {c?.battery_soc ?? '—'}%
-              </Text>
-              <Text className="text-xs text-on-surface-variant">剩余电量</Text>
-            </View>
-            <View className="flex-row items-baseline gap-1">
-              <Text className="font-mono text-2xl font-black text-primary tracking-tight">
-                {o?.avalible_driving_distance ?? '—'}
-              </Text>
-              <Text className="text-xs font-mono text-on-surface-variant">km 续航</Text>
-            </View>
-          </View>
-          <View className="my-2">
-            <SegmentBar
-              total={10}
-              filled={Math.round((c?.battery_soc ?? 0) / 10)}
-              fillClass="bg-primary-container"
-              emptyClass="bg-surface-container-highest"
-              height={8}
+        <SectionHeader title="灯光与提示" />
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <CommandButton
+              icon={ACTION_ICONS['light.flash']}
+              label="闪灯（已响应态）"
+              state={st('light.flash')}
+              variant="solid"
+              onPress={() => runId('light.flash')}
             />
           </View>
-          <View className="flex-row justify-between pt-1 border-t border-outline-variant/40">
-            <Text className="text-[11px] font-mono text-on-surface-variant">
-              总里程：{(o?.total_mileage ?? 0).toLocaleString()} km
-            </Text>
-            <Text className="text-[11px] font-mono text-on-surface-variant">
-              充电限值：{c?.max_range_charge ?? '—'}%
-            </Text>
-          </View>
-        </View>
-
-        <View className="bg-surface-container/60 p-2.5 rounded-lg border border-outline-variant/40 mb-3">
-          <View className="flex-row flex-wrap">
-            <HalfRow label="充电状态" value={chargeStateText(c?.charging_state)} />
-            <HalfRow label="充电枪连接" value={c?.charge_connector_status === 1 ? '已连接' : '未连接'} />
-            <HalfRow label="充电枪锁" value={c?.charge_gun_lock_status === 1 ? '已锁' : '未锁'} />
-            <HalfRow label="充电枪状态" value={c?.charge_gun_status === 1 ? '已插枪' : '未插枪'} />
-            <HalfRow label="慢充口" value={c?.slow_charge_port_status === 1 ? '开启' : '关闭'} />
-            <HalfRow label="快充口" value={c?.fast_charge_port_status === 1 ? '开启' : '关闭'} />
-            <HalfRow
-              label="预计充满时间"
-              value={
-                c === undefined
-                  ? '—'
-                  : c.time_to_complete_charge_min > 0 ? `${c.time_to_complete_charge_min} 分钟` : '--'
-              }
-            />
-            <HalfRow
-              label="预约充电开始"
-              value={c?.reserve_charge_start_time ? c.reserve_charge_start_time : '--'}
-            />
-            <HalfRow
-              label="重复周期"
-              value={c === undefined ? '—' : c.repeat_type === 0 ? '单次' : `类型 ${c.repeat_type}`}
-            />
-          </View>
-          <View className="pt-1 mt-1 border-t border-outline-variant/30">
-            <InfoRow
-              label="电池保温"
-              value={c?.battery_keep_warm_status === 1 ? '开启' : '关闭'}
-            />
-          </View>
-        </View>
-
-        <View className="bg-surface-container-low rounded-lg p-2.5 border border-outline-variant/50">
-          <View className="flex-row items-center gap-1 mb-2">
-            <Text className="text-[13px] font-icon text-secondary">{Icon.analytics}</Text>
-            <Text className="text-[11px] font-bold text-on-surface">上次充电</Text>
-          </View>
-          <View className="flex-row flex-wrap gap-2">
-            <StatBox label="上次充电用电量" value={`${stats?.usageElectricity?.toFixed(1) ?? '—'} kWh`} />
-            <StatBox label="上次充电时长" value={formatChargeDuration(stats?.chargeTime)} />
-            <StatBox label="上次充电完成时间" value={formatTime(stats?.completeTime)} />
-            <StatBox
-              label="上次充电增加续航"
-              value={`${stats?.addedRange?.toLocaleString() ?? '—'} km`}
-              valueClass="text-secondary"
+          <View className="flex-1">
+            <CommandButton
+              icon={ACTION_ICONS['light.horn']}
+              label="鸣笛提示"
+              state={st('light.horn')}
+              onPress={() => runId('light.horn')}
             />
           </View>
         </View>
       </Card>
 
-      {/* 8. 胎压监测 */}
       <Card>
-        <SectionHeader
-          title="胎压监测 (TPMS)"
-          accent="secondary"
-          right={
-            <View className="px-2 py-0.5 rounded bg-secondary/10">
-              <Text className="text-[11px] font-mono font-bold text-secondary">四轮气压均衡 / 正常</Text>
-            </View>
-          }
-        />
-        <View className="flex-row flex-wrap gap-2">
-          <TireCell label="左前轮 FL" kpa={t?.tpms_pressure_fl} warn={t?.tpms_pressure_fl_warn} />
-          <TireCell label="右前轮 FR" kpa={t?.tpms_pressure_fr} warn={t?.tpms_pressure_fr_warn} />
-          <TireCell label="左后轮 RL" kpa={t?.tpms_pressure_rl} warn={t?.tpms_pressure_rl_warn} />
-          <TireCell label="右后轮 RR" kpa={t?.tpms_pressure_rr} warn={t?.tpms_pressure_rr_warn} />
+        <SectionHeader title="哨兵模式" />
+        <View className="flex-row gap-2 mb-2.5">
+          <ReadoutCell label="录像使能" value={videoText} />
+          <ReadoutCell label="维修模式" value={repairText} />
+          <ReadoutCell label="灵敏度" value={sensitivityText} />
         </View>
-      </Card>
-
-      {/* 9. 里程与定位 */}
-      <Card>
-        <SectionHeader
-          title="里程与定位"
-          accent="primary"
-          right={
-            <View className="flex-row items-center gap-1">
-              <Text className="text-[11px] font-icon text-secondary">{Icon.gps_fixed}</Text>
-              <Text className="text-[11px] font-mono text-secondary">
-                {drive?.coordValid === 1 ? '高精度定位活跃' : '定位无效'}
-              </Text>
-            </View>
-          }
-        />
-        <View className="bg-surface-container-low p-3 rounded-lg border border-outline-variant/50 mb-2.5">
-          <InfoRow
-            label="当前坐标"
-            value={
-              drive === undefined
-                ? '—'
-                : `${drive.latitude.toFixed(4)}° N, ${drive.longitude.toFixed(4)}° E`
-            }
-          />
-          <InfoRow
-            label="航向角"
-            value={drive === undefined ? '—' : `${drive.angle.toFixed(0)}° (${headingText(drive.angle)})`}
-          />
-          <InfoRow
-            label="当前车速"
-            value={drive === undefined ? '—' : `${Math.round(Number(drive.speed))} km/h`}
-            valueClass="text-secondary"
-          />
-          <InfoRow
-            label="坐标系"
-            value={drive === undefined ? '—' : coordTypeText(drive.coordType)}
-          />
-          <InfoRow
-            label="续航工况编号"
-            value={o === undefined ? '—' : String(o.range_type)}
-          />
-        </View>
-        <View className="bg-surface-container-low p-3 rounded-lg border border-outline-variant/50 mb-2.5">
-          <InfoRow
-            label="车辆电源"
-            value={
-              i?.power === undefined
-                ? '—'
-                : i.power.car_power_state === 1 ? '已上电' : '未上电'
-            }
-          />
-          <InfoRow
-            label="点火状态"
-            value={
-              i?.power === undefined ? '—' : i.power.car_igon_state === 1 ? '已点火' : '未点火'
-            }
-          />
-          <InfoRow
-            label="远程启动"
-            value={
-              i?.power === undefined
-                ? '—'
-                : i.power.remote_start_status === 1 ? '运行中' : '未启动'
-            }
-          />
-        </View>
-        <View className="flex-row gap-2 pt-1 border-t border-outline-variant/40">
-          <SummaryCell label="总里程" value={`${(o?.total_mileage ?? 0).toLocaleString()} km`} />
-          <SummaryCell
-            label="剩余续航"
-            value={`${o?.avalible_driving_distance ?? '—'} km`}
-            valueClass="text-primary"
-          />
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <CommandButton
+              icon={ACTION_ICONS['sentinel.on']}
+              label="开启哨兵模式"
+              state={st('sentinel.on')}
+              onPress={() => runId('sentinel.on')}
+            />
+          </View>
+          <View className="flex-1">
+            <CommandButton
+              icon={ACTION_ICONS['sentinel.off']}
+              label="关闭哨兵模式"
+              state={st('sentinel.off')}
+              onPress={() => runId('sentinel.off')}
+            />
+          </View>
         </View>
       </Card>
     </ScreenScroll>
   );
 }
 
-/** 舞台上的部位浮标。`pos` 是设计稿里的绝对定位类名。 */
-function DoorTag({ label, ajar, pos }: { label: string; ajar?: number; pos: string }) {
-  const closed = ajar === 0;
-  const centered = pos.includes('center');
-  return (
-    <View
-      className={`absolute ${pos} flex-row items-center gap-1 px-2 py-0.5 rounded bg-surface/90 border border-outline-variant/60`}
-      style={centered ? { left: '50%', marginLeft: -46 } : undefined}>
-      <View className={`w-1.5 h-1.5 rounded-full ${closed ? 'bg-secondary' : 'bg-error'}`} />
-      <Text className="text-[11px] font-medium text-on-surface">{label}</Text>
-      <Text
-        className={`text-[11px] font-mono font-semibold ${closed ? 'text-secondary' : 'text-error'}`}>
-        {ajar === undefined ? '—' : closed ? '闭合' : '未关'}
-      </Text>
-    </View>
-  );
-}
-
-function MicroStat({ label, value, on }: { label: string; value: string; on?: boolean }) {
-  return (
-    <View className="flex-1 items-center">
-      <Text className="text-[9px] text-on-surface-variant">{label}</Text>
-      <Text
-        className={`text-[10px] font-mono font-bold ${on ? 'text-secondary' : 'text-on-surface-variant'}`}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function SmallStat({ label, value, on }: { label: string; value: string; on?: boolean }) {
-  return (
-    <View className="flex-1 bg-surface-container py-1.5 rounded border border-outline-variant/40 items-center">
-      <Text className="text-[10px] text-on-surface-variant">{label}</Text>
-      <Text
-        className={`font-mono text-[11px] font-medium mt-0.5 ${on ? 'text-secondary font-bold' : 'text-on-surface'}`}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function HalfRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View className="w-1/2 flex-row justify-between items-center py-1 pr-2">
-      <Text className="text-[11px] text-on-surface-variant">{label}</Text>
-      <Text className="font-mono text-[11px] font-medium text-on-surface">{value}</Text>
-    </View>
-  );
-}
-
-function StatBox({
-  label,
-  value,
-  valueClass = 'text-on-surface',
+function QuickAction({
+  meta,
+  highlighted,
+  onPress,
 }: {
-  label: string;
-  value: string;
-  valueClass?: string;
+  meta: { label: string; note: string; icon: IconName };
+  highlighted: boolean;
+  onPress: () => void;
 }) {
+  if (highlighted) {
+    return (
+      <Pressable
+        onPress={onPress}
+        className="flex-1 items-center justify-center p-3 rounded-box bg-primary-container/25 border border-primary-container active:scale-95">
+        <View className="w-10 h-10 rounded-full bg-primary-container items-center justify-center mb-1.5">
+          <Text className="text-[20px] font-icon text-on-primary-fixed">{Icon[meta.icon]}</Text>
+        </View>
+        <Text className="text-xs font-headline font-bold text-on-surface text-center">{meta.label}</Text>
+        <Text className="text-[10px] font-body text-on-surface-variant mt-0.5 text-center">{meta.note}</Text>
+      </Pressable>
+    );
+  }
   return (
-    <View style={{ width: '48%' }} className="bg-surface p-2 rounded border border-outline-variant/30">
-      <Text className="text-[10px] text-on-surface-variant">{label}</Text>
-      <Text className={`font-mono text-sm font-bold ${valueClass}`} numberOfLines={1}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function SummaryCell({
-  label,
-  value,
-  valueClass = 'text-on-surface',
-}: {
-  label: string;
-  value: string;
-  valueClass?: string;
-}) {
-  return (
-    <View className="flex-1 items-center">
-      <Text className="text-[10px] text-on-surface-variant">{label}</Text>
-      <Text className={`font-mono text-sm font-bold ${valueClass}`}>{value}</Text>
-    </View>
-  );
-}
-
-/** 胎压格：接口给 kPa，设计稿显示 bar，除以 100。 */
-function TireCell({ label, kpa, warn }: { label: string; kpa?: number; warn?: number }) {
-  return (
-    <View
-      style={{ width: '48%' }}
-      className="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/50 flex-row items-center justify-between">
-      <View>
-        <Text className="text-[11px] text-on-surface-variant font-mono">{label}</Text>
-        <Text className="font-mono text-lg font-bold text-on-surface">
-          {kpa === undefined ? '—' : (kpa / 100).toFixed(1)}
-          <Text className="text-xs font-normal"> bar</Text>
-        </Text>
+    <Pressable
+      onPress={onPress}
+      className="flex-1 items-center justify-center p-3 rounded-box bg-inset active:scale-95">
+      <View className="w-10 h-10 rounded-full bg-surface-container-lowest items-center justify-center mb-1.5">
+        <Text className="text-[20px] font-icon text-on-surface">{Icon[meta.icon]}</Text>
       </View>
-      <View className="px-2 py-1 rounded bg-surface border border-outline-variant/40">
-        <Text className={`text-xs font-medium ${warn === 0 ? 'text-secondary' : 'text-error'}`}>
-          {warn === undefined ? '—' : warn === 0 ? '正常' : '异常'}
-        </Text>
-      </View>
-    </View>
+      <Text className="text-xs font-headline font-semibold text-on-surface text-center">{meta.label}</Text>
+      <Text className="text-[10px] font-body text-on-surface-variant mt-0.5 text-center">{meta.note}</Text>
+    </Pressable>
   );
 }
 
-/**
- * `charging_state` 的取值表。
- *
- * 15 = 未充电，来自 `work/live/st19_full.json` 实测；其余取值按 App 字符串池里的
- * 「充电中 / 充电完成 / 充电故障 / 充电暂停 / 充电预约生效」顺序推断，未逐一实测。
- */
-function chargeStateText(state?: number): string {
-  if (state === undefined) return '—';
-  const table: Record<number, string> = {
-    0: '未充电',
-    1: '充电中',
-    2: '充电完成',
-    3: '充电故障',
-    4: '充电暂停',
-    15: '未充电',
-  };
-  return table[state] ?? `状态 ${state}`;
-}
-
-/** `chargeTime` 单位是毫秒（20789000 → 5.8 小时），不是秒也不是小时。 */
-function formatChargeDuration(ms?: number): string {
-  if (ms === undefined || ms <= 0) return '—';
-  const totalMin = Math.round(ms / 1000 / 60);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分`;
-}
-
-/** `completeTime` 是毫秒时间戳。 */
-function formatTime(ts?: number): string {
-  if (ts === undefined || ts <= 0) return '—';
-  const d = new Date(ts);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function headingText(angle: number): string {
-  const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
-  return dirs[Math.round(angle / 45) % 8];
-}
-
-/**
- * 坐标系取值。APK 里 `coordType` 只找到 1/2 两个分支的字符串，未逐一实测，
- * 这里按常见约定给中文名，未知值原样显示数字，不猜。
- */
-function coordTypeText(type: number): string {
-  const table: Record<number, string> = { 1: 'WGS-84', 2: 'GCJ-02' };
-  return table[type] ?? `类型 ${type}`;
+function PillAction({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      className="px-3.5 py-2 rounded-full bg-surface border border-hairline active:scale-95">
+      <Text className="text-xs font-headline font-semibold text-on-surface">{label}</Text>
+    </Pressable>
+  );
 }

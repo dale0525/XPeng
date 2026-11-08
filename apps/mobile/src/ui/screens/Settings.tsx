@@ -1,45 +1,39 @@
-/**
- * 设置页（对应 `docs/design/settings-light.html` / `settings-dark.html`）。
- *
- * 五张卡片照抄设计稿：账户、车辆、连接、外观、关于。车型能力徽章来自
- * `vehicle.function`（服务端下发的布尔位），不硬编码——换车型时自动跟着变。
- */
-import { Pressable, Text, View } from 'react-native';
-import type { Session } from '@xpeng/protocol/src/session';
-import type { Vehicle } from '@xpeng/protocol/src/vehicles';
-import { Card, InfoRow, PrimaryButton, ScreenScroll } from '../components';
+import type * as React from 'react';
+import { Image, Pressable, Text, View } from 'react-native';
+import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import type { LinkState } from '../../core/car';
+import type { SessionState } from '../../core/session';
 import type { ThemeMode } from '../../core/theme';
 import type { UpdateState } from '../../core/update';
-import { Icon } from '../icons';
+import {
+  CapsTag,
+  Card,
+  InfoRow,
+  PrimaryButton,
+  ReadoutCell,
+  ScreenScroll,
+  SectionHeader,
+  StatusStrip,
+} from '../components';
+import { DotTag, SpinnerIcon } from '../atoms';
+import { Icon, type IconName } from '../icons';
 
-/** 能力位 → 中文名。只列本项目实际会用到的几项。 */
-const CAPABILITIES: Array<{ key: string; label: string }> = [
-  { key: 'remoteControl', label: '远程车控' },
-  { key: 'sentinelMode', label: '哨兵模式' },
-  { key: 'tpms', label: '胎压监测' },
-  { key: 'sunShade', label: '遮阳帘' },
-  { key: 'bluetoothKey', label: '蓝牙钥匙' },
+const CAR_IMAGE = require('../../assets/car/d55a.png');
+
+const THEME_OPTIONS: Array<{ key: ThemeMode; label: string }> = [
+  { key: 'system', label: '跟随系统' },
+  { key: 'light', label: '浅色' },
+  { key: 'dark', label: '深色' },
 ];
 
-export function SettingsScreen({
-  session,
-  vehicle,
-  linkState,
-  latencyMs,
-  mqttExpireAt,
-  theme,
-  onThemeChange,
-  onReconnect,
-  onLogout,
-  versionName,
-  update,
-  onCheckUpdate,
-  onDownload,
-  bottomInset,
-}: {
-  session: Session;
+const CAPABILITY_LABELS = ['远程车控', '哨兵模式', '胎压监测', '遮阳帘', '蓝牙钥匙'];
+
+export function SettingsScreen(props: {
+  bottomInset: number;
+  session: Extract<SessionState, { kind: 'active' }>['session'];
   vehicle: Vehicle;
-  linkState: string;
+  status: VehicleStatus | null;
+  linkState: LinkState;
   latencyMs: number | null;
   mqttExpireAt: number | null;
   theme: ThemeMode;
@@ -50,201 +44,325 @@ export function SettingsScreen({
   update: UpdateState;
   onCheckUpdate: () => void;
   onDownload: () => void;
-  bottomInset: number;
-}) {
-  const caps = CAPABILITIES.filter((c) => vehicle.function[c.key] !== false);
-  const mqttLeft = mqttExpireAt === null ? null : Math.max(0, mqttExpireAt - Date.now());
+}): React.JSX.Element {
+  const {
+    bottomInset,
+    session,
+    vehicle,
+    status,
+    linkState,
+    latencyMs,
+    mqttExpireAt,
+    theme,
+    onThemeChange,
+    onReconnect,
+    onLogout,
+    versionName,
+    update,
+    onCheckUpdate,
+    onDownload,
+  } = props;
+
+  const linkText =
+    linkState === 'online'
+      ? '已连接'
+      : linkState === 'connecting'
+        ? '连接中'
+        : linkState === 'offline'
+          ? '未连接'
+          : '—';
 
   return (
     <ScreenScroll bottomInset={bottomInset}>
-      {/* 1. 账户 */}
-      <Card className="relative overflow-hidden">
-        <View className="absolute top-0 left-0 w-1.5 h-full bg-primary" />
-        <View className="pl-1.5">
-          <View className="flex-row items-start justify-between">
-            <View>
-              <View className="flex-row items-center gap-2">
-                <Text className="font-headline font-bold text-lg text-on-surface">
-                  {vehicle.ownerInfo.nickName || '车主'}
-                </Text>
-                <View className="bg-primary px-2 py-0.5 rounded-sm">
-                  <Text className="text-[10px] font-headline font-extrabold text-on-primary">
-                    车主
-                  </Text>
-                </View>
-              </View>
-              <Text className="font-mono text-xs text-on-surface-variant font-medium tracking-wide mt-1">
-                {maskMobile(vehicle.ownerInfo.mobile)}
-              </Text>
-            </View>
-            <View className="flex-row items-center gap-1.5 bg-surface-container-low px-2.5 py-1 rounded-full border border-outline-variant/40">
-              <View className="w-2 h-2 rounded-full bg-success" />
-              <Text className="text-xs font-medium text-success">已登录</Text>
-            </View>
-          </View>
+      <View className="pt-2 pb-1">
+        <Text className="font-headline text-3xl font-bold tracking-tight text-on-surface">设置</Text>
+        <Text className="mt-1 text-xs font-body font-medium text-on-surface-variant">
+          自研车控节点设置与车辆参数面板
+        </Text>
+      </View>
 
-          <View className="mt-4 pt-3 border-t border-outline-variant/20 flex-row items-center justify-between">
-            <View className="flex-row items-center gap-1.5">
-              <Text className="text-[16px] font-icon text-outline">{Icon.schedule}</Text>
-              <Text className="font-mono text-xs text-on-surface-variant">
-                剩余 {formatDuration(session.expiresAt - Date.now())}
-              </Text>
+      <Card>
+        <View className="flex-row items-center justify-between pb-3 border-b border-hairline">
+          <View className="flex-row items-center gap-2">
+            <View className="w-2 h-2 rounded-full bg-primary-container" />
+            <Text className="font-headline text-base font-semibold text-on-surface">
+              {vehicle.plateNo ? `车辆：${vehicle.plateNo}` : '车辆：—'}
+            </Text>
+          </View>
+          <DotPill label="已同步" compact />
+        </View>
+
+        <View className="mt-4 p-4 rounded-box bg-ink relative overflow-hidden">
+          <Image
+            source={CAR_IMAGE}
+            className="absolute top-0 bottom-0 right-0 w-44"
+            resizeMode="contain"
+            style={{ opacity: 0.85 }}
+          />
+          <View>
+            <Text className="text-xs font-body font-medium text-white" style={{ opacity: 0.7 }}>
+              SOC 荷电状态
+            </Text>
+            <View className="flex-row items-baseline gap-1 mt-1">
+              <Text className="font-headline text-4xl font-bold text-positive">—</Text>
+              <Text className="font-headline text-lg font-semibold text-white">%</Text>
             </View>
-            <Pressable
-              onPress={onLogout}
-              className="px-3 py-1.5 bg-surface-container-high rounded-sm active:scale-95">
-              <Text className="text-xs font-headline font-bold text-on-surface">退出登录</Text>
-            </Pressable>
+            <View className="mt-3 w-52">
+              <View className="h-2 w-full rounded-full bg-inset overflow-hidden">
+                <View className="h-full rounded-full bg-primary-container w-0" />
+              </View>
+              <View className="flex-row justify-between mt-1">
+                <Text className="text-[10px] font-headline text-white" style={{ opacity: 0.5 }}>
+                  0
+                </Text>
+                <Text className="text-[10px] font-headline text-white" style={{ opacity: 0.5 }}>
+                  50
+                </Text>
+                <Text className="text-[10px] font-headline text-white" style={{ opacity: 0.5 }}>
+                  100
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
       </Card>
 
-      {/* 2. 车辆 */}
-      <Card className="relative overflow-hidden">
-        <View className="absolute top-0 left-0 w-1.5 h-full bg-secondary" />
-        <View className="pl-1.5">
-          <View className="flex-row items-baseline justify-between">
-            <View className="flex-row items-center gap-2">
-              <Text className="font-headline font-extrabold text-xl text-on-surface tracking-tight">
-                {vehicle.plateNo}
-              </Text>
-              <View className="px-2 py-0.5 bg-surface-container rounded-sm border border-secondary/30">
-                <Text className="font-headline font-bold text-xs text-secondary">
-                  {vehicle.vehicleTypeCode || vehicle.vehicleTypeName}
-                </Text>
-              </View>
-            </View>
-            <Text className="text-[11px] font-mono text-outline font-medium">
-              {vehicle.vehicleTypeName}
-            </Text>
+      <Card>
+        <SectionHeader title="状态清单" right={<HeaderIcon name="checklist" />} />
+        <View className="gap-2.5">
+          <View className="flex-row gap-2.5">
+            <ReadoutCell label="整车闭锁" value={lockText(status)} />
+            <ReadoutCell label="五门状态" value={doorsText(status)} />
           </View>
+          <View className="flex-row gap-2.5">
+            <ReadoutCell label="哨兵录像" value={sentinelText(status)} />
+            <ReadoutCell label="远程启动只读" value={remoteStartText(status)} />
+          </View>
+        </View>
+      </Card>
 
-          <View className="mt-3 bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/30">
-            <InfoRow label="VIN" value={vehicle.vin} />
-            <InfoRow
+      <Card>
+        <View className="flex-row items-center justify-between mb-3.5">
+          <Text className="font-headline text-base font-semibold text-on-surface">账户信息</Text>
+          <DotPill label="已登录" compact />
+        </View>
+        <View className="border-b border-hairline">
+          <InfoRow label="车主昵称" value={vehicle.ownerInfo.nickName || '—'} />
+        </View>
+        <View className="border-b border-hairline">
+          <InfoRow label="手机号" value={maskMobile(vehicle.ownerInfo.mobile)} />
+        </View>
+        <InfoRow
+          label="令牌剩余"
+          value={formatDuration(session.expiresAt - Date.now())}
+        />
+        <View className="mt-3.5">
+          <ActionButton label="退出登录" icon="logout" onPress={onLogout} />
+        </View>
+      </Card>
+
+      <Card>
+        <SectionHeader title="车辆档案" right={<HeaderIcon name="badge" />} />
+        <View className="gap-2.5">
+          <View className="flex-row gap-2.5">
+            <ReadoutCell label="车牌" value={vehicle.plateNo || '—'} />
+            <ReadoutCell label="车型代码" value={vehicle.vehicleTypeCode || '—'} />
+          </View>
+          <View className="flex-row gap-2.5">
+            <ReadoutCell label="VIN 车架号" value={vehicle.vin || '—'} />
+            <ReadoutCell
               label="总里程"
-              value={`${vehicle.totalMileage.toLocaleString()} 公里`}
-              valueClass="text-secondary"
+              value={vehicle.totalMileage ? `${vehicle.totalMileage.toLocaleString()} km` : '— km'}
             />
           </View>
-
-          <View className="mt-3 flex-row flex-wrap gap-1.5">
-            {caps.map((c) => (
-              <View
-                key={c.key}
-                className="px-2 py-1 bg-surface-container rounded border border-outline-variant/30">
-                <Text className="text-[11px] font-medium text-on-surface-variant">{c.label}</Text>
-              </View>
+        </View>
+        <View className="mt-4 pt-3.5 border-t border-hairline">
+          <CapsTag text="已就绪能力" />
+          <View className="flex-row flex-wrap gap-2 mt-2.5">
+            {CAPABILITY_LABELS.map((label) => (
+              <DotPill key={label} label={label} />
             ))}
           </View>
         </View>
       </Card>
 
-      {/* 3. 连接 */}
       <Card>
-        <View className="flex-row items-center justify-between mb-3">
-          <View className="flex-row items-center gap-2">
-            <View
-              className={`w-2.5 h-2.5 rounded-full ${
-                linkState === 'online' ? 'bg-success' : 'bg-outline'
-              }`}
+        <SectionHeader title="通讯与遥测连接" right={<HeaderIcon name="hub" />} />
+        <View className="border-b border-hairline">
+          <InfoRow label="云端状态" value={linkText} />
+        </View>
+        <View className="border-b border-hairline">
+          <InfoRow label="往返延迟" value={latencyMs === null ? '— ms' : `${latencyMs} ms`} />
+        </View>
+        <InfoRow
+          label="MQTT 凭据剩余"
+          value={
+            mqttExpireAt === null
+              ? '—'
+              : formatDuration(Math.max(0, mqttExpireAt - Date.now()))
+          }
+        />
+        <View className="mt-3.5">
+          <ActionButton label="重新连接" icon="sync" onPress={onReconnect} />
+        </View>
+      </Card>
+
+      <Card>
+        <SectionHeader title="外观与主题" right={<HeaderIcon name="palette" />} />
+        <View className="flex-row items-center p-1 rounded-full bg-inset">
+          {THEME_OPTIONS.map((option) => (
+            <ThemeSegment
+              key={option.key}
+              label={option.label}
+              selected={theme === option.key}
+              onPress={() => onThemeChange(option.key)}
             />
-            <Text className="font-headline font-bold text-sm text-on-surface tracking-tight">
-              云端连接：
-              {linkState === 'online' ? '已连接' : linkState === 'connecting' ? '连接中' : '未连接'}
-            </Text>
-          </View>
-          <View className="px-2 py-0.5 rounded bg-success/10">
-            <Text className="font-mono text-xs font-bold text-success">
-              {latencyMs === null ? '— ms' : `${latencyMs} ms`}
-            </Text>
-          </View>
-        </View>
-        <View className="bg-surface-container-low rounded-lg p-3 border border-outline-variant/30 flex-row items-center justify-between">
-          <View>
-            <Text className="text-[11px] text-outline font-medium">MQTT 凭据到期时间</Text>
-            <Text className="font-mono text-xs font-bold text-on-surface mt-0.5">
-              {mqttLeft === null ? '未签发' : `剩余 ${formatDuration(mqttLeft)}`}
-            </Text>
-          </View>
-          <Pressable
-            onPress={onReconnect}
-            className="px-3 py-1.5 bg-secondary rounded active:scale-95">
-            <Text className="text-white font-headline font-bold text-xs">重新连接</Text>
-          </Pressable>
+          ))}
         </View>
       </Card>
 
-      {/* 4. 外观 */}
       <Card>
-        <View className="flex-row items-center justify-between mb-3">
-          <Text className="font-headline font-bold text-sm text-on-surface tracking-tight">外观</Text>
-          <Text className="text-[11px] text-outline font-mono">THEME</Text>
+        <View className="flex-row items-center justify-between mb-3.5">
+          <Text className="font-headline text-base font-semibold text-on-surface">关于客户端</Text>
+          <DotPill label="已最新" compact />
         </View>
-        <View className="flex-row p-1 bg-surface-container rounded-lg border border-outline-variant/40 gap-1">
-          {(
-            [
-              ['system', '跟随系统'],
-              ['light', '浅色'],
-              ['dark', '深色'],
-            ] as const
-          ).map(([key, label]) => {
-            const on = theme === key;
-            return (
-              <Pressable
-                key={key}
-                onPress={() => onThemeChange(key)}
-                className={`flex-1 py-2 items-center rounded ${
-                  on ? 'bg-surface border border-outline-variant/30' : ''
-                }`}>
-                <Text
-                  className={`text-xs font-headline font-bold ${
-                    on ? 'text-secondary' : 'text-on-surface-variant'
-                  }`}>
-                  {label}
-                </Text>
-              </Pressable>
-            );
-          })}
+        <View className="flex-row items-center justify-between py-2">
+          <View className="flex-col flex-shrink">
+            <Text className="font-headline text-sm font-semibold text-on-surface">
+              {versionName === '—' ? '版本号 —' : `版本号 ${versionName}`}
+            </Text>
+            <View className="mt-0.5">
+              <CapsTag text="自研客户端 Releases" />
+            </View>
+          </View>
+          <View className="w-8 h-8 rounded-full bg-inset items-center justify-center">
+            <Text className="text-lg font-icon text-positive">{Icon.verified_user}</Text>
+          </View>
         </View>
-      </Card>
-
-      {/* 5. 关于 */}
-      <Card>
-        <View className="flex-row items-center justify-between">
-          <Text className="font-headline font-bold text-sm text-on-surface tracking-tight">关于</Text>
-          <Pressable
-            onPress={onCheckUpdate}
+        <View className="mt-3">
+          <ActionButton
+            label="检查更新"
+            icon="sync"
+            busy={update.kind === 'checking'}
             disabled={update.kind === 'checking' || update.kind === 'downloading'}
-            className="px-2 py-0.5 bg-surface-container-high rounded border border-outline-variant/40 active:scale-95">
-            <Text className="font-mono text-xs font-bold text-on-surface-variant">
-              {update.kind === 'checking' ? '检查中…' : `v${versionName}`}
-            </Text>
-          </Pressable>
+            onPress={onCheckUpdate}
+          />
         </View>
-
         {renderUpdateBody(update, onCheckUpdate, onDownload)}
-
-        <Text className="mt-2.5 text-xs text-on-surface-variant leading-relaxed">
-          登录一次后自动续期，续期失败时会提示重新登录
-        </Text>
       </Card>
     </ScreenScroll>
   );
 }
 
-/**
- * 关于卡片里随更新状态变化的那一块。四种状态各给一行结果 + 一个动作：
- * 检查中/已最新/有新版（下载按钮）/下载中（进度条）/失败（原因 + 重试）。
- */
+function HeaderIcon({ name }: { name: IconName }) {
+  return (
+    <View className="w-7 h-7 rounded-full bg-inset items-center justify-center">
+      <Text className="text-[17px] font-icon text-on-surface">{Icon[name]}</Text>
+    </View>
+  );
+}
+
+function DotPill({ label, compact }: { label: string; compact?: boolean }) {
+  const dot = <DotTag label={label} value="" dotClass="bg-positive" valueClass="text-positive" />;
+  return compact ? (
+    <View className="flex-row items-center rounded-full bg-inset px-2.5 py-0.5">{dot}</View>
+  ) : (
+    <View className="rounded-full bg-inset px-3 py-1.5">{dot}</View>
+  );
+}
+
+function ActionButton({
+  label,
+  icon,
+  onPress,
+  disabled,
+  busy,
+}: {
+  label: string;
+  icon: IconName;
+  onPress: () => void;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      className="w-full flex-row items-center justify-center gap-2 py-3 rounded-full bg-primary-container active:scale-95"
+      style={disabled ? { opacity: 0.5 } : undefined}>
+      {busy ? (
+        <SpinnerIcon size={18} className="text-on-primary-fixed" />
+      ) : (
+        <Text className="text-lg font-icon text-on-primary-fixed">{Icon[icon]}</Text>
+      )}
+      <Text className="text-sm font-headline font-semibold text-on-primary-fixed">{label}</Text>
+    </Pressable>
+  );
+}
+
+function ThemeSegment({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} className="flex-1">
+      {selected ? (
+        <View className="py-2 rounded-full bg-surface-container-lowest items-center">
+          <Text className="text-xs font-headline font-semibold text-on-surface">{label}</Text>
+        </View>
+      ) : (
+        <View className="py-2 rounded-full items-center">
+          <Text className="text-xs font-headline font-semibold text-on-surface-variant">
+            {label}
+          </Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+function lockText(status: VehicleStatus | null): string {
+  const lock = status?.instant?.door?.driver_door_lock_st;
+  return lock === undefined ? '—' : lock === 1 ? '已闭锁' : '已解锁';
+}
+
+function doorsText(status: VehicleStatus | null): string {
+  const door = status?.instant?.door;
+  if (!door) return '—';
+  const ajar = [
+    door.driver_door_ajar_st,
+    door.passenger_door_ajar_st,
+    door.rear_left_door_ajar_st,
+    door.rear_right_door_ajar_st,
+    door.trunk_ajar_st,
+  ];
+  if (ajar.some((v) => typeof v !== 'number')) return '—';
+  const open = ajar.filter((v) => v !== 0).length;
+  return open === 0 ? '全闭合' : `${open} 处未关`;
+}
+
+function sentinelText(status: VehicleStatus | null): string {
+  const enabled = status?.instant?.ext?.sentinel_mode_video_enable;
+  return enabled === undefined ? '—' : enabled === 1 ? '已启用' : '已关闭';
+}
+
+function remoteStartText(status: VehicleStatus | null): string {
+  const running = status?.instant?.power?.remote_start_status;
+  return running === undefined ? '—' : running === 1 ? '运行中' : '未启动';
+}
+
 function renderUpdateBody(update: UpdateState, onCheck: () => void, onDownload: () => void) {
   if (update.kind === 'idle' || update.kind === 'checking') return null;
 
   if (update.kind === 'current') {
     return (
-      <View className="mt-2.5 flex-row items-center gap-1.5">
-        <Text className="text-[14px] font-icon text-success">{Icon.check_circle}</Text>
-        <Text className="text-xs text-on-surface-variant">已是最新版本 v{update.version}</Text>
+      <View className="mt-2.5">
+        <StatusStrip label="已是最新版本" value={`v${update.version}`} />
       </View>
     );
   }
@@ -278,9 +396,9 @@ function renderUpdateBody(update: UpdateState, onCheck: () => void, onDownload: 
             {pct === null ? formatBytes(update.done) : `${pct}%`}
           </Text>
         </View>
-        <View className="mt-1.5 h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+        <View className="mt-1.5 h-1.5 rounded-full bg-inset overflow-hidden">
           <View
-            className="h-full bg-primary rounded-full"
+            className="h-full bg-primary-container rounded-full"
             style={{ width: pct === null ? '30%' : `${pct}%` }}
           />
         </View>
@@ -296,13 +414,12 @@ function renderUpdateBody(update: UpdateState, onCheck: () => void, onDownload: 
   if (update.kind === 'installing') {
     return (
       <View className="mt-2.5 flex-row items-center gap-1.5">
-        <Text className="text-[14px] font-icon text-secondary">{Icon.sync}</Text>
+        <SpinnerIcon size={14} className="text-secondary" />
         <Text className="text-xs text-on-surface-variant">正在唤起系统安装器…</Text>
       </View>
     );
   }
 
-  // available
   const { release, asset } = update;
   return (
     <View className="mt-2.5">

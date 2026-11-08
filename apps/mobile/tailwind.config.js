@@ -1,5 +1,5 @@
 /**
- * 设计令牌，逐项抄自 `docs/design/*.html` 的 `tailwind.config` 段。
+ * Volt Lime 设计令牌，逐项抄自 `docs/design/*.html` 的 `tailwind.config` 段。
  *
  * 颜色只出现一次语义名，取值在 `src/core/colors.ts` 里按亮/暗各给一份，运行时由根
  * 节点注入 CSS 变量。所以组件里写 `bg-surface` 就同时适配两种主题，不用写 `dark:`。
@@ -63,15 +63,19 @@ module.exports = {
         background: 'var(--c-background)',
         'on-background': 'var(--c-on-background)',
         success: 'var(--c-success)',
+        positive: 'var(--c-positive)',
+        ink: 'var(--c-ink)',
+        inset: 'var(--c-inset)',
+        hairline: 'var(--c-hairline)',
+        accent: 'var(--c-accent)',
       },
       fontFamily: {
-        // 设计稿的三支柱：标题 Anybody、正文 Space Grotesk、遥测读数 Space Mono
-        headline: ['Anybody'],
-        display: ['Anybody'],
-        label: ['Anybody'],
-        body: ['SpaceGrotesk'],
+        // Volt Lime：标题/数值 Space Grotesk、正文 Plus Jakarta Sans
+        headline: ['SpaceGrotesk'],
+        display: ['SpaceGrotesk'],
+        label: ['SpaceGrotesk'],
+        body: ['PlusJakartaSans'],
         mono: ['SpaceMono'],
-        // 图标就是字形：靠 className 控字号与颜色
         icon: ['MaterialSymbols'],
       },
       fontSize: {
@@ -98,10 +102,14 @@ module.exports = {
         'label-mono': ['11px', { lineHeight: '14px', letterSpacing: '0.06em', fontWeight: '400' }],
       },
       borderRadius: {
-        DEFAULT: '0.125rem',
-        lg: '0.25rem',
-        xl: '0.5rem',
-        full: '0.75rem',
+        DEFAULT: '0.25rem',
+        lg: '0.5rem',
+        xl: '0.75rem',
+        '2xl': '1.375rem',
+        '3xl': '1.75rem',
+        full: '9999px',
+        card: '28px',
+        box: '22px',
       },
       spacing: {
         gutter: '1rem',
