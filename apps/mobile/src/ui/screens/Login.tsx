@@ -1,64 +1,58 @@
 /**
- * 手机号登录页（对应 `docs/design/login-light.html` / `login-dark.html`）。
+ * 手机号登录页（对应 `docs/design/c6048d2d97a84497b5ed3c70524e44ff.html`）。
  *
- * 流程与官方一致，四步：
- *   1. 填手机号 → 点「获取验证码」→ 自动弹出第一道滑块（sceneType=SMS）
- *   2. 滑块通过 → 才真正下发短信，页面切到验证码输入态并开始 60s 倒计时
- *   3. 填 4 位验证码 → 校验通过 → 自动弹出第二道滑块（sceneType=LGN）
- *   4. 第二道滑块通过 → 换 token → 进主界面
- *
- * 两道滑块都是**弹层**，不是常驻在页面上的控件：官方就是这么做的，而且常驻会
- * 让易盾 SDK 在用户还没到那一步时就先采集一次指纹。
+ * 两道滑块都是弹层而非常驻控件：官方就是这么做的，而且常驻会让易盾 SDK 在用户
+ * 还没到那一步时就先采集一次指纹。稿中的「请验证滑块」胶囊因此只作状态提示。
  */
 import { useEffect, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import type * as React from 'react';
+import { Pressable, ScrollView, Text, TextInput, View, type TextInputInstance } from 'react-native';
 import { LoginFlow } from '@xpeng/protocol/src/session';
+import { DARK_COLORS, LIGHT_COLORS } from '../../core/colors';
 import { sessionStore } from '../../core/session';
-import { CaptchaModal } from '../SliderCaptcha';
-import { Icon } from '../icons';
-import { SpinnerIcon } from '../atoms';
 import { useThemeMode } from '../../core/theme';
-
-/** 与桌面图标同一张图（官方图标灰度反相），避免应用内外两个标志。 */
-const BRAND_ICON = require('../../assets/brand/icon.png');
+import { SpinnerIcon } from '../atoms';
+import { CapsTag } from '../components';
+import { Icon } from '../icons';
+import { CaptchaModal } from '../SliderCaptcha';
 
 /** 官方短信验证码是 4 位（实测收到的短信如此），不是常见的 6 位。 */
 const SMS_CODE_LEN = 4;
+const RESEND_LABEL = '60s 后重发';
 
 type Stage = 'phone' | 'code';
 
-export function LoginScreen() {
+export function LoginScreen(): React.JSX.Element {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [stage, setStage] = useState<Stage>('phone');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  /** 正在进行的网络动作；null 表示空闲。用于给按钮和状态行显示具体进度。 */
   const [pending, setPending] = useState<null | 'sending' | 'verifying' | 'signing'>(null);
   const busy = pending !== null;
   /**
-   * 倒计时用「截止时间戳」而不是「剩余秒数」。
-   *
-   * 之前存剩余秒数、每渲染一次重建一个 1s 的 setTimeout：只要中途有别的 setState
-   * （`pending`、`message`、`error` 任意一个变化）就会触发重渲染，旧 effect 被
-   * cleanup 掉，新 effect 从同一个剩余值重新起跳——一旦某次渲染密集发生，链条就
-   * 停在最后那个数字上不动（实测停在 1s）。存时间戳则与渲染次数无关，任何时刻
-   * 都能算出真实的剩余值。
+   * 倒计时存截止时间戳而不是剩余秒数：存秒数时每渲染一次就重建 1s 定时器，
+   * 中途任何 setState 都会让旧 effect 被 cleanup，链条会停在同一数字上不动
+   * （实测停在 1s）。存时间戳则与渲染次数无关。
    */
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const countdown = cooldownUntil > now ? Math.ceil((cooldownUntil - now) / 1000) : 0;
-  /** 当前该弹哪道滑块：发码那道（SMS）还是换 token 那道（LGN）。 */
   const [captcha, setCaptcha] = useState<'sms' | 'login' | null>(null);
   const flow = useRef<LoginFlow | null>(null);
+  const codeInput = useRef<TextInputInstance>(null);
   const [, , scheme] = useThemeMode();
+  const placeholderColor = (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)['on-surface-variant'];
 
-  // 只有真的在倒计时时才挂心跳；归零后自动停，不空转。
   useEffect(() => {
     if (cooldownUntil <= Date.now()) return;
     const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
   }, [cooldownUntil]);
+
+  useEffect(() => {
+    if (stage === 'code') codeInput.current?.focus();
+  }, [stage]);
 
   const phoneReady = phone.length === 11;
 
@@ -77,7 +71,6 @@ export function LoginScreen() {
   async function onSmsSlider(validate: string) {
     setCaptcha(null);
     setPending('sending');
-    // 上一次拖错留下的提示必须清掉，否则重试成功后页面上还挂着红字
     setError('');
     setMessage('');
     try {
@@ -120,7 +113,6 @@ export function LoginScreen() {
     try {
       const session = await flow.current.finishWithSlider(validate);
       await sessionStore.adopt(session);
-      // 成功后不需要清 pending：外壳已切走，这个页面马上卸载
     } catch (e) {
       setError(describe(e));
       setPending(null);
@@ -139,208 +131,185 @@ export function LoginScreen() {
     }
   }
 
+  function resetCodeStage() {
+    setStage('phone');
+    setCode('');
+    setCooldownUntil(0);
+    flow.current = null;
+    setMessage('');
+    setError('');
+  }
+
+  function pressLogin() {
+    if (busy) return;
+    if (stage === 'code' && flow.current) {
+      if (code.length === SMS_CODE_LEN) submitCode(code);
+      else codeInput.current?.focus();
+      return;
+    }
+    if (countdown > 0) return;
+    requestCode();
+  }
+
   return (
     <View className="flex-1 bg-background">
       <ScrollView
         className="flex-1"
-        contentContainerClassName="px-6 pt-2 pb-6 flex-grow"
+        contentContainerClassName="px-6 pt-5 pb-6 flex-grow"
         keyboardShouldPersistTaps="handled">
-        {/* 顶部装饰线：设计稿里横贯页面的琥珀渐变 */}
-        <View className="h-1 -mx-6 mb-4 bg-primary-container/40" />
-
-        {/* 品牌区：左图标右两行文字，不是居中的大标题 */}
-        <View className="flex-row items-center gap-3.5 mt-2 mb-7">
-          <View className="w-12 h-12 rounded-xl bg-surface border border-outline-variant items-center justify-center overflow-hidden">
-            <View className="absolute top-0 right-0 w-8 h-1 bg-primary-container" />
-            <Image source={BRAND_ICON} className="w-8 h-8 rounded-lg" resizeMode="contain" />
-          </View>
-          <View className="flex-col">
-            <View className="flex-row items-center gap-2">
-              <Text className="font-headline font-black text-[23px] tracking-tight text-on-surface">
-                小鹏友
-              </Text>
-              <View className="px-1.5 py-0.5 bg-primary-container/10 border border-primary-container/30 rounded">
-                <Text className="font-mono text-[9px] font-bold text-primary tracking-wider">
-                  TELEMATICS
-                </Text>
-              </View>
+        <View className="flex-1 flex-col justify-between">
+          <View className="w-full">
+            <View className="w-full h-11 items-center justify-between">
+              <Pressable
+                onPress={resetCodeStage}
+                accessibilityLabel="返回"
+                className="w-11 h-11 rounded-full bg-surface items-center justify-center active:scale-95">
+                <Text className="font-icon text-[20px] text-on-surface">{Icon.arrow_back}</Text>
+              </Pressable>
             </View>
-            <View className="mt-1 flex-row items-center gap-1.5">
-              <View className="w-1.5 h-1.5 rounded-full bg-secondary-fixed-dim" />
-              <Text className="font-body text-[12px] font-medium text-on-surface-variant">
-                非官方自研客户端
+            <View className="mt-8 mb-2">
+              <Text className="font-label text-[32px] font-bold leading-tight tracking-tight text-on-surface">
+                手机号登录
+              </Text>
+              <Text className="mt-2 font-body text-[14px] text-on-surface-variant">
+                使用手机号验证码登录
               </Text>
             </View>
           </View>
-        </View>
 
-        {/* 表单卡片 */}
-        <View className="bg-surface rounded-2xl border border-outline-variant/80 p-5 overflow-hidden">
-          <View className="absolute top-0 left-5 right-5 h-[1.5px] bg-primary-container/25" />
-
-          {/* 手机号 */}
-          <View className="mb-4">
-            <View className="flex-row items-center justify-between mb-1.5">
-              <Text className="font-body text-[13px] font-semibold text-on-surface-variant">
-                手机号
-              </Text>
-              <Text className="font-mono text-[10px] text-outline font-medium">CHN MOBILE</Text>
-            </View>
-            <View className="w-full h-12 bg-surface-container-low rounded-xl border border-outline-variant flex-row items-center px-3.5">
-              <View className="flex-row items-center pr-2.5 mr-2.5 border-r border-outline-variant/80">
-                <Text className="font-mono text-[14px] font-bold text-primary">+86</Text>
-                <Text className="font-icon text-[16px] text-outline ml-1">{Icon.expand_more}</Text>
-              </View>
-              <TextInput
-                value={phone}
-                onChangeText={onChangePhone}
-                editable={stage === 'phone' && !busy}
-                keyboardType="phone-pad"
-                maxLength={11}
-                placeholder="请输入 11 位手机号"
-                placeholderTextColor="#8A7F68"
-                className="flex-1 font-mono text-[15px] text-on-surface p-0"
-              />
-            </View>
-          </View>
-
-          {/* 验证码：发码后才出现，与设计稿的「一步一屏」一致 */}
-          {stage === 'code' ? (
-            <View className="mb-4">
-              <View className="flex-row items-center justify-between mb-1.5">
-                <Text className="font-body text-[13px] font-semibold text-on-surface-variant">
-                  验证码
-                </Text>
-                <Text className="font-mono text-[10px] text-outline font-medium">ONE-TIME CODE</Text>
-              </View>
-              <View className="w-full h-12 bg-surface-container-low rounded-xl border border-outline-variant flex-row items-center pl-3.5 pr-1.5">
+          <View className="w-full py-2">
+            <View className="w-full gap-3.5">
+              <View className="w-full h-[62px] rounded-full bg-surface border border-surface-container px-5 flex-row items-center">
+                <View className="flex-row items-center gap-1 pr-3 border-r border-surface-variant">
+                  <Text className="font-label text-[15px] font-semibold text-on-surface">+86</Text>
+                  <Text className="font-icon text-[18px] text-on-surface-variant">
+                    {Icon.expand_more}
+                  </Text>
+                </View>
                 <TextInput
+                  value={phone}
+                  onChangeText={onChangePhone}
+                  editable={stage === 'phone' && !busy}
+                  keyboardType="phone-pad"
+                  maxLength={11}
+                  placeholder="请输入 11 位手机号"
+                  placeholderTextColor={placeholderColor}
+                  className="flex-1 ml-4 font-body text-[15px] text-on-surface p-0"
+                />
+              </View>
+
+              <View className="w-full h-[62px] rounded-full bg-surface border border-surface-container pl-5 pr-2.5 flex-row items-center justify-between">
+                <TextInput
+                  ref={codeInput}
                   value={code}
                   onChangeText={(v) => {
                     setCode(v);
                     setError('');
                     if (v.length === SMS_CODE_LEN) submitCode(v);
                   }}
-                  editable={!busy}
-                  autoFocus
+                  editable={stage === 'code' && !busy}
                   keyboardType="number-pad"
                   maxLength={SMS_CODE_LEN}
-                  placeholder={`请输入 ${SMS_CODE_LEN} 位验证码`}
-                  placeholderTextColor="#8A7F68"
-                  className="flex-1 font-mono text-[15px] text-on-surface p-0 tracking-widest"
+                  placeholder="请输入 4 位验证码"
+                  placeholderTextColor={placeholderColor}
+                  className="flex-1 font-body text-[15px] text-on-surface p-0"
                 />
-                <Pressable
-                  onPress={countdown > 0 || busy ? undefined : requestCode}
-                  className="h-9 px-3 rounded-lg bg-surface border border-primary-container/40 items-center justify-center"
-                  style={{ opacity: countdown > 0 ? 0.5 : 1 }}>
-                  <Text className="font-body text-[12px] font-semibold text-primary">
-                    {pending === 'sending'
-                      ? '发送中…'
-                      : countdown > 0
-                        ? `${countdown}s 后重试`
-                        : '获取验证码'}
-                  </Text>
-                </Pressable>
+                <View className="flex-row items-center gap-2 pl-2">
+                  <View className="w-[1px] h-5 bg-surface-variant" />
+                  <Pressable
+                    onPress={countdown > 0 || busy ? undefined : requestCode}
+                    className="px-1 py-1"
+                    style={{ opacity: countdown > 0 || busy ? 0.5 : 1 }}>
+                    <Text className="font-body text-[13px] font-semibold text-on-surface">
+                      获取验证码
+                    </Text>
+                  </Pressable>
+                  <View className="h-7 px-2.5 rounded-full bg-surface-variant items-center justify-center">
+                    <CapsTag text={countdown > 0 ? `${countdown}s 后重发` : RESEND_LABEL} />
+                  </View>
+                </View>
               </View>
+
+              <View className="w-full h-[52px] rounded-full bg-surface border border-surface-container px-4 flex-row items-center justify-between">
+                <View className="flex-row items-center gap-2.5">
+                  <View className="w-6 h-6 rounded-full bg-primary-container items-center justify-center">
+                    <Text className="font-icon text-[16px] text-on-surface">
+                      {Icon.priority_high}
+                    </Text>
+                  </View>
+                  <Text className="font-body text-[13px] font-medium text-on-surface">
+                    请验证滑块
+                  </Text>
+                </View>
+                <View className="flex-row items-center gap-2 pr-1">
+                  <Text className="font-body text-[12px] text-on-surface-variant">验证中</Text>
+                  {busy || captcha !== null ? (
+                    <SpinnerIcon size={16} className="text-on-surface" />
+                  ) : (
+                    <View className="w-4 h-4 rounded-full border-2 border-surface-variant" />
+                  )}
+                </View>
+              </View>
+
+              {message ? (
+                <View className="flex-row items-center gap-1.5">
+                  <Text className="font-icon text-[14px] text-secondary-fixed-dim">
+                    {Icon.check_circle}
+                  </Text>
+                  <Text className="font-body text-[12px] text-on-surface-variant flex-shrink">
+                    {message}
+                  </Text>
+                </View>
+              ) : null}
+              {error ? (
+                <View className="flex-row items-center gap-1.5">
+                  <Text className="font-icon text-[14px] text-error">{Icon.gpp_bad}</Text>
+                  <Text className="font-body text-[12px] text-error flex-shrink">{error}</Text>
+                </View>
+              ) : null}
             </View>
-          ) : null}
 
-          <View className="pt-2 gap-3">
-            {stage === 'code' ? (
+            <View className="w-full items-center mt-2 mb-4">
               <Pressable
-                onPress={() => submitCode(code)}
-                disabled={busy || code.length !== SMS_CODE_LEN}
-                className="w-full h-12 rounded-xl items-center justify-center flex-row gap-2 bg-primary"
-                style={{ opacity: busy || code.length !== SMS_CODE_LEN ? 0.5 : 1 }}>
-                <Text className="font-headline font-extrabold text-[16px] tracking-wider text-on-primary uppercase">
-                  {pending === 'verifying'
-                    ? '校验验证码…'
-                    : pending === 'signing'
-                      ? '正在登录…'
-                      : '登录'}
+                onPress={pressLogin}
+                disabled={busy}
+                className="w-full h-[56px] rounded-full bg-primary-container items-center justify-center active:scale-[0.98]"
+                style={{ opacity: busy ? 0.6 : 1 }}>
+                <Text className="font-label text-[16px] font-bold tracking-wide text-on-primary-fixed">
+                  登录
                 </Text>
-                {busy ? (
-                  <SpinnerIcon size={19} className="text-on-primary" />
-                ) : (
-                  <Text className="font-icon text-[19px] text-on-primary">{Icon.expand_more}</Text>
-                )}
               </Pressable>
-            ) : (
-              <Pressable
-                onPress={busy ? undefined : requestCode}
-                className="w-full h-12 rounded-xl bg-primary items-center justify-center flex-row gap-2 active:scale-[0.98]">
-                <Text className="font-headline font-extrabold text-[16px] tracking-wider text-on-primary uppercase">
-                  {pending === 'sending' ? '正在发送…' : '获取验证码'}
-                </Text>
-                {pending === 'sending' ? (
-                  <SpinnerIcon size={19} className="text-on-primary" />
-                ) : (
-                  <Text className="font-icon text-[19px] text-on-primary">{Icon.expand_more}</Text>
-                )}
-              </Pressable>
-            )}
-
-            {/* 只在验证码阶段出现：给用户一条改号重来的退路。
-                手机号阶段不显示——本地会话由 sessionStore.init() 在启动时自动恢复，
-                有令牌就直接进主界面、根本到不了这个页面，所以「使用已保存的令牌
-                登录」这个按钮从来没有可执行的动作，已删除。 */}
-            {stage === 'code' ? (
-              <Pressable
-                onPress={() => {
-                  setStage('phone');
-                  setCode('');
-                  setCooldownUntil(0);
-                  flow.current = null;
-                  setMessage('');
-                  setError('');
-                }}
-                className="w-full h-11 rounded-xl bg-surface-container/70 border border-outline-variant/90 items-center justify-center flex-row gap-2 active:scale-[0.98]">
-                <Text className="font-icon text-[18px] text-secondary-fixed-dim">{Icon.lock}</Text>
-                <Text className="font-body text-[13px] font-semibold text-on-surface-variant">
+              <Pressable onPress={resetCodeStage} className="mt-4 active:scale-95">
+                <Text className="font-body text-[13px] font-medium text-on-surface-variant">
                   换一个手机号
                 </Text>
               </Pressable>
-            ) : null}
+            </View>
           </View>
 
-          {/* 状态行：设计稿没有，但流程需要；左对齐贴在卡片里，不用居中 Banner */}
-          {pending ? (
-            <View className="mt-3 flex-row items-center gap-1.5">
-              <SpinnerIcon size={14} className="text-secondary-fixed-dim" />
-              <Text className="font-body text-[12px] text-on-surface-variant flex-shrink">
-                {pending === 'sending'
-                  ? '正在发送验证码，请稍候…'
-                  : pending === 'verifying'
-                    ? '正在校验验证码…'
-                    : '正在换取登录凭证…'}
+          <View className="w-full items-center gap-2 pb-1">
+            <View className="w-full max-w-[340px] rounded-full bg-surface py-2 px-3.5 flex-row items-center justify-center gap-1.5">
+              <Text className="font-icon text-[15px] text-on-surface-variant">
+                {Icon.shield}
+              </Text>
+              <Text className="font-body text-[12px] leading-none tracking-tight text-on-surface-variant">
+                仅使用本人账号，不收集第三方数据
               </Text>
             </View>
-          ) : null}
-          {message ? (
-            <View className="mt-3 flex-row items-center gap-1.5">
-              <Text className="font-icon text-[14px] text-secondary-fixed-dim">
-                {Icon.check_circle}
+            <View className="w-full max-w-[340px] rounded-full bg-surface py-2 px-3.5 flex-row items-center justify-center gap-1.5">
+              <Text className="font-icon text-[15px] text-on-surface-variant">
+                {Icon.info}
               </Text>
-              <Text className="font-body text-[12px] text-on-surface-variant flex-shrink">
-                {message}
+              <Text className="font-body text-[12px] leading-none tracking-tight text-on-surface-variant">
+                登录会把官方 App 踢下线
               </Text>
             </View>
-          ) : null}
-          {error ? (
-            <View className="mt-3 flex-row items-center gap-1.5">
-              <Text className="font-icon text-[14px] text-error">{Icon.gpp_bad}</Text>
-              <Text className="font-body text-[12px] text-error flex-shrink">{error}</Text>
+            <View className="pt-2 flex-row items-center gap-1.5">
+              <View className="w-2 h-2 rounded-full bg-secondary-container" />
+              <Text className="font-body text-[12px] font-medium text-on-surface-variant">
+                服务连接正常
+              </Text>
             </View>
-          ) : null}
-        </View>
-
-        {/* 页脚：合规说明胶囊 */}
-        <View className="items-center pt-4 pb-2 mt-auto">
-          <View className="flex-row items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container/80 border border-outline-variant/60">
-            <Text className="font-icon text-[15px] text-secondary-fixed-dim">{Icon.shield}</Text>
-            <Text className="font-body text-[11px] text-on-surface-variant font-medium">
-              仅使用本人账号，不收集第三方数据
-            </Text>
           </View>
         </View>
       </ScrollView>
@@ -349,12 +318,6 @@ export function LoginScreen() {
         visible={captcha !== null}
         scheme={scheme}
         onValidated={captcha === 'sms' ? onSmsSlider : onLoginSlider}
-        // 拖错不关弹层：关掉再让用户自己找按钮重来，等于把一次可恢复的失败变成
-        // 死路。原地把错误显示在页面上，用户直接再拖一次即可（弹层内 WebView 已
-        // 按代次重建，旧的作废实例不会干扰）。
-        //
-        // 这里不把易盾原文（`300(unpass error) - Failed to verify captcha`）抛给
-        // 用户：那是英文内部错误码，对「再拖一次」这个动作没有指导意义。
         onError={() => setError('滑块验证未通过，请再拖一次')}
         onCancel={() => setCaptcha(null)}
       />
