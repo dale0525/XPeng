@@ -21,7 +21,11 @@ export interface Vehicle {
   totalMileage: number;
   relationType: number;
   vehicleAppearance: VehicleAppearance;
-  ownerInfo: { uid: number; nickName: string; mobile: string; headImg: string | null };
+  /**
+   * 车主信息。`/biz/v5/vehicle/v2/myVehicles` 对部分账号（子账号、或车主信息未随列表
+   * 下发）返回 null，真机 2026-11-08 复现过，因此按可空处理。
+   */
+  ownerInfo: { uid: number; nickName: string; mobile: string; headImg: string | null } | null;
   permissions: { remoteControl: { isPermanent: boolean; expireTime: number | null } };
   equipment: { camera360: boolean };
   /** 车型能力表，决定 UI 显示哪些控件；不要硬编码功能可见性。 */
