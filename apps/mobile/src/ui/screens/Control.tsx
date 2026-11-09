@@ -108,8 +108,8 @@ export function ControlScreen(props: {
   onRemoteView: () => void;
   onSummon: () => void;
   onConnectCharger: () => void;
-  /** 当前登录账号 uid，用于判定是否为车主（远程查看仅车主可用）。 */
-  viewerUid: number | null;
+  /** 当前登录账号是否为车主（远程查看仅车主可用）。由 App 依据当前登录账号 uid 与车主 uid 判定。 */
+  isOwner: boolean;
 }): React.JSX.Element {
   const {
     vehicle,
@@ -122,7 +122,7 @@ export function ControlScreen(props: {
     onRemoteView,
     onSummon,
     onConnectCharger,
-    viewerUid,
+    isOwner,
   } = props;
   const [states, setStates] = useState<Record<string, Outcome>>({});
   const [temp, setTemp] = useState<number | null>(null);
@@ -198,9 +198,7 @@ export function ControlScreen(props: {
   const locked = d?.driver_door_lock_st === 1;
   // 远程查看仅车主可用：车控指令按车主权限签发，子账号即使放开入口也会被服务端拒绝，
   // 因此在入口处拦截，点击给「仅车主可用」提示（设计稿不表现权限差异，只做代码拦截）。
-  // ownerInfo 在真机上可能为 null（子账号或车主信息未随列表下发），此时无法确认车主身份，
-  // 按非车主处理——宁可拦下一次可用的远程查看，也不先发一条注定被服务端拒绝的指令。
-  const isOwner = viewerUid !== null && vehicle.ownerInfo?.uid === viewerUid;
+  // isOwner 由 App 用「当前登录账号 uid === 车主 uid」判定；资料未取到时按非车主处理。
   const openRemoteView = () => {
     if (isOwner) onRemoteView();
     else onUnsupported('远程查看（仅车主可用）');
@@ -375,7 +373,7 @@ export function ControlScreen(props: {
 
       {/* ===== 4. Extended Feature Entry Points（三列卡片） ===== */}
       <View className="flex-row gap-2">
-        <FeatureEntry icon={Icon.videocam} label="远程查看" note="车身全景环视" onPress={onRemoteView} />
+        <FeatureEntry icon={Icon.videocam} label="远程查看" note="车身全景环视" onPress={openRemoteView} />
         <FeatureEntry icon={Icon.swap_vertical_circle} label="直线召唤" note="前后遥控泊车" onPress={onSummon} />
         <FeatureEntry icon={Icon.ev_station} label="连接充电桩" note="智慧家充桩配对" onPress={onConnectCharger} />
       </View>

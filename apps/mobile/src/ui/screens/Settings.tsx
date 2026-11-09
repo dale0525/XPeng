@@ -1,6 +1,6 @@
 import type * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
-import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import type { LinkState } from '../../core/car';
 import type { SessionState } from '../../core/session';
 import type { ThemeMode } from '../../core/theme';
@@ -21,6 +21,7 @@ export function SettingsScreen(props: {
   bottomInset: number;
   session: Extract<SessionState, { kind: 'active' }>['session'];
   vehicle: Vehicle;
+  profile: UserProfile | null;
   status: VehicleStatus | null;
   linkState: LinkState;
   latencyMs: number | null;
@@ -38,6 +39,7 @@ export function SettingsScreen(props: {
     bottomInset,
     session,
     vehicle,
+    profile,
     status,
     linkState,
     latencyMs,
@@ -132,8 +134,8 @@ export function SettingsScreen(props: {
         <CardHeader icon="badge" title="账户信息" right={<StatusPill label="已登录" />} />
         <RowList
           rows={[
-            { label: '车主昵称', value: vehicle.ownerInfo?.nickName || '—' },
-            { label: '手机号', value: vehicle.ownerInfo?.mobile ? maskMobile(vehicle.ownerInfo.mobile) : '—' },
+            { label: '昵称', value: profile?.nickName || '—' },
+            { label: '手机号', value: profile?.mobile ? maskMobile(profile.mobile) : '—' },
             { label: '令牌剩余', value: formatDuration(session.expiresAt - Date.now()) },
           ]}
         />
