@@ -837,6 +837,9 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | `/biz/v5/remoteControl/activityList` | 需 body 带 `vin` |
 | `/biz/v5/mqtt/createMqttAccount/app` | MQTT 凭据 |
 | `/sso/app/v5/keyAuth/getKeyAuthSwitch` | 钥匙授权开关（本账号 `switchStatus:null`） |
+| `/resource/app/v3/userinfoMask` | 主机 `apps.xiaopeng.com`；当前登录账号**本人**资料：`uid`、`nickName`、`mobile`、`headImg`、`type`（子账号实测 `type:4`） |
+
+**`ownerInfo` 是车主、不是登录人**：`myVehicles[].ownerInfo` 恒为该车车主资料；子账号登录时，它与 `/resource/app/v3/userinfoMask` 返回的登录人资料在 uid、昵称、手机号上都不相同。凡界面要显示「当前登录账号」必须取 `userinfoMask`，不能取 `ownerInfo`。
 
 **权限与钥匙激活无关**：本账号对这台车的 `permissions.remoteControl` 为 `isPermanent:true`、`expireTime:null`，服务端照常返回 19 项车控能力。数字钥匙未激活只影响 BLE 本地解锁，不影响云端车控。
 

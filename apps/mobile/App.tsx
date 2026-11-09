@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { carLink, type LinkState } from './src/core/car';
 import { bleLink } from './src/core/ble';
 import { sessionStore, type SessionState } from './src/core/session';
@@ -45,6 +45,7 @@ function Shell() {
   const [session, setSession] = useState<SessionState>({ kind: 'loading' });
   const [tab, setTab] = useState<TabKey>('control');
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [status, setStatus] = useState<VehicleStatus | null>(null);
   const [link, setLink] = useState<LinkState>('idle');
   const [linkReason, setLinkReason] = useState<string | undefined>();
@@ -109,6 +110,13 @@ function Shell() {
         await carLink.connect(first.vin, session.session.uid);
       } catch (e) {
         console.warn('[shell] 读取车辆失败:', e instanceof Error ? e.message : String(e));
+      }
+      // 当前登录账号本人资料（myVehicles 的 ownerInfo 是车主，不是登录人）。
+      try {
+        const p = await sessionStore.call<UserProfile>('/resource/app/v3/userinfoMask', {});
+        if (alive) setProfile(p);
+      } catch (e) {
+        console.warn('[shell] 读取账号资料失败:', e instanceof Error ? e.message : String(e));
       }
     })();
     const unsubLink = carLink.subscribe((s, reason) => {
@@ -210,7 +218,7 @@ function Shell() {
             onRemoteView={() => setRemoteViewVisible(true)}
             onSummon={() => setSummonVisible(true)}
             onConnectCharger={() => setChargerVisible(true)}
-            viewerUid={session.session.uid}
+            isOwner={profile !== null && vehicle.ownerInfo !== null && vehicle.ownerInfo.uid === profile.uid}
           />
         ) : tab === 'status' ? (
           <StatusScreen status={status} bottomInset={108 + insets.bottom} />
@@ -219,6 +227,7 @@ function Shell() {
             bottomInset={108 + insets.bottom}
             session={session.session}
             vehicle={vehicle}
+            profile={profile}
             status={status}
             linkState={link}
             latencyMs={latency ?? carLink.latencyMs}

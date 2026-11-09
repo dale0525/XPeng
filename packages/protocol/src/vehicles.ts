@@ -32,6 +32,21 @@ export interface Vehicle {
   function: Record<string, boolean>;
 }
 
+/**
+ * 当前登录账号本人的资料（区别于 `Vehicle.ownerInfo` 的车主资料）。
+ *
+ * 来源 `POST /resource/app/v3/userinfoMask`：子账号登录时 `uid`/`mobile`/`nickName`
+ * 都是子账号自己（真机实测 mobile=130*****836、type=4），而 `ownerInfo` 恒为车主。
+ */
+export interface UserProfile {
+  uid: number;
+  nickName: string;
+  mobile: string;
+  headImg: string | null;
+  /** 账号类型，真机子账号为 4。 */
+  type: number;
+}
+
 export interface VehicleStatus {
   instant: {
     door: {
