@@ -383,12 +383,14 @@ export function BottomNav({
   insetBottom: number;
 }) {
   return (
+    /* 照稿子：nav 本身 `flex justify-around items-center py-2.5` 垂直居中每个入口。
+       之前把安全区 inset 当成 nav 的 paddingBottom，多出来的底部内边距把按钮顶成偏上。
+       安全区只应作用在 nav 之外的外层留白上，nav 内边距保持稿子的 py-2.5。 */
     <View
-      /* 稿子容器是 flex justify-around：每个入口按自身内容宽度排布、四周均分留白，
-         不是等分（flex-1）。等分会让三个入口的图标与文字落在不同基线上。 */
-      className="absolute bottom-0 left-0 right-0 mx-4 flex-row items-center justify-around rounded-full bg-inverse-surface px-4 py-2.5 mb-3"
+      className="absolute bottom-0 left-0 right-0"
       style={{ paddingBottom: Math.max(insetBottom, 8) }}>
-      {TABS.map((t) => {
+      <View className="mx-4 mb-3 flex-row items-center justify-around rounded-full bg-inverse-surface px-4 py-2.5">
+        {TABS.map((t) => {
         const on = t.key === active;
         return (
           <Pressable
@@ -426,6 +428,7 @@ export function BottomNav({
           </Pressable>
         );
       })}
+      </View>
     </View>
   );
 }

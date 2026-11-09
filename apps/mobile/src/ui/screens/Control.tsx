@@ -224,6 +224,9 @@ export function ControlScreen(props: {
     ? DASH
     : tailgateOpen ? '已开启' : '已关闭';
   const soc = c?.battery_soc === undefined ? DASH : String(c.battery_soc);
+  const rangeKm = status?.instant?.odometer?.avalible_driving_distance === undefined
+    ? DASH
+    : String(Math.round(status.instant.odometer.avalible_driving_distance));
   const chargeMinutes = c?.time_to_complete_charge_min === undefined
     ? DASH
     : c.time_to_complete_charge_min > 0 ? String(c.time_to_complete_charge_min) : DASH;
@@ -323,11 +326,11 @@ export function ControlScreen(props: {
             </View>
           </View>
 
-          {/* Hero Bottom：电量大字 + 充电徽章；分隔线 + 充电详情 */}
+          {/* Hero Bottom：剩余续航大字（km）+ 充电徽章；分隔线 + 充电详情 */}
           <View className="relative mt-28 justify-end">
             <View className="flex-row items-baseline gap-1">
-              <Text className="text-[56px] font-headline font-bold tracking-tighter text-white tabular-nums">{soc}</Text>
-              <Text className="text-[30px] font-headline font-bold text-white/80">%</Text>
+              <Text className="text-[56px] font-headline font-bold tracking-tighter text-white tabular-nums">{rangeKm}</Text>
+              <Text className="text-[30px] font-headline font-bold text-white/80">km</Text>
               {charging ? (
                 <View className="ml-3 flex-row items-center gap-1 rounded-full border border-positive/40 bg-positive/20 px-2.5 py-1">
                   <Text className="text-[14px] font-icon text-positive">{Icon.bolt}</Text>
@@ -344,7 +347,7 @@ export function ControlScreen(props: {
                     : '未充电'}
                 </Text>
               </View>
-              <Text className="text-[12px] font-headline font-medium text-white/90">电量 {soc}</Text>
+              <Text className="text-[12px] font-headline font-medium text-white/90">电量 {soc}%</Text>
             </View>
           </View>
         </View>
