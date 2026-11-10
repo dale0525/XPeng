@@ -20,6 +20,7 @@ import {
   ScreenScroll,
   SectionHeader,
   StatusStrip,
+  PendingSpinner,
   type CommandVisualState,
 } from '../components';
 import { LiveDot, SegmentBar } from '../atoms';
@@ -173,6 +174,11 @@ export function ControlScreen(props: {
     setTimeout(() => {
       carLink.readStatus().catch(() => {});
     }, 6000);
+  }
+
+  /** 某条指令是否还在等车端回执——按钮据此把图标与文字换成旋转圈。 */
+  function isPending(id: string): boolean {
+    return id !== '' && states[id] === 'pending';
   }
 
   function runId(id: string) {
@@ -400,6 +406,9 @@ export function ControlScreen(props: {
                 ? { label: tailgateOpen ? '关闭尾门' : '打开尾门', note: '电动尾门', icon: tailgateOpen ? 'garage' : 'sensor_door' }
                 : QUICK_META[id]}
               highlighted={(id === 'doorLock' && !locked) || (id === 'tailgateOpen' && tailgateOpen)}
+              pending={isPending(id === 'doorLock' ? (locked ? 'door.unlock' : 'door.lock')
+                : id === 'tailgateOpen' ? (tailgateOpen ? 'trunk.close' : 'trunk.open')
+                : REAL_COMMANDS[id] ?? '')}
               onPress={() => runQuick(id)}
             />
           ))}
@@ -431,6 +440,7 @@ export function ControlScreen(props: {
             <Pill2
               title="中控门锁"
               note={d === undefined ? '读取中' : locked ? '车辆已锁止' : '车辆未锁止'}
+              pending={isPending(locked ? 'door.unlock' : 'door.lock')}
               onPress={() => runId(locked ? 'door.unlock' : 'door.lock')}
             />
           </View>
@@ -441,6 +451,7 @@ export function ControlScreen(props: {
             <Pill2
               title={tailgateOpen ? '关闭尾门' : '打开尾门'}
               note={bleV2 ? 'BLE 直连' : '仅 DF 车型'}
+              pending={isPending(tailgateOpen ? 'trunk.close' : 'trunk.open')}
               onPress={() => (bleV2 ? runId(tailgateOpen ? 'trunk.close' : 'trunk.open') : onUnsupported('电动尾门'))}
             />
           </View>
@@ -448,6 +459,7 @@ export function ControlScreen(props: {
             <Pill2
               title="开启临停"
               note="单次触发"
+              pending={isPending('temp.park')}
               onPress={() =>
                 run({ id: 'temp.park', label: '开启临停', group: 'door', serviceType: 9, msgContent: { cmd_type: 3 } })
               }
@@ -471,10 +483,10 @@ export function ControlScreen(props: {
           <StatPill label="电动尾门状态" value={tailgateText} />
         </View>
         <View className="mt-4 flex-row flex-wrap gap-2.5 pt-1">
-          <View className="basis-[48%]"><TextPill label="全车车窗通风" onPress={() => runId('window.down')} /></View>
-          <View className="basis-[48%]"><TextPill label="全车车窗关闭" onPress={() => runId('window.up')} /></View>
-          <View className="basis-[48%]"><TextPill label="打开遮阳帘" onPress={() => runId('shade.open')} /></View>
-          <View className="basis-[48%]"><TextPill label="关闭遮阳帘" onPress={() => runId('shade.close')} /></View>
+          <View className="basis-[48%]"><TextPill label="全车车窗通风" pending={isPending('window.down')} onPress={() => runId('window.down')} /></View>
+          <View className="basis-[48%]"><TextPill label="全车车窗关闭" pending={isPending('window.up')} onPress={() => runId('window.up')} /></View>
+          <View className="basis-[48%]"><TextPill label="打开遮阳帘" pending={isPending('shade.open')} onPress={() => runId('shade.open')} /></View>
+          <View className="basis-[48%]"><TextPill label="关闭遮阳帘" pending={isPending('shade.close')} onPress={() => runId('shade.close')} /></View>
         </View>
       </Card>
 
@@ -494,40 +506,66 @@ export function ControlScreen(props: {
         </View>
         <View className="mt-4 gap-2 pt-1">
           <View className="flex-row gap-2.5">
-            <Pressable onPress={() => runId('hvac.on')}
+            <Pressable onPress={() => runId('hvac.on')} disabled={isPending('hvac.on')}
               className="flex-1 flex-row items-center justify-center gap-1 rounded-full bg-on-surface px-3 py-2.5 active:scale-95">
-              <Text className="text-[16px] font-icon text-surface">{Icon.power_settings_new}</Text>
-              <Text className="text-[12px] font-headline font-semibold text-surface">打开空调</Text>
+              {isPending('hvac.on') ? (
+                <PendingSpinner color="#FFFFFF" />
+              ) : (
+                <>
+                  <Text className="text-[16px] font-icon text-surface">{Icon.power_settings_new}</Text>
+                  <Text className="text-[12px] font-headline font-semibold text-surface">打开空调</Text>
+                </>
+              )}
             </Pressable>
-            <Pressable onPress={() => runId('hvac.off')}
+            <Pressable onPress={() => runId('hvac.off')} disabled={isPending('hvac.off')}
               className="flex-1 items-center justify-center rounded-full bg-inset px-3 py-2.5 active:scale-95">
-              <Text className="text-[12px] font-headline font-semibold text-on-surface">关闭空调</Text>
+              {isPending('hvac.off')
+                ? <PendingSpinner color="#111214" />
+                : <Text className="text-[12px] font-headline font-semibold text-on-surface">关闭空调</Text>}
             </Pressable>
           </View>
           <View className="flex-row gap-2.5">
-            <Pressable onPress={() => changeTemp(-1)}
+            <Pressable onPress={() => changeTemp(-1)} disabled={isPending('hvac.temp')}
               className="flex-1 flex-row items-center justify-center gap-1 rounded-full bg-inset px-3 py-2 active:scale-95">
-              <Text className="text-[16px] font-icon text-on-surface">{Icon.remove}</Text>
-              <Text className="text-[12px] font-headline font-semibold text-on-surface">温度 -</Text>
+              {isPending('hvac.temp') ? (
+                <PendingSpinner color="#111214" />
+              ) : (
+                <>
+                  <Text className="text-[16px] font-icon text-on-surface">{Icon.remove}</Text>
+                  <Text className="text-[12px] font-headline font-semibold text-on-surface">温度 -</Text>
+                </>
+              )}
             </Pressable>
-            <Pressable onPress={() => changeTemp(1)}
+            <Pressable onPress={() => changeTemp(1)} disabled={isPending('hvac.temp')}
               className="flex-1 flex-row items-center justify-center gap-1 rounded-full bg-inset px-3 py-2 active:scale-95">
-              <Text className="text-[16px] font-icon text-on-surface">{Icon.add}</Text>
-              <Text className="text-[12px] font-headline font-semibold text-on-surface">温度 +</Text>
+              {isPending('hvac.temp') ? (
+                <PendingSpinner color="#111214" />
+              ) : (
+                <>
+                  <Text className="text-[16px] font-icon text-on-surface">{Icon.add}</Text>
+                  <Text className="text-[12px] font-headline font-semibold text-on-surface">温度 +</Text>
+                </>
+              )}
             </Pressable>
           </View>
           <View className="flex-row gap-2 pt-1">
-            <Pressable onPress={() => runId('hvac.quickCool')}
+            <Pressable onPress={() => runId('hvac.quickCool')} disabled={isPending('hvac.quickCool')}
               className="flex-1 items-center justify-center rounded-full bg-inset px-1 py-2 active:scale-95">
-              <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">极速降温 (18°C)</Text>
+              {isPending('hvac.quickCool')
+                ? <PendingSpinner color="#111214" />
+                : <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">极速降温 (18°C)</Text>}
             </Pressable>
-            <Pressable onPress={() => runId('hvac.quickWarm')}
+            <Pressable onPress={() => runId('hvac.quickWarm')} disabled={isPending('hvac.quickWarm')}
               className="flex-1 items-center justify-center rounded-full bg-inset px-1 py-2 active:scale-95">
-              <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">极速升温 (32°C)</Text>
+              {isPending('hvac.quickWarm')
+                ? <PendingSpinner color="#111214" />
+                : <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">极速升温 (32°C)</Text>}
             </Pressable>
-            <Pressable onPress={() => runId('hvac.highTemp')}
+            <Pressable onPress={() => runId('hvac.highTemp')} disabled={isPending('hvac.highTemp')}
               className="flex-1 items-center justify-center rounded-full bg-inset px-1 py-2 active:scale-95">
-              <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">高温抑菌 (32°C)</Text>
+              {isPending('hvac.highTemp')
+                ? <PendingSpinner color="#111214" />
+                : <Text className="text-[11px] font-headline font-semibold text-center text-on-surface">高温抑菌 (32°C)</Text>}
             </Pressable>
           </View>
         </View>
@@ -540,15 +578,27 @@ export function ControlScreen(props: {
           <Text className="text-[16px] font-headline font-semibold text-on-surface">灯光与提示</Text>
         </View>
         <View className="mt-4 flex-row gap-2.5">
-          <Pressable onPress={() => runId('light.flash')}
+          <Pressable onPress={() => runId('light.flash')} disabled={isPending('light.flash')}
             className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-inset px-4 py-2.5 active:scale-95">
-            <Text className="text-[18px] font-icon text-on-surface">{Icon.lightbulb}</Text>
-            <Text className="text-[12px] font-headline font-bold text-on-surface">闪灯</Text>
+            {isPending('light.flash') ? (
+              <PendingSpinner color="#111214" />
+            ) : (
+              <>
+                <Text className="text-[18px] font-icon text-on-surface">{Icon.lightbulb}</Text>
+                <Text className="text-[12px] font-headline font-bold text-on-surface">闪灯</Text>
+              </>
+            )}
           </Pressable>
-          <Pressable onPress={() => runId('light.horn')}
+          <Pressable onPress={() => runId('light.horn')} disabled={isPending('light.horn')}
             className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-inset px-4 py-2.5 active:scale-95">
-            <Text className="text-[18px] font-icon text-on-surface">{Icon.volume_up}</Text>
-            <Text className="text-[12px] font-headline font-bold text-on-surface">鸣笛</Text>
+            {isPending('light.horn') ? (
+              <PendingSpinner color="#111214" />
+            ) : (
+              <>
+                <Text className="text-[18px] font-icon text-on-surface">{Icon.volume_up}</Text>
+                <Text className="text-[12px] font-headline font-bold text-on-surface">鸣笛</Text>
+              </>
+            )}
           </Pressable>
         </View>
       </Card>
@@ -573,13 +623,17 @@ export function ControlScreen(props: {
           </Text>
         </View>
         <View className="mt-4 flex-row gap-2.5 pt-1">
-          <Pressable onPress={() => runId('sentinel.on')}
+          <Pressable onPress={() => runId('sentinel.on')} disabled={isPending('sentinel.on')}
             className="flex-1 items-center justify-center rounded-full bg-on-surface px-3 py-2.5 active:scale-95">
-            <Text className="text-[12px] font-headline font-bold text-surface">开启哨兵模式</Text>
+            {isPending('sentinel.on')
+              ? <PendingSpinner color="#FFFFFF" />
+              : <Text className="text-[12px] font-headline font-bold text-surface">开启哨兵模式</Text>}
           </Pressable>
-          <Pressable onPress={() => runId('sentinel.off')}
+          <Pressable onPress={() => runId('sentinel.off')} disabled={isPending('sentinel.off')}
             className="flex-1 items-center justify-center rounded-full bg-inset px-3 py-2.5 active:scale-95">
-            <Text className="text-[12px] font-headline font-bold text-on-surface">关闭哨兵模式</Text>
+            {isPending('sentinel.off')
+              ? <PendingSpinner color="#111214" />
+              : <Text className="text-[12px] font-headline font-bold text-on-surface">关闭哨兵模式</Text>}
           </Pressable>
         </View>
       </Card>
@@ -590,10 +644,12 @@ export function ControlScreen(props: {
 function QuickAction({
   meta,
   highlighted,
+  pending,
   onPress,
 }: {
   meta: { label: string; note: string; icon: IconName };
   highlighted: boolean;
+  pending: boolean;
   onPress: () => void;
 }) {
   // 照 a694：卡片恒为 bg-white/rounded-[22px]/p-3；「闪灯」的高亮只体现在图标圈底色（bg-[#F4EF00]），
@@ -601,38 +657,60 @@ function QuickAction({
   return (
     <Pressable
       onPress={onPress}
+      disabled={pending}
       className="flex-1 items-center justify-center rounded-[22px] bg-surface p-3 active:scale-95">
-      <View
-        className={
-          highlighted
-            ? 'mb-2 h-11 w-11 items-center justify-center rounded-full bg-primary-container'
-            : 'mb-2 h-11 w-11 items-center justify-center rounded-full bg-inset'
-        }>
-        <Text className="text-[20px] font-icon text-on-surface">{Icon[meta.icon]}</Text>
-      </View>
-      <Text className="text-center text-[12px] font-headline font-semibold text-on-surface">{meta.label}</Text>
+      {pending ? (
+        <View className="h-[64px] items-center justify-center">
+          <PendingSpinner color="#111214" size={20} />
+        </View>
+      ) : (
+        <>
+          <View
+            className={
+              highlighted
+                ? 'mb-2 h-11 w-11 items-center justify-center rounded-full bg-primary-container'
+                : 'mb-2 h-11 w-11 items-center justify-center rounded-full bg-inset'
+            }>
+            <Text className="text-[20px] font-icon text-on-surface">{Icon[meta.icon]}</Text>
+          </View>
+          <Text className="text-center text-[12px] font-headline font-semibold text-on-surface">{meta.label}</Text>
+        </>
+      )}
     </Pressable>
   );
 }
 
 /** 双行胶囊按钮：照 a694 车门区——12px 粗体主文字 + 10px 次要副文字，rounded-full bg-inset。 */
-function Pill2({ title, note, onPress }: { title: string; note: string; onPress: () => void }) {
+/** 双行胶囊按钮：照 a694 车门区——12px 粗体主文字 + 10px 次要副文字，rounded-full bg-inset。 */
+function Pill2({ title, note, pending, onPress }: { title: string; note: string; pending?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={pending}
       className="items-center justify-center rounded-full bg-inset px-4 py-2.5 active:scale-95">
-      <Text className="text-[12px] font-headline font-bold text-on-surface">{title}</Text>
-      <Text className="text-[10px] font-body text-on-surface-variant">{note}</Text>
+      {pending ? (
+        <View className="h-[28px] items-center justify-center">
+          <PendingSpinner color="#111214" />
+        </View>
+      ) : (
+        <>
+          <Text className="text-[12px] font-headline font-bold text-on-surface">{title}</Text>
+          <Text className="text-[10px] font-body text-on-surface-variant">{note}</Text>
+        </>
+      )}
     </Pressable>
   );
 }
 
-function TextPill({ label, onPress }: { label: string; onPress: () => void }) {
+function TextPill({ label, pending, onPress }: { label: string; pending?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={pending}
       className="rounded-full bg-inset px-3 py-2.5 items-center justify-center active:scale-95">
-      <Text className="text-[12px] font-headline font-semibold text-on-surface">{label}</Text>
+      {pending
+        ? <PendingSpinner color="#111214" />
+        : <Text className="text-[12px] font-headline font-semibold text-on-surface">{label}</Text>}
     </Pressable>
   );
 }
