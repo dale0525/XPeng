@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type * as React from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { plateShadow } from '../atoms';
@@ -37,16 +37,18 @@ type PileState =
   | { kind: 'idle' }
   | { kind: 'searching' }
   | { kind: 'connecting'; name: string; mac: string }
-  | { kind: 'charging'; name: string; mac: string }
+  | { kind: 'connected'; name: string; mac: string }
+  | { kind: 'starting'; name: string; mac: string }
+  | { kind: 'started'; name: string; mac: string }
   | { kind: 'error'; message: string };
 
 const STATE_TEXT: Record<PileState['kind'], string> = {
   idle: '未连接',
   searching: '扫描中',
   connecting: '握手中',
-  // 启动充电完成后即释放链路（原生模块同一时刻只允许一条 GATT），所以这里
-  // 不能写「已连接」。
-  charging: '已下发',
+  connected: '已连接',
+  starting: '下发中',
+  started: '已下发',
   error: '失败',
 };
 
@@ -67,8 +69,9 @@ function explain(error: unknown): string {
   if (raw.includes('E_BLUETOOTH_OFF')) return `系统蓝牙未开启。原生返回：${raw}`;
   if (raw.includes('E_SCAN')) return `蓝牙扫描失败。原生返回：${raw}`;
   if (raw.includes('unexpected start-charging reply shape')) {
-    // 桩回 payload 01 = 条件不满足（典型是车未插枪），见 docs/research/xpeng-ble-charging-pile.md §5。
-    return '充电桩拒绝了启动充电（回执 payload=01，常见原因是车辆未插枪）。';
+    // 桩回 payload 01 = 条件不满足。实测已插枪且正在充电时同样回 01，所以不能
+    // 把「未插枪」当唯一或主要原因，见 docs/research/xpeng-ble-charging-pile.md §5。
+    return '充电桩拒绝了启动充电（回执 payload=01：当前条件不满足，桩不细分原因；车已在充电时重复下发也会被拒）。';
   }
   return raw;
 }
@@ -81,9 +84,15 @@ export function ConnectChargerSheet(props: {
   const [, , scheme] = useThemeMode();
   const [pile, setPile] = useState<PileState>({ kind: 'idle' });
   const [chargeText, setChargeText] = useState('可充电');
+  /** 供回调读取最新状态，避免把 pile 放进 useCallback 依赖导致重复建链。 */
+  const pileRef = useRef<PileState>(pile);
+  pileRef.current = pile;
+  /** 握手完成后的会话；关闭弹窗时由 cleanup 释放，不随启动充电释放。 */
+  const live = useRef<Awaited<ReturnType<typeof connectPile>> | null>(null);
+  /** 打开期间只允许一条链路：重复 effect（重渲染）不能重复连接。 */
+  const opening = useRef(false);
 
-  const startCharging = useCallback(async () => {
-    // 已在扫描/握手/已下发时重复点击会自己撞原生 E_BUSY，按钮已 disabled，这里不再加守卫。
+  const connect = useCallback(async () => {
     setPile({ kind: 'searching' });
     setChargeText('正在扫描充电桩');
     try {
@@ -115,25 +124,69 @@ export function ConnectChargerSheet(props: {
       const name = found.name ?? '充电桩';
       setPile({ kind: 'connecting', name, mac: found.mac });
       setChargeText('正在握手');
-      const { startCharging: runStartCharging, transport } = await connectPile(found.mac);
-      try {
-        await runStartCharging();
-        setPile({ kind: 'charging', name, mac: found.mac });
-        setChargeText('已下发启动充电');
-      } finally {
-        // 一次会话一条链路：启动充电完成后释放，避免占着电台影响车辆数字钥匙。
-        await transport.disconnect().catch(() => {});
-      }
+      const handshake = await connectPile(found.mac);
+      live.current = handshake;
+      // 桩侧断链不会走任何 promise：不监听就会一直显示「已连接」。
+      handshake.transport.onDrop((reason) => {
+        live.current = null;
+        setPile({ kind: 'error', message: `充电桩连接已断开：${reason}` });
+        setChargeText('连接已断开');
+      });
+      setPile({ kind: 'connected', name, mac: found.mac });
+      setChargeText('已连接充电桩');
     } catch (error) {
       setPile({ kind: 'error', message: explain(error) });
-      setChargeText('启动失败');
+      setChargeText('连接失败');
     }
   }, []);
 
-  const name = pile.kind === 'connecting' || pile.kind === 'charging' ? pile.name : '—';
-  const mac = pile.kind === 'connecting' || pile.kind === 'charging' ? pile.mac : '—';
-  const connected = pile.kind === 'charging';
-  const busy = pile.kind === 'searching' || pile.kind === 'connecting';
+  /** 启动充电与连接解耦：只有握手完成的会话才能下发。 */
+  const startCharging = useCallback(async () => {
+    const session = live.current;
+    if (!session) return;
+    const current = pileRef.current;
+    if (current.kind !== 'connected' && current.kind !== 'started') return;
+    setPile({ kind: 'starting', name: current.name, mac: current.mac });
+    setChargeText('正在下发启动充电');
+    try {
+      await session.startCharging();
+      setPile({ kind: 'started', name: current.name, mac: current.mac });
+      setChargeText('已下发启动充电');
+    } catch (error) {
+      setChargeText('启动失败');
+      setPile({ kind: 'error', message: explain(error) });
+    }
+  }, []);
+
+  // 打开即自动连接，关闭即释放：原生模块同一时刻只允许一条 GATT。
+  useEffect(() => {
+    if (!visible) return;
+    if (opening.current) return;
+    opening.current = true;
+    void connect();
+    return () => {
+      opening.current = false;
+      const session = live.current;
+      live.current = null;
+      if (session) void session.transport.disconnect().catch(() => {});
+    };
+  }, [visible, connect]);
+
+  /** 连接失败后没有别的入口，必须能就地重试（关闭再开等于重来一次）。 */
+  const retry = useCallback(() => {
+    if (opening.current) return;
+    opening.current = true;
+    void connect();
+  }, [connect]);
+
+  const named = pile.kind === 'connecting' || pile.kind === 'connected'
+    || pile.kind === 'starting' || pile.kind === 'started' ? pile : null;
+  const name = named?.name ?? '—';
+  const mac = named?.mac ?? '—';
+  const connected = pile.kind === 'connected' || pile.kind === 'started';
+  const busy = pile.kind === 'searching' || pile.kind === 'connecting' || pile.kind === 'starting';
+  /** 握手完成才允许下发启动充电。 */
+  const canStart = connected && !busy;
   /** 原生拒绝的原文要单独占一行可读位置，不能挤在底部那句淡灰小字里。 */
   const failure = pile.kind === 'error' ? pile.message : null;
 
@@ -185,17 +238,25 @@ export function ConnectChargerSheet(props: {
 
           <Pressable
             onPress={startCharging}
-            disabled={busy}
+            disabled={!canStart}
             className="w-full h-[52px] rounded-full bg-primary-container flex-row items-center justify-center gap-2 active:scale-[0.98]"
-            style={busy ? { opacity: 0.5 } : undefined}>
+            style={canStart ? undefined : { opacity: 0.5 }}>
             <Text className="text-[20px] font-icon text-on-primary-fixed">{Icon.bolt}</Text>
             <Text className="text-[16px] font-headline font-semibold text-on-primary-fixed">
-              {busy ? STATE_TEXT[pile.kind] : '启动充电'}
+              {pile.kind === 'starting' ? STATE_TEXT.starting : '启动充电'}
             </Text>
           </Pressable>
 
+          {failure ? (
+            <Pressable
+              onPress={retry}
+              className="w-full h-11 mt-2 rounded-full bg-inset items-center justify-center active:scale-95">
+              <Text className="text-[14px] font-headline font-semibold text-on-surface">重新连接</Text>
+            </Pressable>
+          ) : null}
+
           <Text className="text-center text-[12px] font-body text-on-surface-variant mt-3 mb-2">
-            {failure ? null : '连接后可在车旁启动充电'}
+            {failure ? null : connected ? '充电桩已连接，可在车旁启动充电' : '正在自动连接充电桩'}
           </Text>
 
           {failure ? (
