@@ -47,6 +47,7 @@ class PileNativeTransport implements PileTransport {
   private queue: Uint8Array[] = [];
   private waiters: Array<{ resolve: (value: Uint8Array) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }> = [];
   private subscription: { remove(): void } | null = null;
+  private dropSubscription: { remove(): void } | null = null;
 
   async connect(mac: string, timeoutMs = 15000): Promise<void> {
     this.mac = mac.toUpperCase();
@@ -55,7 +56,23 @@ class PileNativeTransport implements PileTransport {
       if (event.mac.toUpperCase() !== this.mac) return;
       this.push(fromHex(event.hex));
     });
+    // 桩侧或系统主动断链（信号丢失、桩断电）不会通过 promise 暴露：原生只在
+    // `xpeng-ble-disconnect` 上报。不监听的话界面会一直显示「已连接」。
+    this.dropSubscription = this.emitter.addListener('xpeng-ble-disconnect', (value) => {
+      const event = value as unknown as { mac: string; reason: string };
+      if (event.mac.toUpperCase() !== this.mac) return;
+      this.failWaiters(new Error(event.reason));
+      for (const listener of this.dropListeners) listener(event.reason);
+    });
     await bridge.connectProfile(mac, PILE_SERVICE_UUID, null, null, PILE_WRITE_HANDLE, PILE_NOTIFY_HANDLE, false, timeoutMs);
+  }
+
+  /** Link-loss listeners; fired when the GATT link drops outside our control. */
+  private readonly dropListeners = new Set<(reason: string) => void>();
+
+  onDrop(listener: (reason: string) => void): () => void {
+    this.dropListeners.add(listener);
+    return () => { this.dropListeners.delete(listener); };
   }
 
   write(frame: Uint8Array): Promise<void> {
@@ -78,6 +95,9 @@ class PileNativeTransport implements PileTransport {
     this.failWaiters(new Error('pile transport closed'));
     this.subscription?.remove();
     this.subscription = null;
+    this.dropSubscription?.remove();
+    this.dropSubscription = null;
+    this.dropListeners.clear();
     await bridge.disconnect();
   }
 
