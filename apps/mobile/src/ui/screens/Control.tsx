@@ -404,7 +404,11 @@ export function ControlScreen(props: {
               key={id}
               meta={id === 'tailgateOpen'
                 ? { label: tailgateOpen ? '关闭尾门' : '打开尾门', note: '电动尾门', icon: tailgateOpen ? 'garage' : 'sensor_door' }
-                : QUICK_META[id]}
+                : id === 'doorLock'
+                  // 稿 a694：锁止时 lock + 「已锁车」，解锁时 lock_open + 「已解锁」；
+                  // 电光黄图标圈只在解锁态出现（见下面 highlighted）。
+                  ? { label: locked ? '已锁车' : '已解锁', note: '门锁', icon: locked ? 'lock' : 'lock_open' }
+                  : QUICK_META[id]}
               highlighted={(id === 'doorLock' && !locked) || (id === 'tailgateOpen' && tailgateOpen)}
               pending={isPending(id === 'doorLock' ? (locked ? 'door.unlock' : 'door.lock')
                 : id === 'tailgateOpen' ? (tailgateOpen ? 'trunk.close' : 'trunk.open')
