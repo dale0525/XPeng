@@ -4,6 +4,7 @@ import { Modal, Pressable, Text, View, type ViewStyle } from 'react-native';
 import { plateShadow } from '../atoms';
 import { themeVars, useThemeMode } from '../../core/theme';
 import { Icon } from '../icons';
+import { RtmpPlayer } from '../RtmpPlayer';
 import {
   closeRemoteView,
   openRemoteView,
@@ -77,6 +78,12 @@ export function RemoteViewSheet(props: {
   const streaming = pictureText === '已开流' || pictureText === '画面正常';
   /** 失败原文单独留一份：要显示在弹窗正文里，不能只塞进 12px 灰字。 */
   const [errorText, setErrorText] = useState<string | null>(null);
+  /**
+   * 车端开流回执里的 `camera_live_url`（RTMP，带时效 `auth_key`）。它是运行时凭据：
+   * 不落盘、不写日志、不缓存，只在本次弹窗生命周期内交给原生播放器；每次开流/切
+   * 视角回执各给一条新的，关闭弹窗即置空停流。
+   */
+  const [liveUrl, setLiveUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -85,15 +92,16 @@ export function RemoteViewSheet(props: {
     setLinkText('正在初始化');
     setPictureText('正在拉流');
     setErrorText(null);
+    setLiveUrl(null);
     openRemoteView()
       .then((result) => {
         if (!alive) return;
         setLinkOk(result.ok);
         setLinkText(result.ok ? '已连接' : (result.error ?? '下发失败'));
-        // 回执里的 camera_live_url 是运行时凭据：不展示、不落盘、不写日志。
-        // 视频占位区保持占位，也是因为 RN 侧没有可用的视频播放组件。
         setPictureText(result.ok ? '已开流' : '拉流失败');
         setErrorText(result.ok ? null : (result.error ?? '下发失败（无错误文案）'));
+        // 开流成功帧的 msg_content 里带 camera_live_url；拿不到就保持占位，不假装在播。
+        if (result.ok) setLiveUrl(result.echo?.camera_live_url ?? null);
       })
       .catch((e: unknown) => {
         // `carLink.send` 正常返回 CommandResult、不 reject，但包装函数是 async，
@@ -119,6 +127,8 @@ export function RemoteViewSheet(props: {
       .then((result) => {
         setPictureText(result.ok ? '画面正常' : '切换失败');
         setErrorText(result.ok ? null : (result.error ?? '切换失败（无错误文案）'));
+        // 切视角回执带的是新角度的流地址；回执没给地址时沿用当前这条，不把已有画面打断。
+        if (result.ok && result.echo?.camera_live_url) setLiveUrl(result.echo.camera_live_url);
       })
       .catch((e: unknown) => {
         setPictureText('切换失败');
@@ -129,6 +139,7 @@ export function RemoteViewSheet(props: {
   const close = useCallback(() => {
     // 先收弹窗再下发：关流回执要等车端，弹窗不该为此卡在原地。
     setPictureText('正在关闭');
+    setLiveUrl(null);
     void closeRemoteView().catch(() => {});
     onClose();
   }, [onClose]);
@@ -162,10 +173,14 @@ export function RemoteViewSheet(props: {
                 <Text className="text-[12px] font-body font-medium text-white leading-none tracking-wider">实时</Text>
               </View>
             ) : null}
-            <View className="items-center justify-center gap-1.5">
-              <Text className="text-[28px] font-icon text-on-surface-variant">{Icon.videocam}</Text>
-              <Text className="text-[13px] font-body text-on-surface-variant tracking-wide">视频画面</Text>
-            </View>
+            {liveUrl ? (
+              <RtmpPlayer streamUrl={liveUrl} style={{ position: 'absolute', inset: 0 }} />
+            ) : (
+              <View className="items-center justify-center gap-1.5">
+                <Text className="text-[28px] font-icon text-on-surface-variant">{Icon.videocam}</Text>
+                <Text className="text-[13px] font-body text-on-surface-variant tracking-wide">视频画面</Text>
+              </View>
+            )}
           </View>
 
           <View className="mt-[14px] mb-3 flex-row gap-2">
