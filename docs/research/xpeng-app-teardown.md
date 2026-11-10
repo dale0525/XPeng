@@ -764,6 +764,8 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 - 真机逐项点击并用屏幕标题核对物理角度后，四个单路视角的「请求 `cmd_value` → 回执 `camera_type`」为：前 `2 → 1`（默认视角/初始化）、后 `3 → 3`、左 `4 → 5`、右 `5 → 7`。从右视补点左视、从左视切回前视也分别观察到 `camera_type=5` 与 `camera_type=1`；其中补点左视再次精确配对 `4 → 5`。屏幕只有前/后/左/右四个按钮，本车当前界面没有 360、俯视、四宫格或 OMS 入口；其它车型的扩展视角未验。
 - 下行 `st=11` 回 `code:200`，`camera_degree=0.0`，`camera_360` 四路均为 1；开流成功帧带 `camera_live_url`。`camera_status=-2` 仍可开流，不能再据此判「无环视硬件」或「车主权限不足」；`avm_exist=0` 与 `camera_status=-2` 分属不同口径。
 - `camera_live_url` 内容属运行时凭据，不收录。触发式堆取样并非每次都能留住刚发出的 PUBLISH：从右视切回前视的那一次只有屏幕「前视」与 `camera_type=1` 回执，没有完整请求帧；但初始化时 `cmd_value=2 → camera_type=1` 已有全等配对，且 `3/4/5 → 3/5/7` 构成连续映射。静态侧因 360 壳只留下 `CameraType` / `CAMERA_*` 字符串名与方法名，未找到数值常量或 `switchCamera` 实现字节码；资源 id 与枚举名不能替代这些运行时数值证据。
+- 流协议是 **RTMP**：`camera_live_url` 形如 `rtmp://live.xiaopeng.com/xmart/<车机 CDU-ID>?auth_key=<签名>`，每次开流现签、约 2～2.5 小时时效，回执里不带其它播放地址（没有 HLS/FLV 备选）。官方 App 用 WebRTC 库播的也是这一路流；自研端直接用 Media3 ExoPlayer + RTMP 数据源播同一地址即可出画面（2026-11-11 真机验证）。
+- **切视角要在流启动之后发**：开流前发的 `cmd_value=2` 在流尚未启动时不落到编码器上，画面仍是上一次查看时的角度，而回执照样回 `camera_type=1`（回执只反映请求被受理，不反映画面真的换了）。开流成功后补发同一条 `cmd_value=2` 才会切到前视。
 
 **临停**：见 §5.6，`st=9 ct=3` 是动作指令；下电回 10905，上电回 `code:200`。此前把它称作「只读门锁查询」的判断已撤回。
 
@@ -839,7 +841,9 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | `/sso/app/v5/keyAuth/getKeyAuthSwitch` | 钥匙授权开关（本账号 `switchStatus:null`） |
 | `/resource/app/v3/userinfoMask` | 主机 `apps.xiaopeng.com`；当前登录账号**本人**资料：`uid`、`nickName`、`mobile`、`headImg`、`type`（子账号实测 `type:4`） |
 
-**`ownerInfo` 是车主、不是登录人**：`myVehicles[].ownerInfo` 恒为该车车主资料；子账号登录时，它与 `/resource/app/v3/userinfoMask` 返回的登录人资料在 uid、昵称、手机号上都不相同。凡界面要显示「当前登录账号」必须取 `userinfoMask`，不能取 `ownerInfo`。
+**`ownerInfo` 是车主、不是登录人**：`myVehicles[].ownerInfo` 为该车车主资料；子账号登录时，它与 `/resource/app/v3/userinfoMask` 返回的登录人资料在 uid、昵称、手机号上都不相同。凡界面要显示「当前登录账号」必须取 `userinfoMask`，不能取 `ownerInfo`。
+
+**`ownerInfo` 不能用来判车主**：车主本人账号登录时 `ownerInfo` 实测也可能为 `null`（同一响应里 `permissions` 同样为 null），拿 `ownerInfo.uid === 登录人 uid` 判定会把车主本人误判成非车主；子账号反而可能拿到有值的 `ownerInfo`，于是旧判据只在子账号上「碰巧正确」。判车主取 `userinfoMask.type`：车主本人 `1`、被分享子账号 `4`。
 
 **权限与钥匙激活无关**：本账号对这台车的 `permissions.remoteControl` 为 `isPermanent:true`、`expireTime:null`，服务端照常返回 19 项车控能力。数字钥匙未激活只影响 BLE 本地解锁，不影响云端车控。
 
