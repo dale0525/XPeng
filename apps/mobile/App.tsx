@@ -187,7 +187,7 @@ function Shell() {
         title={PAGE_TITLE[tab]}
         vehicleLabel={vehicleLabel}
         online={link === 'online'}
-        bluetoothReady={bluetoothReady}
+        bluetoothState={bluetoothConnected ? 'connected' : bluetoothReady ? 'ready' : 'off'}
         onRefresh={refresh}
       />
 
