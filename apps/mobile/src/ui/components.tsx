@@ -539,25 +539,34 @@ export function PrimaryButton({
 }
 
 
-/** 蓝牙指示点：已连接用状态绿，未连接用中性描边色。 */
-function BluetoothDot({ ready }: { ready: boolean }) {
-  return ready ? (
-    <View className="w-1.5 h-1.5 rounded-full bg-positive" />
-  ) : (
-    <View className="w-1.5 h-1.5 rounded-full bg-outline" />
-  );
+/**
+ * 蓝牙指示点：只有真实 GATT 链路才算已连接（状态绿）；
+ * 数字钥匙材料就绪但没建链路是中性描边色；未就绪时最淡。
+ */
+export type BluetoothState = 'connected' | 'ready' | 'off';
+
+function BluetoothDot({ state }: { state: BluetoothState }) {
+  const color = state === 'connected'
+    ? 'bg-positive'
+    : state === 'ready' ? 'bg-outline' : 'bg-surface-container-highest';
+  return <View className={`w-1.5 h-1.5 rounded-full ${color}`} />;
 }
+const BLUETOOTH_LABEL: Record<BluetoothState, string> = {
+  connected: '已连接',
+  ready: '钥匙已就绪',
+  off: '未连接',
+};
 export function TopBar({
   title,
   vehicleLabel,
   online,
-  bluetoothReady,
+  bluetoothState,
   onRefresh,
 }: {
   title: string;
   vehicleLabel: string;
   online: boolean;
-  bluetoothReady: boolean;
+  bluetoothState: BluetoothState;
   onRefresh: () => void;
 }) {
   return (
@@ -600,9 +609,9 @@ export function TopBar({
               <Text className="text-[13px] font-icon text-on-surface-variant">
                 {Icon.bluetooth}
               </Text>
-              <BluetoothDot ready={bluetoothReady} />
+              <BluetoothDot state={bluetoothState} />
               <Text className="text-[11px] font-body font-medium text-on-surface-variant">
-                {bluetoothReady ? '已连接' : '未连接'}
+                {BLUETOOTH_LABEL[bluetoothState]}
               </Text>
             </View>
           </View>
