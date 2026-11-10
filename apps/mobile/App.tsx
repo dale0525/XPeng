@@ -218,7 +218,10 @@ function Shell() {
             onRemoteView={() => setRemoteViewVisible(true)}
             onSummon={() => setSummonVisible(true)}
             onConnectCharger={() => setChargerVisible(true)}
-            isOwner={profile !== null && vehicle.ownerInfo !== null && vehicle.ownerInfo.uid === profile.uid}
+            // 车主判定不能依赖 myVehicles 的 ownerInfo：真机实测该账号
+            // ownerInfo 恒为 null（子账号反而有值），拿它比对会把车主本人判成非车主。
+            // 用 userinfoMask 的账号类型：车主本人 type=1，被分享子账号 type=4（均实测）。
+            isOwner={profile !== null && profile.type === 1}
           />
         ) : tab === 'status' ? (
           <StatusScreen status={status} bottomInset={108 + insets.bottom} />
