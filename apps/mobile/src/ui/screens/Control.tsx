@@ -11,6 +11,7 @@ import type { CustomCommandId } from './CustomCommandSheet';
 import { carLink } from '../../core/car';
 import { bleLink } from '../../core/ble';
 import { sendVehicleCommand } from '@xpeng/protocol/src/ble-v2-routing';
+import { isP5BleV2Vehicle } from '@xpeng/protocol/src/ble-v2-context';
 import {
   CapsTag,
   Card,
@@ -34,7 +35,8 @@ const COMMAND_DEFS: Record<string, CommandDef> = Object.fromEntries(
 );
 
 const REAL_COMMANDS: Record<CustomCommandId, string | undefined> = {
-  doorLock: 'door.unlock',
+  // 门锁格是状态切换，方向由当前锁止状态决定，见 runQuick。
+  doorLock: undefined,
   remoteUnlock: undefined,
   acOn: 'hvac.on',
   flash: 'light.flash',
@@ -47,6 +49,8 @@ const REAL_COMMANDS: Record<CustomCommandId, string | undefined> = {
   highTempSterilize: 'hvac.highTemp',
   sentinelOn: 'sentinel.on',
   sentinelOff: 'sentinel.off',
+  // 尾门是单个切换键，方向由 runQuick 按当前开合状态决定；线上开/关共用 0x04，
+  // 车端自己按当前状态动作（材料预签 300 条、不带动作参数，research §6.7 + 2026-11-10 复核）。
   tailgateOpen: undefined,
   tempPark: undefined,
 };
@@ -161,7 +165,14 @@ export function ControlScreen(props: {
       setStates((s) => ({ ...s, [def.id]: 'idle' }));
       if (def.id === 'light.flash') setFlashJustFired(false);
     }, 3000);
-    if (result.ok) carLink.readStatus().catch(() => {});
+    // 无论回执成败都回读：BLE 侧回执超时（实测 trunk.open 出现 BLE response timeout）
+    // 或回执 163（车端已执行、官方语义未定）时物理动作都可能已生效，
+    // 回执只说明「有没有收到答复」，不能作为「车有没有动」的判据。
+    // 尾门/车窗这类机械动作要几秒才走完，立刻回读拿到的常是旧状态，所以补一次延迟回读。
+    carLink.readStatus().catch(() => {});
+    setTimeout(() => {
+      carLink.readStatus().catch(() => {});
+    }, 6000);
   }
 
   function runId(id: string) {
@@ -170,6 +181,21 @@ export function ControlScreen(props: {
   }
 
   function runQuick(id: CustomCommandId) {
+    // 门锁格是设计稿里的状态切换按钮：已锁就发解锁，未锁就发锁车。
+    if (id === 'doorLock') {
+      runId(locked ? 'door.unlock' : 'door.lock');
+      return;
+    }
+    // 尾门同上是切换键：当前已开就发关闭，否则发打开（线上两向共用 0x04）。
+    // 只有 DF 车型有已验证的 BLE 路由，其他车型没有 MQTT 兜底，保持明确提示。
+    if (id === 'tailgateOpen') {
+      if (!bleV2) {
+        onUnsupported('电动尾门');
+        return;
+      }
+      runId(tailgateOpen ? 'trunk.close' : 'trunk.open');
+      return;
+    }
     const commandId = REAL_COMMANDS[id];
     if (commandId === undefined) {
       onUnsupported(QUICK_META[id].label);
@@ -196,6 +222,8 @@ export function ControlScreen(props: {
   const ext = i?.ext;
   const seat = i?.seat;
   const locked = d?.driver_door_lock_st === 1;
+  // 只有 DF 车型有已验证的 BLE V2 路由；其他车型的后备箱没有 MQTT 证据，只能如实说不可用。
+  const bleV2 = isP5BleV2Vehicle(vehicle);
   // 远程查看仅车主可用：车控指令按车主权限签发，子账号即使放开入口也会被服务端拒绝，
   // 因此在入口处拦截，点击给「仅车主可用」提示（设计稿不表现权限差异，只做代码拦截）。
   // isOwner 由 App 用「当前登录账号 uid === 车主 uid」判定；资料未取到时按非车主处理。
@@ -219,7 +247,9 @@ export function ControlScreen(props: {
   const solarText = solar === undefined
     ? DASH
     : solar.solarWorkStatus === 1 ? '采光发电中' : '待机';
-  const tailgateOpen = d?.trunk_ajar_st === 1;
+  // `*_ajar_st` 是「未关闭程度」：0=全关，非 0=未关。实测尾门完全打开时 trunk_ajar_st=2、
+  // 关闭时=0（2026-11-10 真机日志），所以判「开着」不能用 `=== 1`。
+  const tailgateOpen = (d?.trunk_ajar_st ?? 0) > 0;
   const tailgateText = d?.trunk_ajar_st === undefined
     ? DASH
     : tailgateOpen ? '已开启' : '已关闭';
@@ -366,8 +396,10 @@ export function ControlScreen(props: {
           {quickCommands.slice(0, 4).map((id) => (
             <QuickAction
               key={id}
-              meta={QUICK_META[id]}
-              highlighted={id === 'flash' && flashJustFired}
+              meta={id === 'tailgateOpen'
+                ? { label: tailgateOpen ? '关闭尾门' : '打开尾门', note: '电动尾门', icon: tailgateOpen ? 'garage' : 'sensor_door' }
+                : QUICK_META[id]}
+              highlighted={(id === 'doorLock' && !locked) || (id === 'tailgateOpen' && tailgateOpen)}
               onPress={() => runQuick(id)}
             />
           ))}
@@ -399,7 +431,7 @@ export function ControlScreen(props: {
             <Pill2
               title="中控门锁"
               note={d === undefined ? '读取中' : locked ? '车辆已锁止' : '车辆未锁止'}
-              onPress={() => runId(locked ? 'door.lock' : 'door.unlock')}
+              onPress={() => runId(locked ? 'door.unlock' : 'door.lock')}
             />
           </View>
           <View className="basis-[48%]">
@@ -408,8 +440,8 @@ export function ControlScreen(props: {
           <View className="basis-[48%]">
             <Pill2
               title={tailgateOpen ? '关闭尾门' : '打开尾门'}
-              note="BLE 直连"
-              onPress={() => onUnsupported('电动尾门')}
+              note={bleV2 ? 'BLE 直连' : '仅 DF 车型'}
+              onPress={() => (bleV2 ? runId(tailgateOpen ? 'trunk.close' : 'trunk.open') : onUnsupported('电动尾门'))}
             />
           </View>
           <View className="basis-[48%]">
