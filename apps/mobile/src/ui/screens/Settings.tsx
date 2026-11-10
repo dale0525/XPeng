@@ -123,7 +123,7 @@ export function SettingsScreen(props: {
           rows={[
             { label: '整车闭锁', value: lockText(status) },
             { label: '五门状态', value: doorsText(status) },
-            { label: '哨兵录像', value: sentinelText(status) },
+            { label: '哨兵影像', value: sentinelText(status) },
             { label: '远程启动只读', value: remoteStartText(status) },
           ]}
         />
@@ -384,8 +384,10 @@ function doorsText(status: VehicleStatus | null): string {
 }
 
 function sentinelText(status: VehicleStatus | null): string {
-  const enabled = status?.instant?.ext?.sentinel_mode_video_enable;
-  return enabled === undefined ? '—' : enabled === 1 ? '已启用' : '已关闭';
+  // 哨兵是否开启只看 `soldier_camera_status`（§5.6）。`sentinel_mode_video_enable` 是「录像使能」，
+  // 车没开哨兵时它仍可能是 1（实测同帧 soldier_camera_status=0 而 video_enable=1）。
+  const enabled = status?.instant?.ext?.soldier_camera_status;
+  return enabled === undefined ? '—' : enabled === 1 ? '已开启' : '已关闭';
 }
 
 function remoteStartText(status: VehicleStatus | null): string {
