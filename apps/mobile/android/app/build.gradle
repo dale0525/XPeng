@@ -151,4 +151,12 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // 远程查看的实时画面是 RTMP（rtmp://live.xiaopeng.com/...，见 docs/research
+    // xpeng-app-teardown.md §5.7）：Media3 ExoPlayer 负责解码，rtmp 数据源把 RTMP
+    // 拉进来。不引 react-native-video：只播一路 RTMP，原生 ViewManager 约 60 行，
+    // 比整库省约 10MB 包体。
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-datasource-rtmp:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
 }

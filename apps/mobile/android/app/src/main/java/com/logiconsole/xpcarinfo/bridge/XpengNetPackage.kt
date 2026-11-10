@@ -10,5 +10,5 @@ class XpengNetPackage : ReactPackage {
         listOf(XpengNetModule(ctx), UpdaterModule(ctx), XpengBleModule(ctx))
 
     override fun createViewManagers(ctx: ReactApplicationContext): List<ViewManager<*, *>> =
-        listOf(CaptchaWebViewManager())
+        listOf(CaptchaWebViewManager(), RtmpPlayerViewManager())
 }
