@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Pressable, ScrollView, Text, View } from 'react-native';
 import { glowStyle, insetWell, plateShadow } from './atoms';
 import { Icon, type IconName } from './icons';
 
@@ -646,3 +647,37 @@ export function ScreenScroll({
 }
 
 export { insetWell, plateShadow, glowStyle };
+
+/** 旋转加载圈：纯 RN Animated 画的圆环，不新增依赖。用在 PendingSpinner 里替换按钮内容。 */
+export function Spinner({ size = 16, color }: { size?: number; color: string }) {
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, { toValue: 1, duration: 800, easing: Easing.linear, useNativeDriver: true }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <Animated.View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 2,
+        borderColor: color,
+        borderTopColor: 'transparent',
+        transform: [{ rotate }],
+      }}
+    />
+  );
+}
+
+/**
+ * 按钮内容替换用的旋转圈：等待车端时把图标与文字整体换掉，而不是盖一层遮罩。
+ * 遮罩会把底色压灰、看着像禁用；换内容则保留按钮原本的尺寸与底色。
+ */
+export function PendingSpinner({ color = '#111214', size = 16 }: { color?: string; size?: number }) {
+  return <Spinner color={color} size={size} />;
+}
