@@ -25,6 +25,8 @@ import {
 } from '../components';
 import { LiveDot, SegmentBar } from '../atoms';
 import { Icon, type IconName } from '../icons';
+import { DARK_COLORS, LIGHT_COLORS } from '../../core/colors';
+import { useThemeMode } from '../../core/theme';
 
 const CAR_IMAGE = require('../../assets/car/d55a.png');
 const DASH = '—';
@@ -132,21 +134,32 @@ export function ControlScreen(props: {
   const [states, setStates] = useState<Record<string, Outcome>>({});
   const [temp, setTemp] = useState<number | null>(null);
   const [bleState, setBleState] = useState(bleLink.uiState);
-  const waterOpacity = useRef(new Animated.Value(0.28)).current;
+  // 充电水面波浪：稿子只有一条几乎看不出的 subtleWave，用户要求做成能看出来的「波浪曲线」。
+  // 做法：一排细条按正弦函数起伏拼出波浪顶边，相位用循环 Animated.Value 当节拍驱动横向流动。
+  const wavePhase = useRef(new Animated.Value(0)).current;
+  // 卡片高度是 min-h 撑出来的（非定值），Yoga 里父容器百分比高度会解析成 0，
+  // 所以水面高度必须按实测高度换算成像素，不能直接用 `74%`。
+  const [heroHeight, setHeroHeight] = useState(0);
+  // 波浪相位 0→1（一个周期 3s），每帧写进渲染状态供正弦计算用。
+  const [renderClock, setRenderClock] = useState(0);
   /** 闪灯只响应一段时间：点过后 2.4 秒内才显示已响应态，与 run() 的回落时长一致。 */
   const [flashJustFired, setFlashJustFired] = useState(false);
 
   useEffect(() => bleLink.subscribe(setBleState), []);
+  // 只有充电时才需要波浪；不充电时别让这个每帧 setState 的节拍空转重渲染整屏。
+  const waveActive = (status?.instant?.charge?.time_to_complete_charge_min ?? 0) > 0;
   useEffect(() => {
+    if (!waveActive) return;
+    const id = wavePhase.addListener(({ value }) => setRenderClock(value));
     const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(waterOpacity, { toValue: 0.45, duration: 2600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(waterOpacity, { toValue: 0.28, duration: 2600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ]),
+      Animated.timing(wavePhase, { toValue: 1, duration: 3000, easing: Easing.linear, useNativeDriver: false }),
     );
     loop.start();
-    return () => loop.stop();
-  }, [waterOpacity]);
+    return () => {
+      loop.stop();
+      wavePhase.removeListener(id);
+    };
+  }, [wavePhase, waveActive]);
 
   async function run(def: CommandDef) {
     setStates((s) => ({ ...s, [def.id]: 'pending' }));
@@ -303,29 +316,77 @@ export function ControlScreen(props: {
 // 拿不到这个值时按未充电处理，宁可少画一次水面，也不能对没充电的车报充电中。
   const chargeMinNum = c?.time_to_complete_charge_min;
   const charging = chargeMinNum !== undefined && chargeMinNum > 0;
-  // 遮罩高度跟 SOC 成比例（50%~100% 映射 18%~90%），让「水面」真的代表电量，而不是固定 48%。
+  // 水面高度直接取 SOC 百分比：绿色波纹覆盖卡片的比例就是充电进度。
+  // 拿不到 SOC 时给一个象征性的三分之一，不假装具体电量。
   const socNum = c?.battery_soc;
-  const waterPercent = socNum === undefined
-    ? 18
-    : Math.max(18, Math.min(90, Math.round(18 + (socNum / 100) * 72)));
+  const waterPercent = socNum === undefined ? 33 : Math.max(0, Math.min(100, socNum));
+  // onLayout 未回填时（首帧）按 380dp 兜底，避免水面高度算成 0 而整层不显示。
+  const heroPx = heroHeight > 0 ? heroHeight : 380;
+  const waterHeight = Math.round(heroPx * waterPercent / 100);
+  // 两种水色：
+  //  · WATER：真正的半透明绿，水体用它，车能从水里透出来；
+  //  · WATER_SOLID：把同一种绿按比例预混进卡片底色 ink 得到的实色，只在「水面那一圈窄带」用，
+  //    这样窄带细条互相重叠也不会 alpha 叠加出竖纹（半透明条重叠正是竖条纹的根因）。
+  const [, , scheme] = useThemeMode();
+  const inkRgb = (scheme === 'dark' ? DARK_COLORS : LIGHT_COLORS)['ink'];
+  const hexToRgb = (hex: string): [number, number, number] => {
+    const h = hex.replace('#', '');
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  };
+  const [inkR, inkG, inkB] = hexToRgb(inkRgb);
+  const [gr, gg, gb] = [18, 206, 134];
+  const WATER = (a: number) => `rgba(${gr},${gg},${gb},${a})`;
+  const WATER_SOLID = (a: number) =>
+    `rgb(${Math.round(inkR + (gr - inkR) * a)},${Math.round(inkG + (gg - inkG) * a)},${Math.round(inkB + (gb - inkB) * a)})`;
   const chargeHeadline = charging ? '充电中' : '未充电';
+  // 波浪参数：一排细条按正弦计算「波浪顶边」高度，相位随 renderClock 推进形成横向流动。
+  const WAVE_BARS = 120;     // 细条数，越多顶边越平滑（台阶不可见）
+  const WAVE_AMP = 16;       // 波峰到波谷的起伏幅度（px）
+  const WAVE_WAVES = 2;      // 整个宽度上出现几个波
 
   return (
     <ScreenScroll bottomInset={bottomInset}>
       {/* ===== 2. Vehicle Hero Main Card —— 照 a694：整卡 bg-ink、rounded-[28px]、p-5、min-h-380 ===== */}
       <Card padded={false} className="bg-ink rounded-[28px] overflow-hidden">
-        <View className="relative min-h-[380px] justify-between p-5">
+        <View className="relative min-h-[380px] justify-between p-5" onLayout={(e) => setHeroHeight(e.nativeEvent.layout.height)}>
           {/* 车图 + 上下压暗遮罩（稿子用 gradient-to-t，RN 无渐变库，用两层半透明黑等价模拟） */}
           <View className="absolute inset-x-0 top-0 items-center justify-center" style={{ bottom: 120 }}>
             <Image source={CAR_IMAGE} className="w-full h-full" resizeMode="contain" />
           </View>
           <View className="absolute inset-x-0 top-0 h-16 bg-ink/70" />
-          <View className="absolute inset-x-0 h-24 bg-ink/70" style={{ bottom: 0 }} />
-          {/* 充电水波纹（稿子：bottom 一条 112px 高、绿色渐隐，只在充电时出现） */}
+          {/* 底部压暗层只在未充电时盖；充电时它会把绿色水面压成接近黑色，等于又把波纹藏起来。 */}
+          {charging ? null : <View className="absolute inset-x-0 h-24 bg-ink/70" style={{ bottom: 0 }} />}
+          {/* 充电水面：绿色波纹覆盖卡片底部的比例=SOC，顶边是流动的正弦波浪（不是直边）。
+              水体是单块半透明绿渐变（单 view 不会有竖纹，车能透出来）；
+              水面那一圈窄带用预混实色细条拼出正弦波峰（实色重叠不加深，故不会出竖条纹）。 */}
           {charging ? (
-            <Animated.View
-              className="absolute bottom-0 left-0 right-0 bg-positive/25"
-              style={{ height: 112, opacity: waterOpacity }} />
+            <View pointerEvents="none" className="absolute inset-x-0 overflow-hidden" style={{ bottom: 0, height: waterHeight + WAVE_AMP + 24 }}>
+              {/* 水体：从波谷线往下铺满到卡片底，半透明绿，向下略微加深 */}
+              <View style={{
+                position: 'absolute', left: 0, right: 0, top: 24 + WAVE_AMP, bottom: 0,
+                experimental_backgroundImage: `linear-gradient(to bottom, ${WATER(0.10)}, ${WATER(0.24)})`,
+              } as unknown as import('react-native').ViewStyle} />
+              {/* 水面波带：每条按 sin 从波峰线往下填一点，用预混实色拼出起伏波峰 */}
+              {Array.from({ length: WAVE_BARS }).map((_, i) => {
+                const t = i / (WAVE_BARS - 1);
+                const crest = (Math.sin(t * Math.PI * 2 * WAVE_WAVES + renderClock * Math.PI * 2) + 1) / 2; // 0..1
+                const crestTop = 24 + (1 - crest) * WAVE_AMP; // 顶端在 24 ~ 24+AMP 间摆动
+                const bandBottom = 24 + WAVE_AMP + 8;          // 波带固定下探到波谷线下方，保证与水体衔接
+                return (
+                  <View key={i} style={{
+                    position: 'absolute',
+                    left: `${t * 100}%`,
+                    width: `${100 / WAVE_BARS + 0.9}%`, // 略宽压住接缝（实色不透明，重叠不变色）
+                    top: crestTop,
+                    height: bandBottom - crestTop,
+                    backgroundColor: WATER_SOLID(0.22),
+                  }}>
+                    {/* 亮绿波峰线，随波起伏 */}
+                    <View style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 3, backgroundColor: WATER_SOLID(0.5) }} />
+                  </View>
+                );
+              })}
+            </View>
           ) : null}
 
           {/* Hero Header：车型名 + 锁止徽章；下方状态迷你标签 */}
