@@ -7,7 +7,7 @@ import com.facebook.react.uimanager.ViewManager
 
 class XpengNetPackage : ReactPackage {
     override fun createNativeModules(ctx: ReactApplicationContext): List<NativeModule> =
-        listOf(XpengNetModule(ctx), UpdaterModule(ctx), XpengBleModule(ctx))
+        listOf(XpengNetModule(ctx), UpdaterModule(ctx), XpengBleModule(ctx), XpengWifiLocationModule(ctx))
 
     override fun createViewManagers(ctx: ReactApplicationContext): List<ViewManager<*, *>> =
         listOf(CaptchaWebViewManager(), RtmpPlayerViewManager())

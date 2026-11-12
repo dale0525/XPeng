@@ -76,4 +76,7 @@ export const StorageKey = {
   lastRefresh: 'session.lastRefresh',
   theme: 'ui.theme',
   quickCommands: 'ui.quickCommands',
+  proximity: 'ui.proximityAutoUnlock',
+  proximityCalibration: 'ui.proximityCalibration',
+  proximitySuppression: 'ui.proximitySuppression',
 } as const;
