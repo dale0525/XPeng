@@ -1551,6 +1551,24 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 | 每条命令前重新握手 | 无会话复用；挑战窗口 2.0–2.5 s（§6.12） |
 | CCCD 先写 `0200` 再握手 | `0x0010 = 0200`，开启 indicate（§6.10） |
 
+**常驻连接（自研端 2026-11 引入，非官方行为）**：把「每条命令建连一次」改成「钥匙物料就绪即持有连接」，省掉建连 + 服务发现 + MTU 协商约 1.2 s 与首连 `133` 重试，**但握手省不掉**——上面「每条命令前重新握手」的约束不变，每条命令仍完整走 `ef0104 → ef0110 → ed1118 → ed118b`。
+
+**关键纠正（2026-11-12 真车实测）：「连上不认证」撑不住常驻。** 只建连、不发握手时，车端每 **4.88–4.93 s** 主动断开（`onClientConnectionState status=19 / GATT_CONN_TERMINATE_PEER_USER`），连续 8 个周期波动 <0.05 s，是固定计时器而非「被别的手机抢连接槽」那种忽快忽慢；与 §1537「假车只声明 INDICATE 时 App 干等 5 秒超时断开」一致。**所以常驻 = 连上立即三段认证 + 周期性重鉴权**。认证材料一次性（`BleV2MaterialService.take()` 每条消息只能用一次、失败不归还，队列耗尽才向服务端补拉），故每轮重鉴权都要重新取一条材料。官方 App 一次 65 分钟抓包里自动重鉴权 31 轮、中位间隔约 127 秒（§1223），即此机制的官方取值；实测把握手放到 `auto:false` 直连之后，连接从「每 5 秒被踢」变为「一次认证后稳定保持约 123 秒」，与官方 ~127 秒重鉴权周期吻合。
+
+**连接层前提：后台连接（`autoConnect=true`）在本机蓝牙栈不可靠。** 实测 `connectDiagnostic`（`autoConnect=true`、45 s）发出后只登记一个「等广播」的后台连接，45 s 内拿不到任何 `onConnectionStateChange`；改走 `connect`（`autoConnect=false`、10 s 前向连接）后，首连偶发 `133`、随即重试即 `status=0` 成功——与原生模块重试逻辑只在 `autoConnect=false` 上验证成功一致。
+
+**官方「靠近自动解闭锁」机制（2026-11-12，静态证据）**：`com.xiaopeng.common.car.ble.ipc.BleService` 跑在独立进程 `:BLE`，由 `ProcessForegroundMonitor` 维持，挂常驻通知「手机钥匙 / 正在运行」（`ble_polling_service_title`、`ble_polling_service_desc_default`=「正在运行」、`ble_polling_service_info`=「手机无感钥匙已启动」）；清单声明 `WAKE_LOCK` 与 `RECEIVE_BOOT_COMPLETED`。判距不是直接换算米数，而是先在「主驾门 1 米 / 后尾门 1 米」做**手动校准**（`AdjustBleByHandActivity`，文案「手机距离主驾门1米」「手机距离后尾门1米」），再按灵敏度档（`PollingSettingActivity`、`desc_polling_sensitivity`）判定；字段名 `pollingIntervalMs`、`pollingUserUnlockDistance`、`scanIntervalDispose`、`keepAliveInterval`。**官方后台是保持连接 + 周期保活**（`keepAliveInterval` 与 §1223 的 ~127 s 重鉴权吻合），不是只扫描。具体阈值/间隔在加密 dex 内，静态取不到，只能在车边标定。
+
+**车端在已有 GATT 连接时不广播（2026-11-12 真车实测）。** 前台持有连接期间，按 `00:60:37:85:B9:D0` 过滤的判距扫描连续 20 轮 `results=0`（连无关设备都收不到），`Connections: 1`；退到后台、`release()` 断开连接后，同一扫描立刻扫到车，`results=1–11`、RSSI 稳定在 `-83…-90 dBm`。因此「前台保持连接」与「后台判距扫描」互斥，不能同时跑；车边标定的阈值必须按「无连接时的广播 RSSI」取，不能用连接期间的信号。另：`SCAN_MODE_LOW_POWER` 在本机实测也能收到结果（02:52 那次 36 条），但为稳妥用 `BALANCED`。
+
+**判距扫描与 GATT 建连争用同一控制器（2026-11-12 真车实测）。** 扫描运行中发起连接直接吃 `133`（`GATT_CONN_FAIL_ESTABLISH`），原生层三次重试都落在同一窗口内全部失败；改为「动作前停扫描、动作后恢复」后同一动作 2.4 s 内成功（`action=unlock ok`）。
+
+**自研端分工（2026-11-12，用户确认）**：前台保持连接；退到后台释放连接、只跑扫描，命中「靠近/离开」才临时连一次、认证、发一条解/闭锁。判距用「进入/离开双阈值 + 停留时间」（滞回挡临界抖动、较长离开停留挡路过误锁）。**不查车锁状态，靠近即解锁、离开即闭锁**（用户明确选择；代价是车本已解锁时仍会重发一次解锁、经过车尾需超过离开停留才闭锁）。后台扫描环的计时必须在原生侧：RN 的 `setTimeout` 在 Activity 后台/息屏时被暂停（见下条），扫描节奏交给 JS 会停摆。
+
+**前台服务只抬进程，不防 CPU 休眠。** 息屏进 Doze 后 RN 的 JS 定时器全停：实测息屏 150 s 内退避重连**一次都没发生**（被踢后 3.5 分钟零重连尝试，拉回前台瞬间恢复）。常驻保活必须在 `connectedDevice` 前台服务里持 `PARTIAL_WAKE_LOCK`（Doze 对超过 10 min 的 wakelock 判失效，需到期前重取），代价是持续唤醒 CPU、耗电增加。
+
+其余会踩的坑：① GATT 客户端只有一个连接槽，常驻会占住它，同车官方 App 的蓝牙钥匙会被挤掉；② 原生模块在 `gatt != null` 时对新连接直接回 `E_BUSY`，常驻期间任何新连接请求都会撞上它；③ 权限被撤销、蓝牙被关掉这类前置条件错误必须单独识别，否则无限退避会变成每 30 s 一次的无效重连；④ 前台服务保活（`connectedDevice` 类型）在 Android 14+ 缺 `BLUETOOTH_CONNECT` 时 `startForeground` 抛 `SecurityException` 直接崩进程——实测复现，必须在服务里接住并 `stopSelf()`，不能靠调用方先查权限兜底（服务运行期间权限随时可能被撤销）。
+
 ### 6.21 取证手段与边界
 - **`am dumpheap` 绕过 Frida 的 ptrace 保护**：`adb shell am dumpheap <pid> /data/local/tmp/app.hprof` 产出约 82 MB（约 20 秒）。走 `Debug.dumpHprofData` 系统路径，不需要 ptrace，加固壳挡不住。
 - **`TestBleKeyV3Activity` 必须用 root 启动**：`adb shell su -c "am start --user 0 -n com.xiaopeng.mycarinfo/com.xiaopeng.common.car.home.TestBleKeyV3Activity"`。该 Activity 未导出，`shell`（uid 2000）直接启动会报 `SecurityException: not exported from uid 10235`。标题「测试数字钥匙3.0」，9×4 绿色按钮矩阵，覆盖整条 V3 握手与车控链路。九行按钮：① 支持V3 / 启动BLE / 创建钥匙 / 分享钥匙 ② 删除钥匙 / 拉取报文 / 连接蓝牙 / 解锁 ③ 闭锁 / 闪灯 / 开窗 / 关窗 ④ 自标定 / 进入泊车 / 订阅车况 / 泊车心跳 ⑤ 清空报文 / AUTH0_REQ / AUTH0_RSP / AUTH1_REQ ⑥ AUTH1_RSP / RKE_REQ / RKE_RSP / ICCOA=>GOOGLE ⑦ ICCE / 获取钥匙列表 / 清空小米拉活配置 / 获取MAC地址 ⑧ 获取报文数量 / 获取报文 / 开通钥匙账号联登 / 关闭钥匙账号联登 ⑨ 获取联登状态 / 延时杀死主进程 / 延时杀死蓝牙进程 / 当前是否使用应急钥匙。
