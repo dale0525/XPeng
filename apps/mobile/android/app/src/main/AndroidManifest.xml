@@ -4,11 +4,28 @@
     <!-- 应用内更新：下载完 APK 后要拉起系统安装器 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <!-- 读当前连着的 WiFi 名需要它（普通权限、安装即授予）。少了它 connectionInfo 直接抛
+         SecurityException，被判成"读不到"——表现为名单永远不生效。 -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <!-- 定位有两个用处：Android 10 起读 WiFi 名（SSID）被系统当作位置信息，没有定位权限
+         只会拿到 `<unknown ssid>`；以及「哪些地点附近不自动解闭锁」要取一次坐标。两处都
+         只在判距动作发生那一瞬做一次性探测，App 不需要后台常驻取位置，故不申请
+         ACCESS_BACKGROUND_LOCATION。 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 常驻蓝牙连接：退到后台后仍要保活，故用前台服务（Android 14 起必须声明类型） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- 判「哪些地点附近不解锁」要取一次坐标，而判距动作都发生在后台：前台服务必须带
+         location 类型，系统才允许在后台读位置（Android 10 起强制）。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 常驻 BLE 要在熄屏/Doze 下继续跑 JS 重连与重鉴权定时器；前台服务本身不阻止 CPU 挂起。 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
       android:name=".MainApplication"
@@ -31,6 +48,11 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+      <!-- 常驻 BLE：App 退到后台后由前台服务抬住进程，GATT 连接随进程存活 -->
+      <service
+        android:name=".bridge.BleKeepAliveService"
+        android:exported="false"
+        android:foregroundServiceType="connectedDevice|location" />
       <!-- 下载到 cacheDir/updates 的 APK 通过它授权给系统安装器读取 -->
       <provider
         android:name="androidx.core.content.FileProvider"
