@@ -89,6 +89,8 @@ export interface BleV2CommandOptions {
   commandCode: number;
   messageId: number;
   timeoutMs?: number;
+  /** Wait for the car's 0x0070 control ACK. RPA activation (0x03) has none, so it passes false. */
+  expectCommandAck?: boolean;
 }
 
 /**
@@ -309,6 +311,7 @@ async function executeV2(options: BleV2CommandOptions) {
       verifyKey: material.verifyCode.code,
       verifyRandom,
       signal: controller.signal,
+      expectCommandAck: options.expectCommandAck,
       frame: buildV2Command(base64Decode(material.message), options.commandCode, options.messageId),
     });
   } catch (error) {
@@ -377,10 +380,10 @@ async function autoPrepareV2(vehicle: Vehicle): Promise<void> {
   await prepareV2(vehicle.vin);
 }
 
-function executePreparedV2(vin: string, commandCode: number) {
+function executePreparedV2(vin: string, commandCode: number, expectCommandAck = true) {
   const context = contexts.get(activeAccount(), vin);
   if (!context) throw new Error('BLE V2 vehicle context is not prepared');
-  return executeV2({ ...context, commandCode });
+  return executeV2({ ...context, commandCode, expectCommandAck });
 }
 
 /** Automatic preparation is HTTP-only; radio control remains an explicit call. */
@@ -690,5 +693,7 @@ export const bleLink = {
   currentLocation: (maxAgeMs = 120_000, timeoutMs = 8_000) => wifiBridge.currentLocation(maxAgeMs, timeoutMs),
   get foreground() { return appForeground; },
   get proximityEnabled() { return proximityEnabled; },
+  /** 已准备好的车辆 VIN（`prepareV2` 成功后才非空）。召唤会话靠它取 V2 车控上下文。 */
+  currentVin: () => holdTarget?.vin ?? null,
   executeV2,
 };
