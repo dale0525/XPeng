@@ -32,7 +32,18 @@ type BleHandshakeOptions = {
   createAuthCipher?: never;
 });
 
-export type BleCommandOptions = BleHandshakeOptions & { frame: Uint8Array; commandCode: number };
+export type BleCommandOptions = BleHandshakeOptions & {
+  frame: Uint8Array;
+  commandCode: number;
+  /**
+   * Wait for the car's `0x0070` control ACK. Defaults to true.
+   *
+   * RPA activation (commandCode 0x03) has no 0x0070 reply in a full captured
+   * session — the car only answers with 0318/0225 status frames — so that path
+   * passes false. Everything else keeps the ACK contract.
+   */
+  expectCommandAck?: boolean;
+};
 
 export interface BleCommandAck { code: number; commandCode: number }
 
@@ -128,6 +139,12 @@ export class BleSession {
       this.onStage?.('authenticated');
       let ack: BleCommandAck | undefined;
       this.onStage?.('command');
+      if (options.expectCommandAck === false) {
+        // Fire-and-forget: write the frame and return once the write is acknowledged.
+        // No server ACK is waited for — RPA activation has none.
+        await this.transport.write(options.frame);
+        return { commandCode: options.commandCode, code: 200 };
+      }
       await this.exchange(options.frame, (data) => {
         for (let i = 0; i + 10 <= data.length; i += 10) {
           if (data[i] === 0 && data[i + 1] === 0x70) {

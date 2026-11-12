@@ -53,6 +53,18 @@ test('vehicle ACK is returned even when its first byte differs from the sent com
   assert.deepEqual(result, { commandCode: 2, code: 163 });
 });
 
+test('fire-and-forget command writes the frame without waiting for a 0x0070 ACK', async () => {
+  // 直线召唤的激活命令是 0x03：真车整场会话没有 0x0070 控制回执，只有 0318/0225 状态帧。
+  // 若默认等 0070，会把已成功写出的激活帧误报成「回执超时」。
+  const io = new FakeTransport();
+  io.ack = ''; // 保持握手回执，但不回任何 0070 记录
+  const result = await new BleSession(io).execute({ ...options, expectCommandAck: false, timeoutMs: 50 });
+  assert.deepEqual(result, { commandCode: 2, code: 200 });
+  assert.equal(io.writes[3], toHex(command));
+  assert.equal(io.closed, 1);
+  assert.equal(io.data.size, 0);
+});
+
 test('reports operation stages from preparation through disconnection', async () => {
   const io = new FakeTransport();
   const stages: BleStage[] = [];
