@@ -54,6 +54,34 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     private data class Write(val bytes: ByteArray, val promise: Promise)
     private val writes = ArrayDeque<Write>()
     private var writing = false
+    /** 原生侧常驻计时器（重连/重鉴权），见 scheduleKeepAliveTimer。 */
+    private data class KaTimer(val mac: String, val reauth: Boolean, val runnable: Runnable)
+    private val kaTimers = mutableListOf<KaTimer>()
+    /**
+     * 后台判距用的常驻扫描。它的计时也必须在原生侧：息屏进 Doze 后 RN 的
+     * setTimeout 一次都不触发（实测被踢后数分钟零重连），扫描节奏若交给 JS 就会停摆。
+     */
+    private var proximityMac: String? = null
+    private var proximityRssi = 0
+    private var proximityRounds = 0
+    private var proximityAllResults = 0
+    private val proximityCallback = object : ScanCallback() {
+        override fun onScanResult(type: Int, result: ScanResult) { handler.post {
+            if (proximityMac == null) return@post
+            proximityAllResults += 1
+            if (!result.device.address.equals(proximityMac, ignoreCase = true)) return@post
+            // 同一轮里保留最强的一次：车在移动/遮挡变化时 RSSI 抖动大，取最强比取最后一条稳。
+            if (result.rssi > proximityRssi) proximityRssi = result.rssi
+        } }
+        // 扫描失败要主动上报：否则服务静默空转，用户会以为功能开着却从不触发。
+        override fun onScanFailed(code: Int) { handler.post {
+            proximityMac = null
+            scanner2?.stopScan(this); scanner2 = null
+            emit("xpeng-ble-proximity-failed", Arguments.createMap().apply { putInt("code", code) })
+        } }
+    }
+    private var scanner2: BluetoothLeScanner? = null
+    private var proximityTick: Runnable? = null
 
     private fun permissions() = if (Build.VERSION.SDK_INT >= 31)
         arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -378,9 +406,182 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         writes.addLast(Write(bytes, p)); drain()
     } }
     @ReactMethod fun disconnect(p: Promise) { handler.post { close("Disconnected by client"); p.resolve(null) } }
+    /**
+     * 把进程抬到前台服务级别，让 App 退到后台后 GATT 连接与 JS 线程继续存活。
+     *
+     * 只改进程优先级，不碰连接本身：断线与重连由 JS 侧 `BleLink` 负责，
+     * 因为重连要参考账号切换与 UI 状态，那些信息只在 JS 侧。
+     */
+    @ReactMethod fun startKeepAlive(text: String, p: Promise) { handler.post {
+        requestNotificationPermission()
+        try {
+            BleKeepAliveService.start(ctx, text); p.resolve(null)
+        } catch (e: Exception) {
+            p.reject("E_KEEPALIVE", e.message ?: "Cannot start keep-alive service")
+        }
+    } }
+    /**
+     * 只刷新通知文案，不负责拉起服务。
+     *
+     * 拉起前台服务只能在 App 处于前台时做（Android 12 起后台启动会被拒），而连接状态
+     * 变化大多发生在后台。所以启动时机固定在 `startKeepAlive`，这里服务没在跑就什么都不做。
+     */
+    @ReactMethod fun updateKeepAlive(text: String, p: Promise) { handler.post {
+        BleKeepAliveService.update(text); p.resolve(null)
+    } }
+    @ReactMethod fun stopKeepAlive(p: Promise) { handler.post {
+        BleKeepAliveService.stop(ctx); p.resolve(null)
+    } }
+
+    /**
+     * 由原生计时驱动常驻连接的重连/重鉴权。
+     *
+     * 为什么不用 JS 的 `setTimeout`：RN 的定时器走宿主(View)时钟，Activity 退到后台后
+     * `JavaTimerManager` 会暂停它——实测息屏后台时断开事件能到 JS、状态也更新成「重连中」，
+     * 但退避/重鉴权的 `setTimeout` 一次都不触发（被踢后数分钟零重连）。原生 `Handler`
+     * 在前台服务持有 `PARTIAL_WAKE_LOCK` 时主线程消息照常执行，故计时放原生、JS 只响应。
+     *
+     * 这里还顺带用原生刷新通知文案，避免后台只靠 JS 改文案时被同样冻结。
+     */
+    @ReactMethod fun scheduleKeepAliveTimer(mac: String, reauth: Boolean, delayMs: Double, p: Promise) { handler.post {
+        val m = mac.uppercase()
+        clearTimers(m, reauth)
+        val runnable = Runnable {
+            emit(
+                if (reauth) "xpeng-ble-reauth-due" else "xpeng-ble-retry-due",
+                Arguments.createMap().apply { putString("mac", m) },
+            )
+        }
+        handler.postDelayed(runnable, delayMs.toLong().coerceAtLeast(0L))
+        kaTimers.add(KaTimer(m, reauth, runnable))
+        p.resolve(null)
+    } }
+    @ReactMethod fun cancelKeepAliveTimers(p: Promise) { handler.post {
+        kaTimers.forEach { handler.removeCallbacks(it.runnable) }
+        kaTimers.clear()
+        p.resolve(null)
+    } }
+
+    private fun clearTimers(mac: String, reauth: Boolean) {
+        val stale = kaTimers.filter { it.mac == mac && it.reauth == reauth }
+        if (stale.isEmpty()) return
+        stale.forEach { handler.removeCallbacks(it.runnable) }
+        kaTimers.removeAll(stale)
+    }
+
+
+    /**
+     * Android 13 起前台服务的常驻通知要单独授权；没授权服务照样跑，但用户看不到
+     * 通知条，也就不知道连接还在。这里只在启动保活时顺带申请，不参与 `ready()` 门禁。
+     */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        val activity = ctx.currentActivity as? PermissionAwareActivity ?: return
+        activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 9022, PermissionListener { code, _, _ -> code == 9022 })
+    }
+
+    /**
+     * 启动/停止后台判距扫描。
+     *
+     * 用地址过滤 + `SCAN_MODE_LOW_POWER`：低功耗模式下控制器自己按占空比扫，比 JS 反复
+     * start/stop 省电得多。每 `PROXIMITY_WINDOW_MS` 收一次本轮最强 RSSI 并上报，本轮一
+     * 次广播都没收到就报 null（等价"很远"）——车端休眠停播时必须能表达"扫不到"，
+     * 否则人走了它还以为在附近。
+     */
+    @ReactMethod fun startProximityScan(mac: String, p: Promise) {
+      // 必须用块体：`= handler.post{}` 会让 Kotlin 推断返回 Boolean，TurboModule
+      // 解析注解时要求「返回 void 的才可为同步方法」，实测直接崩在模块加载。
+      handler.post {
+        if (!ready(p)) return@post
+        if (adapter?.bluetoothLeScanner == null) { p.reject("E_UNSUPPORTED", "BLE scanning unavailable"); return@post }
+        stopProximityLoop()
+        proximityMac = mac.uppercase()
+        proximityRssi = Int.MIN_VALUE
+        proximityRounds = 0
+        proximityAllResults = 0
+        scanner2 = adapter?.bluetoothLeScanner
+        try {
+            scanner2!!.startScan(
+                listOf(android.bluetooth.le.ScanFilter.Builder().setDeviceAddress(proximityMac).build()),
+                ScanSettings.Builder()
+                    // 不用 LOW_POWER：实测该模式下本机控制器几乎不给回调（连无关设备都是
+                    // results=0），判距永远拿不到 RSSI。BALANCED 的占空比足以判距，
+                    // 又不像 LOW_LATENCY 那样一直满速扫。
+                    .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+                    .build(),
+                proximityCallback,
+            )
+        } catch (e: Exception) {
+            stopProximityLoop()
+            p.reject("E_SCAN", e.message ?: "startProximityScan failed")
+            return@post
+        }
+        p.resolve(null)
+        scheduleProximityTick()
+      }
+    }
+
+    @ReactMethod fun stopProximityScan(p: Promise) { handler.post { stopProximityLoop(); p.resolve(null) } }
+
+    /** 判距链路的可观测性：release 包下 JS 的 console.warn 不进 logcat。 */
+    @ReactMethod fun logProximity(message: String, p: Promise) {
+        android.util.Log.i("XpengBle", "proximity $message")
+        p.resolve(null)
+    }
+
+    private fun scheduleProximityTick() {
+        proximityTick?.let { handler.removeCallbacks(it) }
+        val tick = Runnable {
+            val mac = proximityMac ?: return@Runnable
+            // MIN_VALUE 表示本轮一条广播都没有。
+            val seen = proximityRssi != Int.MIN_VALUE
+            val rssi = if (seen) proximityRssi else null
+            proximityRssi = Int.MIN_VALUE
+            proximityRounds += 1
+            // 判距是本功能唯一的输入，扫不到车与"车很远"在行为上无法区分，真车排障
+            // 只能靠这行：没有它就只能看到"没触发"，看不出是没扫到还是阈值不对。
+            val seenAny = proximityAllResults
+            proximityAllResults = 0
+            android.util.Log.i("XpengBle", "proximity round=$proximityRounds rssi=${rssi ?: "none"} results=$seenAny")
+            emit("xpeng-ble-proximity-rssi", Arguments.createMap().apply {
+                putString("mac", mac)
+                if (rssi == null) putNull("rssi") else putInt("rssi", rssi)
+                putInt("round", proximityRounds)
+            })
+            scheduleProximityTick()
+        }
+        proximityTick = tick
+        handler.postDelayed(tick, PROXIMITY_WINDOW_MS)
+    }
+
+    private fun stopProximityLoop() {
+        proximityMac = null
+        proximityTick?.let { handler.removeCallbacks(it) }; proximityTick = null
+        try { scanner2?.stopScan(proximityCallback) } catch (_: Exception) {}
+        scanner2 = null
+    }
+
     override fun invalidate() {
         handler.post { endScan("Module invalidated"); close("Module invalidated")
+            kaTimers.forEach { handler.removeCallbacks(it.runnable) }; kaTimers.clear()
             permissionPromise?.reject("E_INVALIDATED", "Module invalidated"); permissionPromise = null }
+        stopProximityLoop()
         super.invalidate()
+    }
+
+    private companion object {
+        /**
+         * 判距采样窗口：每 1.5 s 汇总一次本轮最强 RSSI。
+         *
+         * 决策延迟 = (样本数-1) × 窗口 + 停留时间，窗口是唯一能压的项：5 s × 2 + 3 s ≈ 15 s
+         * 实测，用户 2026-11-12 明确嫌慢。降到 1.5 s 后是 1.5 s × 2 + 1.5 s = 4.5 s，
+         * 而"连续 3 轮够强"的安全判据一字未动（真机静态序列最长只能连跑 2 轮，降到 2 轮
+         * 就会误解锁，已用测试钉住）。
+         *
+         * 省电影响很小：扫描模式仍是 BALANCED（控制器自行占空比，与窗口无关），
+         * 变的只是 JS 侧汇总频率——3.5 s 多一次唤醒，相对于每轮扫描本身可忽略。
+         */
+        const val PROXIMITY_WINDOW_MS = 1500L
     }
 }

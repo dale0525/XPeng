@@ -34,6 +34,12 @@ export function SettingsScreen(props: {
   update: UpdateState;
   onCheckUpdate: () => void;
   onDownload: () => void;
+  proximityEnabled: boolean;
+  onProximityChange: (enabled: boolean) => void;
+  thresholds: { nearRssi: number; farRssi: number; calibrated: boolean };
+  onRecalibrate: () => void;
+  suppressionSummary: string;
+  onEditSuppression: () => void;
 }): React.JSX.Element {
   const {
     bottomInset,
@@ -52,6 +58,12 @@ export function SettingsScreen(props: {
     update,
     onCheckUpdate,
     onDownload,
+    proximityEnabled,
+    onProximityChange,
+    thresholds,
+    onRecalibrate,
+    suppressionSummary,
+    onEditSuppression,
   } = props;
 
   /** SOC 进度条必须跟真实电量走；拿不到时停在 0 而不是假装半满。 */
@@ -164,7 +176,41 @@ export function SettingsScreen(props: {
         <CapabilityList labels={CAPABILITY_LABELS} />
       </SettingsCard>
 
-      {/* 8. 通讯与遥测连接 */}
+      {/* 8. 靠近自动解闭锁 */}
+      <SettingsCard className="p-5 gap-[14px]">
+        <CardHeader
+          icon="lock_open"
+          title="靠近自动解闭锁"
+          right={<StatusPill label={proximityEnabled ? '已开启' : '已关闭'} />}
+        />
+        <Text className="text-[12px] font-headline font-normal text-on-surface-variant leading-snug">
+          开启后 App 在后台、锁屏时也会周期扫描车辆蓝牙：靠近自动解锁、离开自动闭锁。手机需保持蓝牙开启。
+        </Text>
+        <View className="flex-row gap-2 mt-1">
+          <ThemePill label="开启" selected={proximityEnabled} onPress={() => onProximityChange(true)} />
+          <ThemePill label="关闭" selected={!proximityEnabled} onPress={() => onProximityChange(false)} />
+        </View>
+        <View className="flex-row items-center justify-between pt-1">
+          <Text className="text-[12px] font-headline font-normal text-on-surface-variant">
+            {thresholds.calibrated
+              ? `解锁约 ${thresholds.nearRssi} dBm · 闭锁约 ${thresholds.farRssi} dBm`
+              : `未标定，暂用默认 ${thresholds.nearRssi}/${thresholds.farRssi} dBm`}
+          </Text>
+          <Pressable onPress={onRecalibrate} className="active:scale-95">
+            <Text className="text-[12px] font-headline font-semibold text-primary">重新标定</Text>
+          </Pressable>
+        </View>
+        <View className="flex-row items-center justify-between pt-1">
+          <Text className="flex-1 text-[12px] font-headline font-normal text-on-surface-variant leading-snug pr-3">
+            {suppressionSummary}
+          </Text>
+          <Pressable onPress={onEditSuppression} className="active:scale-95">
+            <Text className="text-[12px] font-headline font-semibold text-primary">设置例外</Text>
+          </Pressable>
+        </View>
+      </SettingsCard>
+
+      {/* 9. 通讯与遥测连接 */}
       <SettingsCard className="p-5 gap-[14px]">
         <CardHeader icon="hub" title="通讯与遥测连接" />
         <RowList
@@ -183,7 +229,7 @@ export function SettingsScreen(props: {
         <AxisButton label="重新连接" icon="sync" onPress={onReconnect} />
       </SettingsCard>
 
-      {/* 9. 外观与主题 */}
+      {/* 10. 外观与主题 */}
       <SettingsCard className="p-5 gap-[14px]">
         <CardHeader icon="palette" title="外观与主题" />
         <View className="flex-row gap-2 mt-1">
@@ -198,7 +244,7 @@ export function SettingsScreen(props: {
         </View>
       </SettingsCard>
 
-      {/* 10. 关于客户端 */}
+      {/* 11. 关于客户端 */}
       <SettingsCard className="p-5 gap-[14px]">
         <CardHeader icon="info" title="关于客户端" right={<StatusPill label="已最新" />} />
         <View className="w-full py-1">

@@ -5,7 +5,7 @@
  * 切换即可，省掉一整套导航容器。快捷指令配置存在原生 SharedPreferences 里。
  */
 import { useEffect, useMemo, useState } from 'react';
-import { StatusBar, Text, View } from 'react-native';
+import { AppState, StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { carLink, type LinkState } from './src/core/car';
@@ -25,6 +25,9 @@ import { StatusScreen } from './src/ui/screens/Status';
 import { RemoteViewSheet } from './src/ui/screens/RemoteViewSheet';
 import { StraightSummonSheet } from './src/ui/screens/StraightSummonSheet';
 import { ConnectChargerSheet } from './src/ui/screens/ConnectChargerSheet';
+import { ProximityCalibrationSheet } from './src/ui/screens/ProximityCalibrationSheet';
+import { ProximitySuppressionSheet } from './src/ui/screens/ProximitySuppressionSheet';
+import { DEFAULT_SUPPRESSION, parseSuppression, serializeSuppression, type ProximitySuppression } from '@xpeng/protocol/src/proximity-suppression';
 
 const PAGE_TITLE: Record<TabKey, string> = {
   control: '车控',
@@ -66,6 +69,11 @@ function Shell() {
   const [chargerVisible, setChargerVisible] = useState(false);
   const [unsupported, setUnsupported] = useState<string | null>(null);
   const [theme, setTheme, scheme] = useThemeMode();
+  const [proximityEnabled, setProximityEnabled] = useState(false);
+  const [calibrationVisible, setCalibrationVisible] = useState(false);
+  const [suppression, setSuppression] = useState<ProximitySuppression>(DEFAULT_SUPPRESSION);
+  const [suppressionVisible, setSuppressionVisible] = useState(false);
+  const [thresholds, setThresholds] = useState(bleLink.currentThresholds());
   const updater = useUpdater();
 
   useEffect(() => {
@@ -78,6 +86,23 @@ function Shell() {
     native.storageGet(StorageKey.quickCommands)
       .then((saved) => setQuickCommands(parseQuickCommands(saved)))
       .catch(() => {});
+    // 开关状态要恢复：否则每次冷启动都显示"关"，而扫描可能已经按上次设置跑着。
+    native.storageGet(StorageKey.proximityCalibration).then((raw) => {
+      bleLink.applyCalibration(bleLink.parseStoredCalibration(raw));
+      setThresholds(bleLink.currentThresholds());
+    }).catch(() => {});
+    // 例外名单要在判距动作能触发之前就装进运行时，否则冷启动后第一次靠近会按"无例外"执行。
+    native.storageGet(StorageKey.proximitySuppression).then((raw) => {
+      const rules = parseSuppression(raw);
+      bleLink.setSuppression(rules);
+      setSuppression(rules);
+    }).catch(() => {});
+    native.storageGet(StorageKey.proximity).then((saved) => {
+      if (saved !== '1') return;
+      setProximityEnabled(true);
+      // 决策函数自己会看前后台：前台开开关也不会起扫描（车端连上就不广播）。
+      void bleLink.setProximityEnabled(true).catch(() => {});
+    }).catch(() => {});
     return bleLink.subscribe((state) => {
       setBluetoothReady(state.phase === 'ready');
       // `connected` 才是 GATT 链路真实状态（ble.ts 的 uiState 只在
@@ -143,6 +168,44 @@ function Shell() {
     },
     [],
   );
+
+  /**
+   * 前后台分工（用户已确认）：前台保持连接，退到后台释放连接、只跑扫描。
+   * AppState 是唯一可靠的前后台信号；息屏时 RN 定时器会停，这里只做一次性切换。
+   */
+  useEffect(() => {
+    void bleLink.setForeground(true);
+    const sub = AppState.addEventListener('change', (next) => {
+      void bleLink.setForeground(next === 'active');
+    });
+    return () => sub.remove();
+  }, []);
+
+  const toggleProximity = (enabled: boolean) => {
+    setProximityEnabled(enabled);
+    native.storageSet(StorageKey.proximity, enabled ? '1' : '0').catch(() => {});
+    void bleLink.setProximityEnabled(enabled).catch((error) => {
+      console.warn('[shell] 靠近自动解闭锁切换失败:', error instanceof Error ? error.message : String(error));
+    });
+    // 首次打开且还没标定：先让用户到目标距离采一次，否则阈值只能靠猜。
+    if (enabled && !bleLink.calibration) setCalibrationVisible(true);
+  };
+
+  const saveSuppression = (rules: ProximitySuppression) => {
+    bleLink.setSuppression(rules);
+    setSuppression(rules);
+    setSuppressionVisible(false);
+    native.storageSet(StorageKey.proximitySuppression, serializeSuppression(rules)).catch(() => {});
+  };
+
+  const suppressionSummary = (() => {
+    const wifi = suppression.wifiSsids.length;
+    const places = suppression.places.length;
+    if (wifi === 0 && places === 0) return '未设置例外，任何 WiFi 与地点都会触发。';
+    if (wifi > 0 && places > 0) return `已在 ${wifi} 个 WiFi、${places} 个地点附近停用。`;
+    if (wifi > 0) return `已在 ${wifi} 个 WiFi 下停用。`;
+    return `已在 ${places} 个地点附近停用。`;
+  })();
 
   const saveQuickCommands = (ids: CustomCommandId[]) => {
     setQuickCommands(ids);
@@ -243,6 +306,12 @@ function Shell() {
             update={updater.state}
             onCheckUpdate={updater.check}
             onDownload={updater.download}
+            proximityEnabled={proximityEnabled}
+            onProximityChange={toggleProximity}
+            thresholds={thresholds}
+            onRecalibrate={() => setCalibrationVisible(true)}
+            suppressionSummary={suppressionSummary}
+            onEditSuppression={() => setSuppressionVisible(true)}
           />
         )}
       </View>
@@ -266,6 +335,23 @@ function Shell() {
       <ConnectChargerSheet
         visible={chargerVisible}
         onClose={() => setChargerVisible(false)}
+      />
+      <ProximityCalibrationSheet
+        visible={calibrationVisible}
+        current={{ nearRssi: thresholds.nearRssi, farRssi: thresholds.farRssi }}
+        onCancel={() => setCalibrationVisible(false)}
+        onConfirmed={(calibration) => {
+          bleLink.applyCalibration(calibration);
+          native.storageSet(StorageKey.proximityCalibration, bleLink.serializeCalibration(calibration)).catch(() => {});
+          setThresholds(bleLink.currentThresholds());
+          setCalibrationVisible(false);
+        }}
+      />
+      <ProximitySuppressionSheet
+        visible={suppressionVisible}
+        rules={suppression}
+        onCancel={() => setSuppressionVisible(false)}
+        onSave={saveSuppression}
       />
     </View>
   );
