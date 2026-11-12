@@ -1,10 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type * as React from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { plateShadow } from '../atoms';
 import { themeVars, useThemeMode } from '../../core/theme';
 import { Icon } from '../icons';
-import { startSummon, stopSummon, type SummonDirection, type SummonResult } from '../../core/summon';
+import {
+  enterSummon,
+  exitSummon,
+  haltSummon,
+  startSummon,
+  type SummonDirection,
+  type SummonResult,
+} from '../../core/summon';
 
 /** 圆形关闭按钮。 */
 function CloseButton({ onPress }: { onPress: () => void }) {
@@ -54,21 +61,49 @@ export function StraightSummonSheet(props: {
   const { visible, onClose, bluetoothConnected } = props;
   const [, , scheme] = useThemeMode();
   const [pressDir, setPressDir] = useState<SummonDirection | null>(null);
-  /** 真实发帧结果；`SummonResult.unconfirmed` 决定是否显示灰字说明。 */
-  const [summonText, setSummonText] = useState('待命');
+  /** 召唤状态文案。只有激活回执成功才显示「已进入召唤态」。 */
+  const [summonText, setSummonText] = useState('未激活');
   const [note, setNote] = useState<string | null>(null);
-  /** 提示条是错误（原生拒绝）还是仅说明（未进入召唤态）；决定配色。 */
   const [noteIsError, setNoteIsError] = useState(false);
+  /** 车端是否已接受激活帧。没激活时方向键不生效——车不会响应心跳。 */
+  const [armed, setArmed] = useState(false);
 
   function show(result: SummonResult, done: string) {
-    // 状态文案只认「车端是否激活」，不认「帧写出去了没有」：激活帧未实现，
-    // 所以成功发帧也停在「待命」，把真实原因放提示条里，不伪装成召唤成功。
-    setSummonText(result.ok ? (result.activated ? done : '待命') : '发帧失败');
+    // 状态文案跟着**车端是否接受激活**走，不跟「帧写出去了没有」走。
+    setSummonText(result.activated ? done : '未激活');
     setNoteIsError(!result.ok);
-    setNote(result.error ?? result.prerequisite ?? (result.unconfirmed ? result.note : null));
+    setNote(result.ok ? null : result.error ?? null);
   }
 
+  /**
+   * 打开发面板即进入召唤态：官方 App 也是进页面就发那条激活帧。
+   * 关闭时走完整的退出序列（停心跳 + 07 连发），否则心跳会留在后台空转。
+   */
+  useEffect(() => {
+    if (!visible) return;
+    setArmed(false);
+    setSummonText('激活中');
+    setNote(null);
+    setNoteIsError(false);
+    enterSummon((message) => {
+      // 心跳中途断掉：会话已经停产，必须把状态退回「未激活」，
+      // 否则用户松手后界面仍显示「召唤中」，以为车还在受控。
+      setArmed(false);
+      setSummonText('未激活');
+      setNoteIsError(true);
+      setNote(message);
+    }).then((result) => {
+      setArmed(result.activated);
+      show(result, '待命');
+    });
+  }, [visible]);
+
   function press(direction: SummonDirection) {
+    if (!armed) {
+      setNoteIsError(false);
+      setNote('尚未进入召唤态，方向键暂不生效');
+      return;
+    }
     setPressDir(direction);
     startSummon(direction).then((result) => show(result, '召唤中'));
   }
@@ -76,13 +111,14 @@ export function StraightSummonSheet(props: {
   function release() {
     if (pressDir === null) return;
     setPressDir(null);
-    stopSummon().then((result) => show(result, '已停止'));
+    haltSummon().then((result) => show(result, '待命'));
   }
 
   function exit() {
-    if (pressDir !== null) void stopSummon();
     setPressDir(null);
-    onClose();
+    setArmed(false);
+    // 退出要走完整的退出帧序列（停心跳 + 07 连发），不能让界面先关掉。
+    void exitSummon().finally(onClose);
   }
 
   return (
