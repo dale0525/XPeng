@@ -44,6 +44,20 @@ style={{ opacity: countdown > 0 ? 0.5 : 1 }}
 
 然后二分：把可疑处的动态 className 换成固定 class + `style`，重装验证。
 
+## RN 定时器在后台/息屏会停，原生事件不会
+
+Activity 退到后台或被息屏 Doze 后，RN 的 `setTimeout`/`setInterval`（走宿主 View 时钟，`JavaTimerManager` host-pause）**一次都不触发**；但原生 `emit` 出来的事件**仍能送达 JS**（实测后台把连接断开事件送到 JS、通知文案照常改成「正在重连」）。
+
+后果：任何「按固定周期反复做」的逻辑（后台扫描、退避重连、周期重鉴权）**不能靠 JS 定时器驱动**，否则息屏就停摆。正确做法：计时放原生（`Handler.postDelayed`，前台服务持唤醒锁时主线程消息照常执行），到点 `emit` 事件回 JS 执行；JS 只负责响应与重排。
+
+判定：息屏后某定时任务停了，先分清是「JS 定时器被挂起」还是「业务逻辑出错」——加一条与业务无关的原生 `emit` 心跳，若原生事件到了而 JS 定时器没跑，就是前者。
+
+## `@ReactMethod ... = handler.post {}` 会让 App 启动即崩
+
+Kotlin 表达式体 `= handler.post { ... }` 的返回类型被推断成 `Boolean`（`Handler.post` 返回 Boolean）。RN 新架构的 TurboModule 在**模块加载时**解析 `@ReactMethod` 注解，遇到「返回类型不是 void 却当同步方法」直接抛 `ParsingException: Unable to parse @ReactMethod annotations ... assumes returnType == void iff the method is synchronous`，整个 JS 运行时崩掉，表现为启动即闪退、`FATAL EXCEPTION: mqt_v_native`。
+
+规则：`@ReactMethod` 一律用**块体** `fun foo(p: Promise) { handler.post { ... } }`，不要用表达式体包 `handler.post`/`runOnUiThread` 这类返回非 void 的调用。排查手段：`javap -p -classpath ... <Module>` 看方法签名是不是 `void`（应为 `public final void foo(...)`）。
+
 ## 照设计稿抄界面
 
 稿子在 `docs/design/<screenId>.html`，是要被逐像素还原的**唯一依据**。别按描述自己重画样式——按稿子的 class 原样搬，只把硬编码数据换成语义 token 与真实字段。
