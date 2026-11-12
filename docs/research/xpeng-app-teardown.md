@@ -1461,6 +1461,23 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 
 **三套词表的关系**（推论，依据是覆盖面与命名粒度）：`REQ_*` 是业务动作全集（含车型专属 `E28_*`/`H93_*` 与协议控制项）；`BLE_CAR_*` 是已下移到 BLE 通道的子集，粒度更细（车窗十档）但缺滑门/剪刀门/超级锁/拖车钩；`CAR_CTRL_*` 是界面/埋点层动作名，粒度最粗。**三套词表都没有数值**——取值在加密 dex 的常量类静态初始化里（`BleCmdDefine`），native 侧也没有这些名字。这一层必须靠 HCI 抓包补（§9）。抓包时按 `REQ_*` 的名字对照 `type` 字节，命中率高于对着 `BLE_CAR_*`。
 
+#### 6.18a 直线召唤（RPA）会话：激活帧、心跳、退出（2026-11-12 真车实证）
+
+真车 HCI 抓包（无线调试，官方 App 5.19.0 主账号），run `work/ble-capture/20261112-225648-rpa-activate-heartbeat`，覆盖「进 `BleParkActivity` → 按住上箭头约 2 秒 → 松手 → 点退出」。108 条 ATT 写 + 71 条 `0x000f` indication：
+
+| 阶段 | 帧 | 结构字段 | 备注 |
+| --- | --- | --- | --- |
+| 激活召唤态 | `ed 11 8c 00856d6bde 55 03 5850424b5448…` | channel `0xED`、`chunk_len=140`、`tbox_len=133`、外层 `type(messageId)=3`、末尾 `cmd=0x03` | **一条**，进页面后紧跟握手发出；`auth[k+2:k+4]=0x0084`=132 B authData |
+| 待机心跳 | `ef 03 02 00 <cnt>` | 5 字节，`handle 0x000c` | 持续写，counter `00–7f` 回绕 |
+| 前进心跳 | `ef 03 02 01 <cnt>` | 同上，mode `0x01` | 按住上箭头期间；本次 33 帧 |
+| 松手回待机 | `ef 03 02 00 <cnt>` | 同上 | 松手后立刻回 `00` |
+| 退出 | `ef 03 02 07 <cnt>` | 同上，mode `0x07` | **连发 5 帧**后停写 |
+
+- **心跳间隔**：107 帧实测中位 **155.3 ms**、均值 154.9 ms、最大 283.8 ms（最大值是前进段到退出帧间的一次停顿）。
+- **激活没有 `0x0070` 控制回执**：整场会话 `0x000f` indication 的 msgId 只有 `0x0055/0x0225/0x0231/0x02d5/0x02fc/0x0318`，**没有 `0x0070`**。激活后车端回的是 `0x0318`（状态）+ `0x0225` 系列，不是车控结果码。自研客户端因此对这条命令按「写成功即止、不等回执」处理，不能套 `BleSession` 默认的 `0x0070` 等待。
+- **与 §6.18 RPA 常量名对照**：`BLE_CAR_ACTIVE_RPA` 对应 `cmd=0x03`（推断，二者在同一次进入时唯一对应）；`BLE_CAR_EXIT_RPA` 未观察到独立 `0xED` 退出帧，退出只靠 `07` 心跳段（§6.18 三套词表均无数值，此对应仅为命名与行为一致）。
+- **未确认**：一条激活帧消耗材料池 1 行还是 2 行（本次未同时拉 `XpVehicle.db` 计数）；`mode=0x00` 是「待机」还是「停」的官方语义；后退 `0x02` 本次未触发（按住上箭头）。
+
 ### 6.19 错误码
 **上行响应的业务类型全集**（`classes.dex` 全量正则，各 12 与 11 个）：`BLE_RESP_*` = `AUTH_OK`、`AUTH_FAIL`、`CAR_STATUS`、`CAR_SYSTEM_REQ_RESEND_CMD`、`CAR_SYSTEM_WAKE_UP_FAIL`、`CHARGING_STATUS`、`CONTROL_FAIL`、`LOGIN_VEHICLE_EVENT`、`MAIN_DRIVING_STATUS`、`PARK_ERROR`、`PARK_STATUS`、`PASSENGER_SIDE_STATUS`；`BLE_DATA_*` = `CHARGE_UNLOCK`、`COLLECT`、`DISABLE_SDK`、`ENABLE_SDK`、`LOGIN_VEHICLE_RESULT`、`PARK_APA_ACCOUNT`、`PARK_APA_SWITCH`、`PROCESS`、`REQ_DISCONNECT_BLE`、`REQ_LOCATE`、`TBOX_4G_READY`。
 
