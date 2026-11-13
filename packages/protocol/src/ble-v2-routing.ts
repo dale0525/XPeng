@@ -35,6 +35,8 @@ interface SendResult {
   error?: string;
   /** Vehicle acted physically in one capture, but the official result-code meaning is unknown. */
   unconfirmed?: boolean;
+  /** 车根本没在广播：蓝牙这条路当前走不通，不是「连了一下没成」。 */
+  outOfRange?: boolean;
 }
 
 /**
@@ -66,8 +68,11 @@ export async function sendVehicleCommand(
   const ble = await sendOverBle(vehicle, commandCode, links);
   // 蓝牙已把指令送达车端（含 163：车已动作但语义未定），不再重复下发。
   if (ble.ok || ble.unconfirmed) return ble;
-  // 尾门没有云端表达，失败就是失败。
-  if (BLE_ONLY_V2_COMMAND_IDS.includes(def.id as typeof BLE_ONLY_V2_COMMAND_IDS[number])) return ble;
+  // 尾门没有云端表达，失败就是失败。车不在范围内时要把原因说清：那不是「连了一下
+  // 没成」，而是这台车此刻根本没在广播，用户需要知道「靠近车辆才能用」。
+  if (BLE_ONLY_V2_COMMAND_IDS.includes(def.id as typeof BLE_ONLY_V2_COMMAND_IDS[number])) {
+    return ble.outOfRange ? { ...ble, error: '车辆不在蓝牙范围内，该指令只能靠近车辆操作' } : ble;
+  }
   const cloud = await links.send(def);
   if (cloud.ok) return cloud;
   // 两条路都失败时，报告蓝牙失败原因——它更能说明「为什么本地点不了」，云端码只是叠加信息。
@@ -87,6 +92,14 @@ async function sendOverBle(
       ? { ok: false, msgId: '', error: message, unconfirmed: true }
       : { ok: false, msgId: '', error: message };
   } catch (error) {
-    return { ok: false, msgId: '', error: error instanceof Error ? error.message : String(error) };
+    // 车不在蓝牙范围内：这是「车没在广播」，与「建连失败」要分开报，界面据此
+    // 给出「靠近车辆」的提示，而不是一条莫名其妙的连接错误。
+    const outOfRange = error instanceof Error && error.name === 'BleOutOfRangeError';
+    return {
+      ok: false,
+      msgId: '',
+      error: error instanceof Error ? error.message : String(error),
+      outOfRange,
+    };
   }
 }

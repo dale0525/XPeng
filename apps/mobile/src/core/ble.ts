@@ -17,10 +17,13 @@ import { BlePreconditionError, connectPreparedBle, type BleConnectPermissions } 
 
 type BlePermissions = BleConnectPermissions;
 interface BleDevice { mac: string; name: string | null; rssi: number }
+/** 只扫一台目标设备：`targetSeen` 为 false 表示这台车根本没在广播。 */
+interface BleScanTargetResult { targetSeen: boolean; rssi: number | null; total: number }
 interface BleNative {
   permissionStatus(): Promise<BlePermissions>;
   requestPermissions(): Promise<BlePermissions>;
   scan(timeoutMs: number): Promise<BleDevice[]>;
+  scanTarget(mac: string, timeoutMs: number): Promise<BleScanTargetResult>;
   stopScan(): Promise<void>;
   connect(mac: string): Promise<void>;
   connectProfile(
@@ -400,9 +403,60 @@ async function autoPrepareV2(vehicle: Vehicle): Promise<void> {
   await prepareV2(vehicle.vin);
 }
 
-function executePreparedV2(vin: string, commandCode: number, expectCommandAck = true) {
+/**
+ * 车不在蓝牙范围内。
+ *
+ * 与「连上了但握手失败」要区分开：前者说明这台车现在根本没在广播，蓝牙这条路
+ * 走不通，路由应当直接改走云端；后者仍值得在蓝牙上重试。
+ *
+ * 用 `name` 而不是 `instanceof` 跨包传递：路由在 `packages/protocol` 里，不能反向
+ * 依赖 App 的模块，只能按名字认这个错误。
+ */
+export class BleOutOfRangeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BleOutOfRangeError';
+  }
+}
+
+/**
+ * 车在不在蓝牙范围内：扫一眼目标广播，扫不到就别去连。
+ *
+ * 蓝牙连接超时 3 秒，但一次锁车还要算上认证与回执；人已经走远时，这三秒和后面
+ * 那些步骤全是白等。扫描比建连便宜得多（实测 1.5 s 一轮就能覆盖车旁范围），
+ * 而且能明确回答「这台车现在根本没在广播」——那是「走云端」的充分理由，
+ * 与「车在附近但这次握手失败」不是一回事，后者仍值得用蓝牙重试。
+ *
+ * 扫不到不等于一定在范围外（广播是间歇的、人体遮挡也会丢包），所以只在
+ * **连续两轮都没扫到** 时才判定不在范围内；扫到一次就按在范围内处理。
+ */
+async function vehicleInBleRange(mac: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await bridge.scanTarget(mac, 1500);
+      if (result.targetSeen) return true;
+    } catch {
+      // 扫描失败（权限、控制器被占用）不能当成「车不在附近」：那会让车旁的人
+      // 也被推去走云端。返回 true 让调用方照常尝试蓝牙。
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 前台车控入口。先确认车在不在蓝牙范围内，不在就直接抛 `BleOutOfRangeError`
+ * 让路由改走云端，不再花时间做注定失败的建连。
+ *
+ * 只对**临时建连**的场景做这个判断：常驻连接已连着时（`link.connected`）说明
+ * 车就在旁边，没必要多扫一轮。
+ */
+async function executePreparedV2(vin: string, commandCode: number, expectCommandAck = true) {
   const context = contexts.get(activeAccount(), vin);
   if (!context) throw new Error('BLE V2 vehicle context is not prepared');
+  if (!link.connected && !(await vehicleInBleRange(context.mac))) {
+    throw new BleOutOfRangeError('车辆不在蓝牙范围内');
+  }
   return executeV2({ ...context, commandCode, expectCommandAck });
 }
 
