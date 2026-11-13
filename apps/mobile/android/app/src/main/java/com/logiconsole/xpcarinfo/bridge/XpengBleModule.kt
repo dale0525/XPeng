@@ -38,6 +38,15 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     private val kaTimers = mutableListOf<KaTimer>()
 
     /**
+     * 抑制条件（WiFi / 坐标）的复查计时器。
+     *
+     * 抑制必须在扫描之前判定，否则人待在抑制区里也要白跑判距；但抑制条件会自己变化
+     * （走出 WiFi 覆盖、离开那个地点），而后台 JS 定时器不可靠，所以由原生按固定间隔
+     * 通知 JS 重新判定一次，命中就继续不扫，不命中才把扫描拉起来。
+     */
+    private var suppressionTimer: Runnable? = null
+
+    /**
      * 一条 GATT 链路的全部状态。
      *
      * 这些字段 2026-11-13 之前是模块级单例，于是同一时刻只允许一条链路：车辆数字钥匙的
@@ -258,7 +267,9 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         } }
         // 扫描失败要主动上报：否则服务静默空转，用户会以为功能开着却从不触发。
         override fun onScanFailed(code: Int) { handler.post {
+            android.util.Log.i("XpengBle", "proximity scan failed: code=$code")
             proximityMac = null
+            proximityTick?.let { handler.removeCallbacks(it) }; proximityTick = null
             scanner2?.stopScan(this); scanner2 = null
             emit("xpeng-ble-proximity-failed", Arguments.createMap().apply { putInt("code", code) })
         } }
@@ -512,6 +523,30 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         kaTimers.removeAll(stale)
     }
 
+    /**
+     * 抑制复查：按固定间隔通知 JS 重新判定 WiFi / 坐标，命中就继续不扫。
+     *
+     * 间隔取 20 s：抑制条件的真实变化（走出 WiFi 覆盖、离开那个地点）都是分钟级的，
+     * 20 s 足够及时，又不必像判距那样 1.5 s 一轮——抑制期间本来就不该耗电。
+     */
+    @ReactMethod fun scheduleSuppressionTimer(intervalMs: Double, p: Promise) { handler.post {
+        suppressionTimer?.let { handler.removeCallbacks(it) }
+        val runnable = object : Runnable {
+            override fun run() {
+                emit("xpeng-ble-suppression-due", Arguments.createMap())
+                handler.postDelayed(this, intervalMs.toLong().coerceAtLeast(1000L))
+            }
+        }
+        suppressionTimer = runnable
+        handler.postDelayed(runnable, intervalMs.toLong().coerceAtLeast(1000L))
+        p.resolve(null)
+    } }
+    @ReactMethod fun cancelSuppressionTimer(p: Promise) { handler.post {
+        suppressionTimer?.let { handler.removeCallbacks(it) }
+        suppressionTimer = null
+        p.resolve(null)
+    } }
+
 
     /**
      * Android 13 起前台服务的常驻通知要单独授权；没授权服务照样跑，但用户看不到
@@ -538,7 +573,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
       handler.post {
         if (!ready(p)) return@post
         if (adapter?.bluetoothLeScanner == null) { p.reject("E_UNSUPPORTED", "BLE scanning unavailable"); return@post }
-        stopProximityLoop()
+        stopProximityLoop("restart")
         proximityMac = mac.uppercase()
         proximityRssi = Int.MIN_VALUE
         proximityRounds = 0
@@ -556,16 +591,21 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
                 proximityCallback,
             )
         } catch (e: Exception) {
-            stopProximityLoop()
+            stopProximityLoop("start failed")
             p.reject("E_SCAN", e.message ?: "startProximityScan failed")
             return@post
         }
+        android.util.Log.i("XpengBle", "proximity scan start: mac=$proximityMac mode=BALANCED")
         p.resolve(null)
         scheduleProximityTick()
       }
     }
 
-    @ReactMethod fun stopProximityScan(p: Promise) { handler.post { stopProximityLoop(); p.resolve(null) } }
+    /**
+     * 停扫描。`reason` 由 JS 侧给：事后要能分辨是"进前台"、"要建连"还是"被抑制"
+     * 停的，否则只看到扫描断了却不知道是谁断的，排障只能靠猜。
+     */
+    @ReactMethod fun stopProximityScan(reason: String, p: Promise) { handler.post { stopProximityLoop(reason); p.resolve(null) } }
 
     /** 判距链路的可观测性：release 包下 JS 的 console.warn 不进 logcat。 */
     @ReactMethod fun logProximity(message: String, p: Promise) {
@@ -598,11 +638,14 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         handler.postDelayed(tick, PROXIMITY_WINDOW_MS)
     }
 
-    private fun stopProximityLoop() {
+    /** 扫描启停的全部变更都走这里，`reason` 由调用方给，日志里能看出是谁停的。 */
+    private fun stopProximityLoop(reason: String) {
+        val wasRunning = proximityMac != null
         proximityMac = null
         proximityTick?.let { handler.removeCallbacks(it) }; proximityTick = null
         try { scanner2?.stopScan(proximityCallback) } catch (_: Exception) {}
         scanner2 = null
+        if (wasRunning) android.util.Log.i("XpengBle", "proximity scan stop: $reason")
     }
 
     override fun invalidate() {
@@ -610,7 +653,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             links.values.toList().forEach { it.close("Module invalidated") }
             kaTimers.forEach { handler.removeCallbacks(it.runnable) }; kaTimers.clear()
             permissionPromise?.reject("E_INVALIDATED", "Module invalidated"); permissionPromise = null }
-        stopProximityLoop()
+        stopProximityLoop("module invalidated")
         super.invalidate()
     }
 
