@@ -91,6 +91,10 @@ class CarLink {
     this.setState('connecting');
     this.vin = vin;
     this.uid = String(uid);
+    // 每次重连都会重新注册两个原生监听；不先撤掉旧的，回前台重连几次后同一条
+    // 下行会被处理多遍（状态合并重复、pending 被同一 msg_ref 命中两次）。
+    for (const u of this.unsubs) u();
+    this.unsubs = [];
     try {
       const account = await sessionStore.call<MqttAccount>(
         '/biz/v5/mqtt/createMqttAccount/app',
@@ -143,6 +147,26 @@ class CarLink {
     this.unsubs = [];
     await native.mqttDisconnect(CONNECTION_ID).catch(() => {});
     this.setState('idle');
+  }
+
+  /**
+   * 回到前台时补状态。
+   *
+   * 两件事都必须做：系统会在 App 进后台后掐断这条 TLS 长连接（实测断开原因是
+   * socket 层 `software caused connection abort`），后台期间没有任何重连时机；
+   * 即使连接侥幸没断，界面上的车况也是进后台前的旧值——实测「显示已上锁、车其实
+   * 没锁」正是这样来的，用户据此判断车已锁好。所以断线就补连（连接里带一次读状态），
+   * 没断就补读一次状态。
+   */
+  async resume(): Promise<void> {
+    if (!this.vin) return;
+    if (this.state === 'online') {
+      await this.readStatus().catch(() => {});
+      return;
+    }
+    if (this.state === 'connecting') return;
+    xpLog('mqtt', `resume after foreground, previous=${this.state}`);
+    await this.connect(this.vin, Number(this.uid));
   }
 
   /** 下发一条指令并等待回执。默认 20 s 超时（实测车端回执 3–12 s）。 */

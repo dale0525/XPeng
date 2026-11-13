@@ -39,6 +39,9 @@ export function SettingsScreen(props: {
   onProximityChange: (enabled: boolean) => void;
   thresholds: { nearRssi: number; farRssi: number; calibrated: boolean };
   onRecalibrate: () => void;
+  /** 数字钥匙物料是否已就绪。标定要先断开常驻连接去听广播，所以判据是「就绪」而不是「链路持有」。 */
+  bluetoothReady: boolean;
+  onUnsupported: (label: string) => void;
   suppressionSummary: string;
   onEditSuppression: () => void;
 }): React.JSX.Element {
@@ -63,6 +66,8 @@ export function SettingsScreen(props: {
     onProximityChange,
     thresholds,
     onRecalibrate,
+    bluetoothReady,
+    onUnsupported,
     suppressionSummary,
     onEditSuppression,
   } = props;
@@ -197,7 +202,14 @@ export function SettingsScreen(props: {
               ? `解锁约 ${thresholds.nearRssi} dBm · 闭锁约 ${thresholds.farRssi} dBm`
               : `未标定，暂用默认 ${thresholds.nearRssi}/${thresholds.farRssi} dBm`}
           </Text>
-          <Pressable onPress={onRecalibrate} className="active:scale-95">
+          {/* 标定要在车里静置采广播样本：钥匙物料没准备好时它必然采不到值，
+              置灰并说明原因，好过点进去等 30 秒再报「样本不足」。
+              注意判据是「物料就绪」而不是「GATT 是否持有」——标定本身要先断开
+              常驻连接车端才广播（ble.ts startCalibration）。 */}
+          <Pressable
+            onPress={() => (bluetoothReady ? onRecalibrate() : onUnsupported('蓝牙未连接'))}
+            style={bluetoothReady ? undefined : { opacity: 0.45 }}
+            className="active:scale-95">
             <Text className="text-[12px] font-headline font-semibold text-primary">重新标定</Text>
           </Pressable>
         </View>
