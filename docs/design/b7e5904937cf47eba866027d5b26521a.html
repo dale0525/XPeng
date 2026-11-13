@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>车控快捷指令 - 1x4 桌面小组件 (Volt Lime 亮色)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+      font-size: 24px;
+      line-height: 1;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body class="w-full h-screen min-h-[160px] flex items-center justify-center p-3 sm:p-4 bg-transparent select-none">
+
+  <!-- Android 1x4 Widget (640x160 等比横向长条，组件本体) -->
+  <div class="w-full max-w-[640px] h-[136px] bg-[#FFFFFF] border border-[#E5E7EB] rounded-[28px] shadow-[0_4px_20px_rgba(0,0,0,0.04)] px-4 py-3 flex items-center justify-between gap-3 box-border">
+    
+    <!-- 快捷项 1: 解锁 -->
+    <div class="flex-1 h-full rounded-[20px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors duration-150 active:bg-[#F4F4F6]">
+      <div class="w-11 h-11 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] shrink-0">
+        <span class="material-symbols-outlined">lock_open</span>
+      </div>
+      <span class="text-[13px] font-medium text-[#111214] tracking-normal leading-tight">解锁</span>
+    </div>
+
+    <!-- 快捷项 2: 远程解锁 -->
+    <div class="flex-1 h-full rounded-[20px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors duration-150 active:bg-[#F4F4F6]">
+      <div class="w-11 h-11 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] shrink-0">
+        <span class="material-symbols-outlined">vpn_key</span>
+      </div>
+      <span class="text-[13px] font-medium text-[#111214] tracking-normal leading-tight">远程解锁</span>
+    </div>
+
+    <!-- 快捷项 3: 开启空调 -->
+    <div class="flex-1 h-full rounded-[20px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors duration-150 active:bg-[#F4F4F6]">
+      <div class="w-11 h-11 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] shrink-0">
+        <span class="material-symbols-outlined">ac_unit</span>
+      </div>
+      <span class="text-[13px] font-medium text-[#111214] tracking-normal leading-tight">开启空调</span>
+    </div>
+
+    <!-- 快捷项 4: 闪灯 -->
+    <div class="flex-1 h-full rounded-[20px] flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors duration-150 active:bg-[#F4F4F6]">
+      <div class="w-11 h-11 rounded-full bg-[#EDEDEF] flex items-center justify-center text-[#111214] shrink-0">
+        <span class="material-symbols-outlined">highlight</span>
+      </div>
+      <span class="text-[13px] font-medium text-[#111214] tracking-normal leading-tight">闪灯</span>
+    </div>
+
+  </div>
+
+</body>
+</html>
