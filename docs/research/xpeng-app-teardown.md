@@ -1584,7 +1584,7 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 
 **前台服务只抬进程，不防 CPU 休眠。** 息屏进 Doze 后 RN 的 JS 定时器全停：实测息屏 150 s 内退避重连**一次都没发生**（被踢后 3.5 分钟零重连尝试，拉回前台瞬间恢复）。常驻保活必须在 `connectedDevice` 前台服务里持 `PARTIAL_WAKE_LOCK`（Doze 对超过 10 min 的 wakelock 判失效，需到期前重取），代价是持续唤醒 CPU、耗电增加。
 
-其余会踩的坑：① GATT 客户端只有一个连接槽，常驻会占住它，同车官方 App 的蓝牙钥匙会被挤掉；② 原生模块在 `gatt != null` 时对新连接直接回 `E_BUSY`，常驻期间任何新连接请求都会撞上它；③ 权限被撤销、蓝牙被关掉这类前置条件错误必须单独识别，否则无限退避会变成每 30 s 一次的无效重连；④ 前台服务保活（`connectedDevice` 类型）在 Android 14+ 缺 `BLUETOOTH_CONNECT` 时 `startForeground` 抛 `SecurityException` 直接崩进程——实测复现，必须在服务里接住并 `stopSelf()`，不能靠调用方先查权限兜底（服务运行期间权限随时可能被撤销）。
+其余会踩的坑：① Android 侧并不限制一个 App 只持有一条 LE 链路（2026-11-13 K60 真机实测：车辆 `00:60:37:85:B9:E0` 与充电桩 `94:70:6C:44:E3:F4` 两条 GATT 链路同时 `Connections: 1`），限制只来自原生模块自身的单槽实现——该实现已改为按 MAC 管理的连接表，同地址重复才回 `E_BUSY`；② 常驻连接仍会占住**车端**那一个连接槽，同车官方 App 的蓝牙钥匙会被挤掉；③ 权限被撤销、蓝牙被关掉这类前置条件错误必须单独识别，否则无限退避会变成每 30 s 一次的无效重连；④ 前台服务保活（`connectedDevice` 类型）在 Android 14+ 缺 `BLUETOOTH_CONNECT` 时 `startForeground` 抛 `SecurityException` 直接崩进程——实测复现，必须在服务里接住并 `stopSelf()`，不能靠调用方先查权限兜底（服务运行期间权限随时可能被撤销）。
 
 ### 6.21 取证手段与边界
 - **`am dumpheap` 绕过 Frida 的 ptrace 保护**：`adb shell am dumpheap <pid> /data/local/tmp/app.hprof` 产出约 82 MB（约 20 秒）。走 `Debug.dumpHprofData` 系统路径，不需要 ptrace，加固壳挡不住。
