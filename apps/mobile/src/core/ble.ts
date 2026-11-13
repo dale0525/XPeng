@@ -150,6 +150,22 @@ bleEmitter.addListener('xpeng-ble-reauth-due', (value) => {
   pending.run();
 });
 
+/**
+ * 通知条文案只描述「现在实际在跑什么」。
+ *
+ * 之前文案跟着最后一条事件走，于是回前台停掉扫描后没人改它：通知一直挂着
+ * 「靠近自动解闭锁运行中」，而扫描早已停了——用户据此以为功能在跑。这里由状态
+ * 直接推出文案，前后台切换与连接变化都走同一个出口，不会漏。
+ */
+function syncKeepAlive(): void {
+  const text = !appForeground
+    ? '靠近自动解闭锁运行中'
+    : link.connected
+      ? '已连接车辆，蓝牙钥匙保持可用'
+      : '正在连接车辆蓝牙';
+  void bridge.updateKeepAlive(text);
+}
+
 const link = new BleLink(new NativeBleTransport(), authMaterialFor, {
   timers: nativeTimers,
   // 常驻模式下一次操作收尾也会报 disconnected，但那只是会话结束、连接还在，
@@ -158,14 +174,18 @@ const link = new BleLink(new NativeBleTransport(), authMaterialFor, {
   isPermanentError: (error) => error instanceof BlePreconditionError,
   onStateChange: (state) => {
     if (state.kind === 'connected') {
-      void bridge.updateKeepAlive('已连接车辆，蓝牙钥匙保持可用');
+      syncKeepAlive();
     } else if (state.kind === 'backoff') {
-      // 重连期间通知条要说明「正在重连」而不是假装已连接，否则用户会以为功能还在。
-      void bridge.updateKeepAlive('连接已断开，正在重连');
+      // 首次尝试就失败说明「从来没连上」，与「连着又掉了」是两回事：人离车几十米时
+      // 每次都落在前一种，写「已断开」会让用户以为刚才还连着。
+      void bridge.updateKeepAlive(
+        state.attempts <= 1 ? '未发现车辆蓝牙，正在重试' : '连接已断开，正在重连',
+      );
     } else if (state.kind === 'idle') {
       // 后台只扫描时连接本来就不该存在（release 必然报 idle），此时服务是扫描的载体，
       // 停了它后台判距立刻失效、进程也会被当普通后台进程回收。只有开关也关着才停服务。
       if (!proximityEnabled) void bridge.stopKeepAlive();
+      else syncKeepAlive();
     }
     publishState();
   },
@@ -588,6 +608,9 @@ async function setForeground(foreground: boolean): Promise<void> {
       scanRunning = false;
       await bridge.stopProximityScan().catch(() => {});
     }
+    // 停掉扫描后必须立刻改通知：下面 holdLink 只有在真的发起连接时才会触发
+    // onStateChange，物料还没就绪时它什么都不做，通知就会一直挂着「运行中」。
+    syncKeepAlive();
     // 前台恢复连接：用已记下的车辆上下文，没有就不连（还没准备好物料）。
     if (holdTarget) await holdLink(holdTarget.mac);
     return;
