@@ -159,4 +159,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-datasource-rtmp:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+
+    // 链路占位判定（BleLinks）是不依赖 Android 的纯逻辑，放 JVM 单测里跑，
+    // 不必为它拉起模拟器与虚拟 BLE 外设。
+    testImplementation("junit:junit:4.13.2")
 }

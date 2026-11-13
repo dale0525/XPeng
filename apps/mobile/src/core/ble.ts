@@ -36,9 +36,9 @@ interface BleNative {
     autoConnect: boolean,
     timeoutMs: number,
   ): Promise<void>;
-  dumpServices(): Promise<Array<{ service: string; characteristics: Array<{ uuid: string; handle: number; properties: number }> }>>;
-  write(hex: string): Promise<void>;
-  disconnect(): Promise<void>;
+  dumpServices(mac: string): Promise<Array<{ service: string; characteristics: Array<{ uuid: string; handle: number; properties: number }> }>>;
+  write(mac: string, hex: string): Promise<void>;
+  disconnect(mac: string): Promise<void>;
   startKeepAlive(text: string): Promise<void>;
   updateKeepAlive(text: string): Promise<void>;
   stopKeepAlive(): Promise<void>;
@@ -67,8 +67,8 @@ class NativeBleTransport implements BleTransport {
     this.mac = mac.toUpperCase();
     await connectPreparedBle(bridge, mac);
   }
-  write(data: Uint8Array) { return bridge.write(toHex(data)); }
-  disconnect() { return bridge.disconnect(); }
+  write(data: Uint8Array) { return bridge.write(this.mac, toHex(data)); }
+  disconnect() { return bridge.disconnect(this.mac); }
   onData(callback: (data: Uint8Array) => void) {
     const sub = this.emitter.addListener('xpeng-ble-data', (value) => {
       const event = value as unknown as { mac: string; hex: string };
@@ -772,5 +772,7 @@ export const bleLink = {
   get proximityEnabled() { return proximityEnabled; },
   /** 已准备好的车辆 VIN（`prepareV2` 成功后才非空）。召唤会话靠它取 V2 车控上下文。 */
   currentVin: () => holdTarget?.vin ?? null,
+  /** 已准备车辆的 BLE 地址：原生按 MAC 管理链路，写帧必须指明走哪一条。 */
+  currentMac: () => holdTarget?.mac ?? null,
   executeV2,
 };

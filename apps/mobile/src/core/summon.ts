@@ -33,7 +33,7 @@ export interface SummonResult {
 }
 
 interface BleWriteBridge {
-  write(hex: string): Promise<void>;
+  write(mac: string, hex: string): Promise<void>;
 }
 
 const bridge = NativeModules.XpengBle as BleWriteBridge | undefined;
@@ -49,7 +49,9 @@ const session = new RpaSession({
   },
   async write(frame) {
     if (!bridge) throw new Error('未找到原生 BLE 模块（NativeModules.XpengBle 为空）');
-    await bridge.write(toHex(frame));
+    const mac = bleLink.currentMac();
+    if (!mac) throw new Error('没有已准备的车辆：蓝牙钥匙尚未就绪');
+    await bridge.write(mac, toHex(frame));
   },
   startTicker(everyMs, tick) {
     const id = setInterval(tick, everyMs);
