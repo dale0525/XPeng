@@ -13,6 +13,7 @@ import {
 } from '@xpeng/protocol/src/mqtt';
 import { COMMANDS, READ_STATUS, type CommandDef } from '@xpeng/protocol/src/commands';
 import type { MqttAccount, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import { acceptPush, IPUSH_WINDOW_MS } from '@xpeng/protocol/src/status-freshness';
 import { onMqttDisconnect, onMqttMessage, native, xpLog } from './native';
 import { sessionStore } from './session';
 
@@ -43,6 +44,10 @@ class CarLink {
   private rtt: number | null = null;
   /** 最近一次发出 st=19 查询的时刻；主动推送也可能先于回执到达，用它兜住延迟显示。 */
   private statusQueryAt: number | null = null;
+  /** 回执到达后到此刻为止的推送视为过期快照，不回写界面（见 acceptPush）。 */
+  private ignorePushesUntil = 0;
+  /** 已采纳过的推送 `msg_id`。旧报文会被重放第二次，同一个 msg_id 不该再回写。 */
+  private readonly seenPushIds = new Set<string>();
 
   get linkState(): LinkState {
     return this.state;
@@ -225,7 +230,21 @@ class CarLink {
     // 注意是**增量**推送：只带变化的那几个子域（例如开遮阳帘只回 window），
     // 必须合并进上一份状态，直接替换会把 solarRoof / trunkPower / chargeStatistics
     // 这些没推的域清空（实测：点一次遮阳帘，太阳能天窗与电动尾门全变成「—」）。
-    if (content?.instant) {
+    const resolve = this.pending.get(msg.msg_ref);
+
+    // 过期推送：一次 st=19 查询会让车端先推一条查询前的增量快照，再回本次查询的
+    // 完整回执。回执让界面变新，那条迟到的快照随后又把它盖回旧值——实测表现为
+    // 「结束充电后先显示未充电，约 1 秒后又变回充电中」。下行报文没有时间戳，
+    // 无法比较新旧，只能在回执到达后的短窗口里忽略非回执推送。
+    const accepted = acceptPush({
+      isReply: resolve !== undefined,
+      msgId: msg.msg_id,
+      now: Date.now(),
+      ignoreUntil: this.ignorePushesUntil,
+      seen: this.seenPushIds,
+    });
+
+    if (content?.instant && accepted) {
       // 首读状态经常是「推送先到、回执后到」，此时配对不到 msg_id，量不到往返。
       // 用发出查询的时刻兜底，保证设置页的延迟不是恒为「—」。
       if (this.statusQueryAt !== null) {
@@ -237,10 +256,13 @@ class CarLink {
       for (const fn of this.statusListeners) fn(status);
     }
 
-    const resolve = this.pending.get(msg.msg_ref);
     if (!resolve) return;
     this.pending.delete(msg.msg_ref);
     const code = content?.code;
+    // 本次查询的回执是权威快照：开一个短窗口挡掉紧跟着到达的过期推送。
+    // 实测迟到的旧快照在回执后 3.19 s 到达，窗口取 6 s 留余量：这期间不采纳非回执推送，
+    // 界面停在刚查到的权威值上。真正的变化车端会在 6 s 后再推，不会丢。
+    if (content?.instant) this.ignorePushesUntil = Date.now() + IPUSH_WINDOW_MS;
     resolve({
       msgId: msg.msg_ref,
       ok: code === 200 || code === undefined,
