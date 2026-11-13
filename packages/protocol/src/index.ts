@@ -7,6 +7,7 @@ export * from './http.ts';
 export * from './api.ts';
 export * from './session.ts';
 export * from './vehicles.ts';
+export * from './vehicle-model.ts';
 export * from './commands.ts';
 export * from './mqtt.ts';
 

@@ -7,6 +7,7 @@ import {
   type CommandDef,
 } from '@xpeng/protocol/src/commands';
 import type { Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import { vehicleModelLabel } from '@xpeng/protocol/src/vehicle-model';
 import type { CustomCommandId } from './CustomCommandSheet';
 import { carLink } from '../../core/car';
 import { bleLink } from '../../core/ble';
@@ -394,7 +395,7 @@ export function ControlScreen(props: {
             <View>
               <View className="flex-row items-center gap-2">
                 <Text className="text-[18px] font-headline font-semibold text-white tracking-wide">
-                  {vehicle.vehicleTypeName || DASH}
+                  {vehicleModelLabel(vehicle) || DASH}
                 </Text>
                 <View className="flex-row items-center gap-1 rounded-full border border-white/10 bg-white/10 px-2 py-0.5">
                   <View className={locked ? 'w-1.5 h-1.5 rounded-full bg-positive' : 'w-1.5 h-1.5 rounded-full bg-on-surface-variant'} />

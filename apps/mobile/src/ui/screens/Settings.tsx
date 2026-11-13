@@ -1,6 +1,7 @@
 import type * as React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import { vehicleModelLabel } from '@xpeng/protocol/src/vehicle-model';
 import type { LinkState } from '../../core/car';
 import type { SessionState } from '../../core/session';
 import type { ThemeMode } from '../../core/theme';
@@ -94,7 +95,7 @@ export function SettingsScreen(props: {
           <View className="h-[26px] px-3 rounded-full bg-surface border border-hairline flex-row items-center gap-1.5">
             <View className="w-1.5 h-1.5 rounded-full bg-primary-container" />
             <Text className="text-[12px] font-semibold font-headline text-on-surface">
-              {`车辆 ${vehicle.vehicleTypeName || '—'}`}
+              {`车辆 ${vehicleModelLabel(vehicle) || '—'}`}
             </Text>
           </View>
           <View className="px-2.5 py-[3px] rounded-full bg-surface border border-hairline flex-row items-center gap-1.5">
