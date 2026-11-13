@@ -40,6 +40,7 @@ type PileState =
   | { kind: 'connected'; name: string; mac: string }
   | { kind: 'starting'; name: string; mac: string }
   | { kind: 'started'; name: string; mac: string }
+  | { kind: 'stopping'; name: string; mac: string }
   | { kind: 'error'; message: string };
 
 const STATE_TEXT: Record<PileState['kind'], string> = {
@@ -48,7 +49,8 @@ const STATE_TEXT: Record<PileState['kind'], string> = {
   connecting: '握手中',
   connected: '已连接',
   starting: '下发中',
-  started: '已下发',
+  started: '已开始充电',
+  stopping: '结束中',
   error: '失败',
 };
 
@@ -68,10 +70,9 @@ function explain(error: unknown): string {
   if (raw.includes('E_PERMISSION')) return `缺少蓝牙权限。原生返回：${raw}`;
   if (raw.includes('E_BLUETOOTH_OFF')) return `系统蓝牙未开启。原生返回：${raw}`;
   if (raw.includes('E_SCAN')) return `蓝牙扫描失败。原生返回：${raw}`;
-  if (raw.includes('unexpected start-charging reply shape')) {
-    // 桩回 payload 01 = 条件不满足。实测已插枪且正在充电时同样回 01，所以不能
-    // 把「未插枪」当唯一或主要原因，见 docs/research/xpeng-ble-charging-pile.md §5。
-    return '充电桩拒绝了启动充电（回执 payload=01：当前条件不满足，桩不细分原因；车已在充电时重复下发也会被拒）。';
+  if (raw.includes('unexpected command ack payload')) {
+    // 命令回执数据段首字节 00 = 接受、01 = 拒绝。桩不细分拒绝原因。
+    return `充电桩拒绝了这条命令（回执首字节非 00：当前条件不满足，桩不细分原因）。原生返回：${raw}`;
   }
   return raw;
 }
@@ -79,8 +80,13 @@ function explain(error: unknown): string {
 export function ConnectChargerSheet(props: {
   visible: boolean;
   onClose: () => void;
+  /** 启动/结束充电命令成功后触发：由宿主关闭弹窗并刷新一次车辆数据。 */
+  onChargingSettled?: () => void;
 }): React.JSX.Element {
   const { visible, onClose } = props;
+  /** 用 ref 持有，避免把回调塞进 useCallback 依赖导致重复建链。 */
+  const onSettled = useRef(props.onChargingSettled);
+  onSettled.current = props.onChargingSettled;
   const [, , scheme] = useThemeMode();
   const [pile, setPile] = useState<PileState>({ kind: 'idle' });
   const [chargeText, setChargeText] = useState('可充电');
@@ -151,9 +157,31 @@ export function ConnectChargerSheet(props: {
     try {
       await session.startCharging();
       setPile({ kind: 'started', name: current.name, mac: current.mac });
-      setChargeText('已下发启动充电');
+      setChargeText('已开始充电');
+      // 命令已生效：关掉弹窗并让宿主刷新一次车辆数据。
+      onSettled.current?.();
     } catch (error) {
       setChargeText('启动失败');
+      setPile({ kind: 'error', message: explain(error) });
+    }
+  }, []);
+
+  /** 结束充电与启动对称：同一条链路、同一个命令交换。 */
+  const stopCharging = useCallback(async () => {
+    const session = live.current;
+    if (!session) return;
+    const current = pileRef.current;
+    // 连上桩就允许结束：进页面时车可能本就在充（不是本次启动的），桩也不上报状态。
+    if (current.kind !== 'started' && current.kind !== 'connected') return;
+    setPile({ kind: 'stopping', name: current.name, mac: current.mac });
+    setChargeText('正在下发结束充电');
+    try {
+      await session.stopCharging();
+      setPile({ kind: 'connected', name: current.name, mac: current.mac });
+      setChargeText('已结束充电');
+      onSettled.current?.();
+    } catch (error) {
+      setChargeText('结束失败');
       setPile({ kind: 'error', message: explain(error) });
     }
   }, []);
@@ -180,13 +208,18 @@ export function ConnectChargerSheet(props: {
   }, [connect]);
 
   const named = pile.kind === 'connecting' || pile.kind === 'connected'
-    || pile.kind === 'starting' || pile.kind === 'started' ? pile : null;
+    || pile.kind === 'starting' || pile.kind === 'started' || pile.kind === 'stopping' ? pile : null;
   const name = named?.name ?? '—';
   const mac = named?.mac ?? '—';
   const connected = pile.kind === 'connected' || pile.kind === 'started';
-  const busy = pile.kind === 'searching' || pile.kind === 'connecting' || pile.kind === 'starting';
-  /** 握手完成才允许下发启动充电。 */
-  const canStart = connected && !busy;
+  const busy = pile.kind === 'searching' || pile.kind === 'connecting'
+    || pile.kind === 'starting' || pile.kind === 'stopping';
+  /** 握手完成即可下发启动。连上就给两个按钮，已启动后启动键置灰、结束键可用。 */
+  const canStart = pile.kind === 'connected';
+  /** 连上桩就允许结束：App 不知道桩是否已在充电（不轮询桩状态），
+   *  用户常在家充已开启的情况下进来关它。发一条桩会正常应答或拒绝的结束命令，
+   *  比藏掉按钮让人无从操作更合理。 */
+  const canStop = connected;
   /** 原生拒绝的原文要单独占一行可读位置，不能挤在底部那句淡灰小字里。 */
   const failure = pile.kind === 'error' ? pile.message : null;
 
@@ -246,6 +279,18 @@ export function ConnectChargerSheet(props: {
               {pile.kind === 'starting' ? STATE_TEXT.starting : '启动充电'}
             </Text>
           </Pressable>
+
+          {canStop || pile.kind === 'stopping' ? (
+            <Pressable
+              onPress={stopCharging}
+              disabled={busy}
+              className="w-full h-[52px] mt-2 rounded-full bg-inset flex-row items-center justify-center active:scale-[0.98]"
+              style={busy ? { opacity: 0.5 } : undefined}>
+              <Text className="text-[16px] font-headline font-semibold text-on-surface">
+                {pile.kind === 'stopping' ? STATE_TEXT.stopping : '结束充电'}
+              </Text>
+            </Pressable>
+          ) : null}
 
           {failure ? (
             <Pressable

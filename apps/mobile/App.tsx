@@ -340,6 +340,12 @@ function Shell() {
       <ConnectChargerSheet
         visible={chargerVisible}
         onClose={() => setChargerVisible(false)}
+        onChargingSettled={() => {
+          // 命令成功后只关弹窗。车辆数据仍由 MQTT 订阅推送驱动，不强制查询：
+          // 主动 readStatus 会让车端先推一条查询前的旧快照，再回本次查询的完整回执，
+          // 界面会先对后错地翻一次（实测「启动充电后迟迟不变为充电中，重启才正常」）。
+          setChargerVisible(false);
+        }}
       />
       <ProximityCalibrationSheet
         visible={calibrationVisible}
