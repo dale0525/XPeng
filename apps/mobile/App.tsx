@@ -9,6 +9,7 @@ import { AppState, StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { carLink, type LinkState } from './src/core/car';
+import { publishWidgetSnapshot } from './src/core/widget-bridge';
 import { bleLink } from './src/core/ble';
 import { sessionStore, type SessionState } from './src/core/session';
 import { themeVars, useThemeMode } from './src/core/theme';
@@ -151,6 +152,9 @@ function Shell() {
     const unsubStatus = carLink.subscribeStatus((s) => {
       setStatus(s);
       setLatency(carLink.latencyMs);
+      // 2x4 组件要显示的电量与续航：每次拿到新状态就落一份快照并让桌面重画。
+      // 组件的 updatePeriodMillis 是 0（系统最短 30 分钟、不够用），只能靠这里推。
+      void publishWidgetSnapshot(s).catch(() => {});
     });
     return () => {
       alive = false;
