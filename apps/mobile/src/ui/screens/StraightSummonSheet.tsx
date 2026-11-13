@@ -99,6 +99,13 @@ export function StraightSummonSheet(props: {
   }, [visible]);
 
   function press(direction: SummonDirection) {
+    // 方向帧直接写 GATT，蓝牙没连上时车永远收不到；先在这里拦住并说明原因，
+    // 比让用户按住几秒后看到「未进入召唤态」更接近事实。
+    if (!bluetoothConnected) {
+      setNoteIsError(true);
+      setNote('蓝牙未连接，无法发送召唤指令');
+      return;
+    }
     if (!armed) {
       setNoteIsError(false);
       setNote('尚未进入召唤态，方向键暂不生效');

@@ -63,6 +63,14 @@ function Shell() {
    * 「按下去没有反应」这件事藏起来。
    */
   const [bluetoothConnected, setBluetoothConnected] = useState(false);
+  /**
+   * 数字钥匙材料是否已取到（`contextState.kind === 'ready'`）。
+   *
+   * 与 `bluetoothReady`（`phase === 'ready'`）不同：退避重连期间 phase 变成
+   * `backoff`，但材料仍在手、mac 也记着，靠近标定照样能跑。拿 phase 当判据会把
+   * 「人在车边刚被踢掉连接」这种最常见的情形误判成不可标定。
+   */
+  const [materialsReady, setMaterialsReady] = useState(false);
   const [quickCommands, setQuickCommands] = useState<readonly CustomCommandId[]>(DEFAULT_CUSTOM_COMMAND_IDS);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [remoteViewVisible, setRemoteViewVisible] = useState(false);
@@ -109,6 +117,7 @@ function Shell() {
       // `connected` 才是 GATT 链路真实状态（ble.ts 的 uiState 只在
       // authenticating/authenticated/command 三个活跃阶段置 true）。
       setBluetoothConnected(state.connected);
+      setMaterialsReady(bleLink.contextState.kind === 'ready');
     });
   }, []);
 
@@ -178,6 +187,10 @@ function Shell() {
     void bleLink.setForeground(true);
     const sub = AppState.addEventListener('change', (next) => {
       void bleLink.setForeground(next === 'active');
+      // 系统会在进后台后掐断 MQTT 长连接（断开原因实测是 socket 的
+      // "software caused connection abort"）。后台期间没有重连时机，回到前台
+      // 必须补一次，否则用户看到的是「连接断开」而所有云端车控都发不出去。
+      if (next === 'active') void carLink.resume();
     });
     return () => sub.remove();
   }, []);
@@ -255,8 +268,15 @@ function Shell() {
         onRefresh={refresh}
       />
 
-      {link === 'offline' && linkReason ? (
-        <Banner tone="error" text={`连接断开：${linkReason}`} tag="RETRY" />
+      {link === 'offline' && linkReason && vehicle ? (
+        <Banner
+          tone="error"
+          text={`连接断开：${linkReason}`}
+          tag="RETRY"
+          onRetry={() => {
+            void carLink.connect(vehicle.vin, session.session.uid);
+          }}
+        />
       ) : null}
       {unsupported ? (
         <View className="mx-5 mb-2 rounded-box bg-surface-container-highest px-4 py-2.5">
@@ -311,6 +331,8 @@ function Shell() {
             onProximityChange={toggleProximity}
             thresholds={thresholds}
             onRecalibrate={() => setCalibrationVisible(true)}
+            bluetoothReady={materialsReady}
+            onUnsupported={setUnsupported}
             suppressionSummary={suppressionSummary}
             onEditSuppression={() => setSuppressionVisible(true)}
           />
