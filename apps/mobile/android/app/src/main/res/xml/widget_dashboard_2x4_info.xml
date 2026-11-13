@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2x4：4 列 × 2 行（约 360×180dp）
+
+  minWidth/minHeight 是 launcher 分配格位的依据，必须与 targetCell 一致：
+  早期只写了 targetCell 而 minWidth 偏小，桌面按最小尺寸给了 1 列宽的窄条，
+  四格标签全被截成「远…」「开…」（Pixel 4a / Android 13 实测）。
+  updatePeriodMillis 置 0：2x2 与 1x4 没有读数，2x4 的刷新由 App 主动推送。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:minResizeWidth="250dp"
+    android:minResizeHeight="110dp"
+    android:resizeMode="none"
+    android:initialLayout="@layout/widget_dashboard_2x4"
+    android:previewLayout="@layout/widget_dashboard_2x4"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_desc_2x4" />

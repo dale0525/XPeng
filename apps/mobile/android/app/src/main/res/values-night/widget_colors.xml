@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Volt Lime 组件暗色令牌：与亮色共用同一套语义名，只换取值。
+
+  暗色不是把亮色反相：卡片 #1B1D20、发丝描边 #2E3035、格底 #26282C、
+  图标圈 #343537，强调色在暗底上提亮到 #E8E400（稿中实测取值）。
+-->
+<resources>
+    <color name="widget_card_bg">#1B1D20</color>
+    <color name="widget_card_border">#2E3035</color>
+
+    <color name="widget_tile_bg">#26282C</color>
+    <color name="widget_icon_circle_bg">#343537</color>
+
+    <!-- 暗色主读数 #F5F6F7、字段名 #9A9DA3 -->
+    <color name="widget_value">#F5F6F7</color>
+    <color name="widget_label">#9A9DA3</color>
+
+    <color name="widget_track">#26282C</color>
+    <color name="widget_accent">#E8E400</color>
+</resources>

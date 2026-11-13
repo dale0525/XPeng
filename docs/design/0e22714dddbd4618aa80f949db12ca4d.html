@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=640, height=320, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>车控快捷组件 - 2x4 桌面小组件 (Volt Lime 暗色)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            headline: ['Space Grotesk', 'sans-serif'],
+            body: ['Plus Jakarta Sans', 'sans-serif'],
+          },
+          colors: {
+            widget: {
+              card: '#1B1D20',
+              border: '#2E3035',
+              track: '#26282C',
+              slot: '#26282C',
+              circle: '#343537',
+              lime: '#E8E400',
+              text: '#F5F6F7',
+              muted: '#9A9DA3',
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    body {
+      background-color: transparent;
+      width: 640px;
+      height: 320px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+</head>
+<body class="p-0 m-0 select-none">
+  <!-- 2x4 Android Widget Container (640x320) -->
+  <div class="w-[640px] h-[320px] bg-[#1B1D20] rounded-[28px] border border-[#2E3035] p-5 flex flex-col justify-between shadow-2xl relative overflow-hidden">
+    
+    <!-- 上半部分：数据区与车辆展示 -->
+    <div class="flex items-center justify-between gap-3 h-[172px] relative z-10 px-1">
+      
+      <!-- 左侧读数区 -->
+      <div class="flex flex-col justify-between h-full py-1">
+        <!-- 剩余电量 -->
+        <div class="flex flex-col">
+          <span class="text-[#9A9DA3] text-xs font-medium tracking-wide mb-1">剩余电量</span>
+          <div class="flex items-baseline font-headline tabular-nums">
+            <span class="text-4xl font-bold text-[#F5F6F7] leading-none tracking-tight">80</span>
+            <span class="text-base font-semibold text-[#F5F6F7] ml-1.5 opacity-90">%</span>
+          </div>
+          <!-- 细能量条 -->
+          <div class="w-28 h-1 bg-[#26282C] rounded-full mt-2.5 overflow-hidden">
+            <div class="h-full bg-[#E8E400] rounded-full" style="width: 80%;"></div>
+          </div>
+        </div>
+
+        <!-- 续航里程 -->
+        <div class="flex flex-col mt-3">
+          <span class="text-[#9A9DA3] text-xs font-medium tracking-wide mb-1">续航里程</span>
+          <div class="flex items-baseline font-headline tabular-nums">
+            <span class="text-3xl font-bold text-[#F5F6F7] leading-none tracking-tight">420</span>
+            <span class="text-xs font-medium text-[#F5F6F7] ml-1.5 opacity-80">km</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧车辆侧后/侧身视角黑白摄影质感高精矢量渲染 (融进卡片、压低高光) -->
+      <div class="relative flex-1 min-w-0 h-[168px] flex items-center justify-center">
+        <svg viewBox="0 0 460 210" class="w-full h-full object-contain filter drop-shadow-[0_12px_24px_rgba(0,0,0,0.65)]" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <!-- 整体环境地坪柔和阴影 -->
+            <radialGradient id="groundShadow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#000000" stop-opacity="0.85"/>
+              <stop offset="60%" stop-color="#000000" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+            </radialGradient>
+            <!-- 车身低照度暗色微光渐变 -->
+            <linearGradient id="bodyGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#2C2E33"/>
+              <stop offset="45%" stop-color="#1A1B1E"/>
+              <stop offset="100%" stop-color="#0E0F11"/>
+            </linearGradient>
+            <!-- 车顶与腰线高光反射（压低避免过曝） -->
+            <linearGradient id="roofHighlight" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#34373C" stop-opacity="0"/>
+              <stop offset="35%" stop-color="#6E727A" stop-opacity="0.6"/>
+              <stop offset="70%" stop-color="#8B8F97" stop-opacity="0.75"/>
+              <stop offset="100%" stop-color="#3A3D43" stop-opacity="0.1"/>
+            </linearGradient>
+            <!-- 车窗熏黑玻璃渐变 -->
+            <linearGradient id="windowGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="#1E2024"/>
+              <stop offset="100%" stop-color="#0B0C0E"/>
+            </linearGradient>
+            <!-- 轮毂金属渐变 -->
+            <linearGradient id="rimMetal" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#4B4E54"/>
+              <stop offset="50%" stop-color="#242629"/>
+              <stop offset="100%" stop-color="#141517"/>
+            </linearGradient>
+          </defs>
+
+          <!-- 投影 -->
+          <ellipse cx="230" cy="184" rx="205" ry="15" fill="url(#groundShadow)"/>
+
+          <!-- 车身主体轮廓 (流线型电动轿跑侧后/侧面造型) -->
+          <path d="M40 162 C65 163 115 163 140 163 C145 138 170 122 196 122 C222 122 245 138 250 163 L340 163 C345 138 370 122 396 122 C422 122 445 138 450 163 C456 163 458 152 456 142 C452 128 438 116 418 108 C388 98 335 90 285 70 C240 52 185 45 125 54 C80 62 48 85 30 115 C18 135 22 156 40 162 Z" fill="url(#bodyGradient)"/>
+          
+          <!-- 车顶弧线压低高光 (体现质感而不刺眼) -->
+          <path d="M34 114 C52 86 82 64 125 56 C183 47 238 54 282 72 C330 91 382 99 414 109" stroke="url(#roofHighlight)" stroke-width="2" stroke-linecap="round"/>
+
+          <!-- 车门接缝与肌肉雕刻线 -->
+          <path d="M120 78 L128 162" stroke="#25272B" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M228 85 L234 162" stroke="#25272B" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M42 124 C100 118 200 116 310 126 C370 132 425 130 452 136" stroke="#3A3D43" stroke-width="1" stroke-opacity="0.5"/>
+
+          <!-- 车窗区 -->
+          <path d="M110 74 C155 58 205 58 245 70 C270 78 290 88 300 95 L232 95 L118 95 Z" fill="url(#windowGradient)" stroke="#2D3035" stroke-width="1"/>
+          <path d="M68 95 C82 84 98 77 114 74 L122 95 Z" fill="url(#windowGradient)" stroke="#2D3035" stroke-width="1"/>
+          <!-- B柱微光 -->
+          <line x1="172" y1="62" x2="176" y2="95" stroke="#2A2C31" stroke-width="3"/>
+
+          <!-- 后视镜 -->
+          <path d="M102 92 C108 90 120 90 124 94 C122 98 112 100 104 98 Z" fill="#24262A" stroke="#383B41" stroke-width="0.8"/>
+
+          <!-- 尾灯贯穿暗红幽光 (内敛低照度) -->
+          <path d="M22 132 C26 130 38 130 46 132" stroke="#8A1C1C" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+
+          <!-- 前轮组 (右侧) -->
+          <g transform="translate(396, 155)">
+            <!-- 轮胎外圈 -->
+            <circle cx="0" cy="0" r="33" fill="#111214" stroke="#1D1E21" stroke-width="2"/>
+            <!-- 轮毂盘面 -->
+            <circle cx="0" cy="0" r="23" fill="url(#rimMetal)"/>
+            <!-- 细致多幅条轮毂结构 -->
+            <circle cx="0" cy="0" r="7" fill="#0C0D0E" stroke="#3B3E45" stroke-width="1"/>
+            <path d="M0 -22 L0 22 M-22 0 L22 0 M-16 -16 L16 16 M-16 16 L16 -16" stroke="#484B52" stroke-width="1.8" stroke-linecap="round"/>
+            <circle cx="0" cy="0" r="2" fill="#E8E400" opacity="0.8"/>
+          </g>
+
+          <!-- 后轮组 (左侧) -->
+          <g transform="translate(196, 155)">
+            <!-- 轮胎外圈 -->
+            <circle cx="0" cy="0" r="33" fill="#111214" stroke="#1D1E21" stroke-width="2"/>
+            <!-- 轮毂盘面 -->
+            <circle cx="0" cy="0" r="23" fill="url(#rimMetal)"/>
+            <!-- 细致多幅条轮毂结构 -->
+            <circle cx="0" cy="0" r="7" fill="#0C0D0E" stroke="#3B3E45" stroke-width="1"/>
+            <path d="M0 -22 L0 22 M-22 0 L22 0 M-16 -16 L16 16 M-16 16 L16 -16" stroke="#484B52" stroke-width="1.8" stroke-linecap="round"/>
+            <circle cx="0" cy="0" r="2" fill="#E8E400" opacity="0.8"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <!-- 下半部分：操作区（一行 4 个等宽快捷操作） -->
+    <div class="grid grid-cols-4 gap-3 h-[92px] w-full relative z-10">
+      
+      <!-- 快捷格 1：解锁 -->
+      <div class="bg-[#26282C] rounded-[22px] flex flex-col items-center justify-center p-2 transition-transform active:scale-95 cursor-pointer">
+        <div class="w-10 h-10 rounded-full bg-[#343537] flex items-center justify-center mb-1.5 shadow-inner">
+          <span class="material-symbols-outlined text-[#F5F6F7] text-[20px]" style="font-variation-settings: 'wght' 300;">lock_open</span>
+        </div>
+        <span class="text-[#F5F6F7] text-[13px] font-medium leading-tight">解锁</span>
+      </div>
+
+      <!-- 快捷格 2：远程解锁 -->
+      <div class="bg-[#26282C] rounded-[22px] flex flex-col items-center justify-center p-2 transition-transform active:scale-95 cursor-pointer">
+        <div class="w-10 h-10 rounded-full bg-[#343537] flex items-center justify-center mb-1.5 shadow-inner">
+          <span class="material-symbols-outlined text-[#F5F6F7] text-[20px]" style="font-variation-settings: 'wght' 300;">vpn_key</span>
+        </div>
+        <span class="text-[#F5F6F7] text-[13px] font-medium leading-tight">远程解锁</span>
+      </div>
+
+      <!-- 快捷格 3：开启空调 -->
+      <div class="bg-[#26282C] rounded-[22px] flex flex-col items-center justify-center p-2 transition-transform active:scale-95 cursor-pointer">
+        <div class="w-10 h-10 rounded-full bg-[#343537] flex items-center justify-center mb-1.5 shadow-inner">
+          <span class="material-symbols-outlined text-[#F5F6F7] text-[20px]" style="font-variation-settings: 'wght' 300;">ac_unit</span>
+        </div>
+        <span class="text-[#F5F6F7] text-[13px] font-medium leading-tight">开启空调</span>
+      </div>
+
+      <!-- 快捷格 4：闪灯 -->
+      <div class="bg-[#26282C] rounded-[22px] flex flex-col items-center justify-center p-2 transition-transform active:scale-95 cursor-pointer">
+        <div class="w-10 h-10 rounded-full bg-[#343537] flex items-center justify-center mb-1.5 shadow-inner">
+          <span class="material-symbols-outlined text-[#F5F6F7] text-[20px]" style="font-variation-settings: 'wght' 300;">highlight</span>
+        </div>
+        <span class="text-[#F5F6F7] text-[13px] font-medium leading-tight">闪灯</span>
+      </div>
+
+    </div>
+
+  </div>
+</body>
+</html>

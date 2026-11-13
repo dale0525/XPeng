@@ -26,3 +26,7 @@ const App = require('./App').default;
 const appName = require('./app.json').name;
 
 AppRegistry.registerComponent(appName, () => App);
+
+// 桌面组件的无界面任务必须在启动时注册：原生拉起进程时不走界面入口，
+// 只有这里注册过，WidgetHeadlessService 才能按名字找到它。
+require('./src/core/widget-task');

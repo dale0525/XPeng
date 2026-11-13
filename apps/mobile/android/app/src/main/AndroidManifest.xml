@@ -53,6 +53,45 @@
         android:name=".bridge.BleKeepAliveService"
         android:exported="false"
         android:foregroundServiceType="connectedDevice|location" />
+      <!-- 三档桌面组件：各自的 provider 与 appwidget-provider 元数据一一对应 -->
+      <receiver
+        android:name=".widgets.WidgetQuick2x2Provider"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/widget_quick_2x2_info" />
+      </receiver>
+      <receiver
+        android:name=".widgets.WidgetQuick1x4Provider"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/widget_quick_1x4_info" />
+      </receiver>
+      <receiver
+        android:name=".widgets.WidgetDashboard2x4Provider"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent-filter>
+        <meta-data
+          android:name="android.appwidget.provider"
+          android:resource="@xml/widget_dashboard_2x4_info" />
+      </receiver>
+      <!-- 组件上四个按钮的点击都会发到这里，再由它起无界面 JS 任务下发指令 -->
+      <receiver
+        android:name=".widgets.WidgetActionReceiver"
+        android:exported="false" />
+      <!-- 无界面任务：App 进程不在时由它拉起 RN 运行时跑一次下发 -->
+      <service
+        android:name=".widgets.headless.WidgetHeadlessService"
+        android:exported="false" />
       <!-- 下载到 cacheDir/updates 的 APK 通过它授权给系统安装器读取 -->
       <provider
         android:name="androidx.core.content.FileProvider"
