@@ -47,7 +47,7 @@
 - 首次直连常返回 `status=133`（`GATT_CONN_FAILED_ESTABLISHMENT`），底层日志先有 `Le connection completed` 再有 `eatt disconnect cid:0xffff`，是 Android 建立 GATT 通道失败的典型表现，**不是桩侧拒绝服务，也不是「桩释放慢」**。
 - 官方 App 同样吃这个 133：首次 `auto:false` 失败后，关闭并用 `auto:true` 重连，约 37–40 ms 后成功。差别只在**有没有重试**。
 - 自研客户端实现：首次 `auto:false`，遇 133 关闭后隔约 200 ms 用 **`auto:false`** 重连，最多 3 次。选 `auto:false` 而非官方的 `auto:true`，是因为本机栈上 `auto:true` 的后台连接不回调 `onClientConnectionState`（会一路超时），`auto:false` 每次都能正常回调。
-- 次要放大因素：同手机同时连着车辆数字钥匙时，两条 LE 链路更容易让第二条被拆。
+- 车辆数字钥匙链路与桩链路**可以并存**（2026-11-13 K60 真机实测）：车辆常驻连接持有期间，弹窗扫到桩 `XPAC00053413`（`94:70:6C:44:E3:3F`）并完成握手，`dumpsys bluetooth_manager` 的 `GATT Client Map` 同时出现两条 `Connections: 1`——一条对端 `00:60:37:85:B9:D0`（车辆主模块），一条对端桩地址。关闭弹窗后桩链路释放、车辆链路保持。手机侧不存在「只能连一台」的限制，限制此前只来自原生模块的单槽实现。
 - **连接建立后 200 ms 内的断开不要当成握手失败**：`GATT_CONN_OK` 之后紧接 `TERMINATE_LOCAL_HOST` 且发生在数百毫秒量级，多半是客户端自己结束进程（例如探针为验证握手而强杀 App）。归因前先确认当时进程是否还活着，否则会把自身的终止误判为桩侧拒绝。
 
 ## 7. 自研端实现约束
@@ -55,7 +55,7 @@
 - 复用现有 `ble-v2` 车控栈连桩不成立：原生模块 `XpengBleModule.kt` 把四个车辆 UUID 写死为 `ED28` 段，扫描硬编码 `startsWith("XPED")`，桩的 `XPAC…` 进不了结果集；全仓无 CRC16。传输层、单 waiter 超时、写队列、字节工具有部分可复用。
 - 代码：`packages/protocol/src/pile-frame.ts`（帧编解码）、`packages/protocol/src/pile-session.ts`（会话状态机 + `generateHandshakeMaterial`）、`apps/mobile/src/core/pile.ts`（`connectPile` 自动握手，重试在原生层）。
 - **连接与启动充电必须是两个动作**：`connectPile` 只负责扫描 → GATT → 握手，成功即返回持有链路的会话；启动充电是后续按需调用，不能塞进同一条 `try/finally`。早先实现把下发与断开绑在一个流程里，导致「不启动充电就连不上、连上也不会保持」，界面上只剩「未连接/已下发」两态。桩一次会话可复用，无须每次动作重建。
-- **链路生命周期归界面**：弹窗可见即自动连接并保持，关闭才 `disconnect()` 释放；原生模块同一时刻只允许一条 GATT，占着电台会挡住车辆数字钥匙的蓝牙车控，因此不能只连不放。桩侧主动断链不通过任何 promise 暴露，只能靠原生 `xpeng-ble-disconnect` 事件通知界面，否则会一直停在「已连接」。
+- **链路生命周期归界面**：弹窗可见即自动连接并保持，关闭才 `disconnect()` 释放；桩侧主动断链不通过任何 promise 暴露，只能靠原生 `xpeng-ble-disconnect` 事件通知界面，否则会一直停在「已连接」。
 
 ## 8. 仍未闭合
 
