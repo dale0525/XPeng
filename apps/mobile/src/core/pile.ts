@@ -130,14 +130,24 @@ class PileNativeTransport implements PileTransport {
 export async function connectPile(
   mac: string,
   options: { timeoutMs?: number } = {},
-): Promise<{ session: PileSession; transport: PileNativeTransport; startCharging: () => Promise<unknown> }> {
+): Promise<{
+  session: PileSession;
+  transport: PileNativeTransport;
+  startCharging: () => Promise<unknown>;
+  stopCharging: () => Promise<unknown>;
+}> {
   const timeoutMs = options.timeoutMs ?? 15000;
   const transport = new PileNativeTransport();
   try {
     await transport.connect(mac, timeoutMs);
     const session = new PileSession(transport);
     await session.connect(generateHandshakeMaterial());
-    return { session, transport, startCharging: () => session.startCharging() };
+    return {
+      session,
+      transport,
+      startCharging: () => session.startCharging(),
+      stopCharging: () => session.stopCharging(),
+    };
   } catch (error) {
     await transport.disconnect().catch(() => {});
     throw error;
