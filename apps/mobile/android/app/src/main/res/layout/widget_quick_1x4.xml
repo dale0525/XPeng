@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  1x4 组件：一行 4 格的横向长条。
+
+  稿是 640×160 等比长条，4×1 格位在真机上约 320×75dp。四格等宽平铺，除这 4 格
+  不显示任何东西。格间距用 layout_margin——RemoteViews 不允许 inflate `View`。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_card_bg"
+    android:padding="@dimen/widget_card_padding">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+        <LinearLayout
+            android:id="@+id/widget_slot_0"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="0dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_0"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_0"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_0"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/widget_slot_1"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/widget_tile_gap"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_1"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_1"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/widget_slot_2"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/widget_tile_gap"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_2"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_2"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/widget_slot_3"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/widget_tile_gap"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_3"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_3"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
