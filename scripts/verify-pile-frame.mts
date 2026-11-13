@@ -9,8 +9,10 @@ const CAPTURED = {
   connectNotify1: '692922a756036c7e01ee6a96ea',
   connectWrite2: '68503f881ae1eed841eb87ff898b1b70ae8438fc',
   connectNotify2: '694a000a010200160f00eeee1711',
-  startWrite: '68620000291a',
-  startReply: '6961003de1',
+  // Class-3 server-family reports seen in the 2026-11-07 window. NOT the start
+  // command: that is the command-family 7e03… frame (see pile-session.mts).
+  class3Write: '68620000291a',
+  class3Reply: '6961003de1',
   status1: '68a51abf3170001f99',
   ack: '69a1002bb5',
   status2: '68a53ebf3170009e2b',
@@ -30,8 +32,8 @@ test('b1 low five bits equal the payload length and high three bits carry the cl
     ['connectNotify1', 1, 9],
     ['connectWrite2', 2, 16],
     ['connectNotify2', 2, 10],
-    ['startWrite', 3, 2],
-    ['startReply', 3, 1],
+    ['class3Write', 3, 2],
+    ['class3Reply', 3, 1],
     ['status1', 5, 5],
     ['ack', 5, 1],
     ['status2', 5, 5],
@@ -53,7 +55,7 @@ test('role bit separates request from response, not transport direction', () => 
 });
 
 test('start-charging sequence carries no session-derived bytes', () => {
-  for (const name of ['startWrite', 'startReply', 'ack'] as const) {
+  for (const name of ['class3Write', 'class3Reply', 'ack'] as const) {
     const { payload } = parsePileFrame(fromHex(CAPTURED[name]));
     assert.ok(payload.length > 0, name);
     assert.ok(payload.every((byte) => byte === 0), `${name} must be all zero`);
@@ -122,7 +124,7 @@ test('crc16 matches the captured trailing checksums', () => {
 });
 
 test('a corrupted checksum is rejected', () => {
-  const broken = fromHex(CAPTURED.startWrite);
+  const broken = fromHex(CAPTURED.class3Write);
   broken[broken.length - 1] = (broken[broken.length - 1]! ^ 0xff) & 0xff;
   assert.throws(() => parsePileFrame(broken), /CRC mismatch/);
 });

@@ -6,8 +6,10 @@ import {
   PileSessionError,
   START_CHARGE_FRAME,
   STATUS_ACK_FRAME,
+  STOP_CHARGE_FRAME,
 } from '../packages/protocol/src/pile-session.ts';
 import { fromHex, toHex } from '../packages/protocol/src/bytes.ts';
+import { buildPileCommandFrame } from '../packages/protocol/src/pile-frame.ts';
 import { parsePileFrame as parse } from '../packages/protocol/src/pile-frame.ts';
 
 /** Frames captured from the real pile in two independent sessions. */
@@ -25,9 +27,15 @@ const SESSION_B = {
   notify2: '694a0008010200160f00eeeed176',
 } as const;
 
-const START_REPLY = '6961003de1';
-const STATUS_1 = '68a51abf3170001f99';
-const STATUS_2 = '68a53ebf3170009e2b';
+/** Captured 2026-11-13 from official App 5.19.0, one continuous session. */
+const START_ACK = '7f03050052afa29bb27d';
+const STOP_ACK = '7f040500ffffffff72c6';
+/** Command-3 ack with verdict byte 01 (rejected), CRC valid. */
+function rejectionAck(): string {
+  return toHex(buildPileCommandFrame(3, Uint8Array.from([0x01, 0x52, 0xaf, 0xa2, 0x9b]), true));
+}
+const STATUS_1 = '68a51ab054710088dd';
+const STATUS_2 = '68a53eb0547100096f';
 
 /** Replays scripted notifications and records every write. */
 class ScriptedTransport implements PileTransport {
@@ -78,7 +86,7 @@ test('start charging writes the constant frame and acks each status', async () =
   const transport = new ScriptedTransport([
     SESSION_A.notify1,
     SESSION_A.notify2,
-    START_REPLY,
+    START_ACK,
     STATUS_1,
     STATUS_2,
   ]);
@@ -102,7 +110,7 @@ test('start charging writes the constant frame and acks each status', async () =
 });
 
 test('a single status frame is enough', async () => {
-  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2, START_REPLY, STATUS_1]);
+  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2, START_ACK, STATUS_1]);
   const session = new PileSession(transport);
   await session.connect({
     connectWrite1: fromHex(SESSION_A.write1),
@@ -147,12 +155,12 @@ test('a corrupted notification is rejected', async () => {
   );
 });
 
-test('a non-zero start reply payload is rejected', async () => {
+test('a command ack with an unknown payload byte is rejected', async () => {
+  // Real ack for command 3 is 7f03050052…; flip the status byte to 0x07.
   const transport = new ScriptedTransport([
     SESSION_A.notify1,
     SESSION_A.notify2,
-    // class 3 reply with payload 0x01 instead of the expected 0x00 (CRC valid)
-    '6961012dc0',
+    '7f03050752afa29bd5a9',
     STATUS_1,
   ]);
   const session = new PileSession(transport);
@@ -160,7 +168,53 @@ test('a non-zero start reply payload is rejected', async () => {
     connectWrite1: fromHex(SESSION_A.write1),
     connectWrite2: fromHex(SESSION_A.write2),
   });
-  await assert.rejects(() => session.startCharging(), /unexpected start-charging reply shape/);
+  await assert.rejects(() => session.startCharging(), /unexpected command ack payload/);
+});
+
+test('an accepted command with no status report still counts as success', async () => {
+  // Real pile, 2026-11-14: ack 02 with verdict 00 arrived, charging started, but
+  // no status report came within the window. This must NOT be reported as a
+  // failure -- the 0x7f verdict is the success criterion, status is async.
+  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2, START_ACK]);
+  const session = new PileSession(transport);
+  await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+  const status = await session.startCharging(600);
+  assert.deepEqual(status, []);
+});
+
+test('a rejection (verdict 01) reports the refusal, not a timeout', async () => {
+  const transport = new ScriptedTransport([
+    SESSION_A.notify1,
+    SESSION_A.notify2,
+    // Same ack shape, first data byte 01 instead of 00.
+    rejectionAck(),
+  ]);
+  const session = new PileSession(transport);
+  await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+  await assert.rejects(() => session.startCharging(), /桩拒绝了命令/);
+});
+
+test('stop charging sends command 4 and answers the status report', async () => {
+  const transport = new ScriptedTransport([SESSION_A.notify1, SESSION_A.notify2, STOP_ACK, STATUS_2]);
+  const session = new PileSession(transport);
+  await session.connect({
+    connectWrite1: fromHex(SESSION_A.write1),
+    connectWrite2: fromHex(SESSION_A.write2),
+  });
+  const status = await session.stopCharging();
+  assert.deepEqual(transport.writes, [
+    SESSION_A.write1,
+    SESSION_A.write2,
+    toHex(STOP_CHARGE_FRAME),
+    toHex(STATUS_ACK_FRAME),
+  ]);
+  assert.equal(status.length, 1);
 });
 
 test('connect cannot run twice', async () => {
