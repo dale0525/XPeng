@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=640, height=320, initial-scale=1.0">
+  <title>车控快捷组件 - 2x4 桌面小组件 (Volt Lime 亮色)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      width: 640px;
+      height: 320px;
+      background: transparent;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .font-num {
+      font-family: 'Space Grotesk', sans-serif;
+      font-feature-settings: 'tnum' on, 'lnum' on;
+    }
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+</head>
+<body class="w-[640px] h-[320px]">
+  <!-- 2x4 桌面组件卡片本体 (640x320 纯卡片，占满画布，无手机框、无壁纸、无导航/状态栏) -->
+  <div class="relative w-[640px] h-[320px] bg-[#FFFFFF] rounded-[28px] border border-[#E5E7EB] shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-[20px] flex flex-col justify-between select-none overflow-hidden">
+    
+    <!-- 上半部分：数据区与车辆占位区 (高度 160px) -->
+    <div class="relative w-full h-[172px] flex items-center justify-between gap-3 px-1">
+      
+      <!-- 左侧：两枚读数竖排 (剩余电量 + 续航里程) -->
+      <div class="flex flex-col justify-between h-full py-1 z-10">
+        
+        <!-- 读数 1: 剩余电量 -->
+        <div class="flex flex-col">
+          <span class="text-[12px] font-medium text-[#8A8D93] leading-none mb-1.5 tracking-tight">剩余电量</span>
+          <div class="flex items-baseline gap-1">
+            <span class="font-num text-[38px] font-bold text-[#111214] leading-none tracking-tight">80</span>
+            <span class="font-num text-[18px] font-semibold text-[#111214] leading-none">%</span>
+          </div>
+          <!-- 细能量条：电量占比 (轨道 #EDEDEF，填充 #F4EF00) -->
+          <div class="w-[124px] h-[4px] bg-[#EDEDEF] rounded-full mt-2 overflow-hidden">
+            <div class="h-full bg-[#F4EF00] rounded-full" style="width: 80%;"></div>
+          </div>
+        </div>
+
+        <!-- 读数 2: 续航里程 -->
+        <div class="flex flex-col mt-2">
+          <span class="text-[12px] font-medium text-[#8A8D93] leading-none mb-1.5 tracking-tight">续航里程</span>
+          <div class="flex items-baseline gap-1">
+            <span class="font-num text-[32px] font-bold text-[#111214] leading-none tracking-tight">420</span>
+            <span class="font-num text-[15px] font-medium text-[#8A8D93] leading-none">km</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 右侧：黑白灰度车辆侧后视角 (纯矢量高精度渲染，融进白色卡片，不跳出边界) -->
+      <div class="relative flex-1 min-w-0 h-full flex items-center justify-center overflow-hidden pointer-events-none">
+        <svg class="w-full h-full" viewBox="0 0 360 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- 车辆底部柔和投影 -->
+          <ellipse cx="200" cy="138" rx="140" ry="12" fill="url(#carShadow)" opacity="0.35" />
+          
+          <!-- 车体主要暗调曲面 (轿车/掀背轿跑 3/4 侧后视角) -->
+          <path d="M40 120 C70 120 90 120 120 120 C130 110 150 110 160 120 C230 120 250 120 270 120 C280 110 300 110 310 120 C340 120 350 116 350 106 C350 96 335 88 315 82 C285 74 240 64 210 52 C185 42 160 40 130 42 C105 44 80 56 60 70 C45 80 35 95 35 106 C35 116 36 120 40 120 Z" fill="url(#carBodyGrad)" />
+          
+          <!-- 车顶弧线与高光反射 (高精度流线) -->
+          <path d="M68 76 C85 62 110 49 140 45 C170 41 200 44 225 54 C255 66 295 76 325 84" stroke="url(#carRoofLight)" stroke-width="2" stroke-linecap="round" />
+          
+          <!-- 侧窗与天幕玻璃暗部 -->
+          <path d="M100 68 C120 54 145 49 175 48 C205 48 230 54 250 64 C240 70 210 75 160 75 C125 75 108 72 100 68 Z" fill="#202226" opacity="0.85" />
+          <path d="M175 48 L170 75" stroke="#3A3D44" stroke-width="1.5" />
+          
+          <!-- 车身腰线折痕与低照度黑白车漆高光 -->
+          <path d="M42 102 C80 100 140 96 220 94 C270 94 320 92 346 95" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="1.2" stroke-linecap="round" />
+          <path d="M38 108 C80 108 140 105 220 104 C280 104 330 102 348 104" stroke="#000000" stroke-opacity="0.25" stroke-width="1.5" stroke-linecap="round" />
+          
+          <!-- 尾灯条微光质感 (贯穿式尾灯) -->
+          <path d="M38 100 C42 98 48 98 52 100" stroke="#111214" stroke-width="2.5" stroke-linecap="round" />
+          
+          <!-- 后轮 (带刹车卡钳与轮毂金属质感) -->
+          <g transform="translate(140, 118)">
+            <circle cx="0" cy="0" r="23" fill="#141518" />
+            <circle cx="0" cy="0" r="19" stroke="#383B42" stroke-width="3" />
+            <circle cx="0" cy="0" r="11" fill="#24262B" />
+            <!-- 轮毂双辐条精细线 -->
+            <line x1="-15" y1="0" x2="15" y2="0" stroke="#717680" stroke-width="1.5" />
+            <line x1="0" y1="-15" x2="0" y2="15" stroke="#717680" stroke-width="1.5" />
+            <line x1="-10" y1="-10" x2="10" y2="10" stroke="#717680" stroke-width="1.5" />
+            <line x1="-10" y1="10" x2="10" y2="-10" stroke="#717680" stroke-width="1.5" />
+            <circle cx="0" cy="0" r="3" fill="#E5E7EB" />
+          </g>
+
+          <!-- 前轮 (透视远端前轮) -->
+          <g transform="translate(290, 118)">
+            <circle cx="0" cy="0" r="23" fill="#141518" />
+            <circle cx="0" cy="0" r="19" stroke="#383B42" stroke-width="3" />
+            <circle cx="0" cy="0" r="11" fill="#24262B" />
+            <!-- 轮毂双辐条精细线 -->
+            <line x1="-15" y1="0" x2="15" y2="0" stroke="#717680" stroke-width="1.5" />
+            <line x1="0" y1="-15" x2="0" y2="15" stroke="#717680" stroke-width="1.5" />
+            <line x1="-10" y1="-10" x2="10" y2="10" stroke="#717680" stroke-width="1.5" />
+            <line x1="-10" y1="10" x2="10" y2="-10" stroke="#717680" stroke-width="1.5" />
+            <circle cx="0" cy="0" r="3" fill="#E5E7EB" />
+          </g>
+
+          <!-- 渐变定义 -->
+          <defs>
+            <radialGradient id="carShadow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#000000" stop-opacity="0.6"/>
+              <stop offset="60%" stop-color="#000000" stop-opacity="0.2"/>
+              <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+            </radialGradient>
+            <linearGradient id="carBodyGrad" x1="50" y1="40" x2="330" y2="130" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#2D3036"/>
+              <stop offset="35%" stop-color="#4B4F58"/>
+              <stop offset="65%" stop-color="#232529"/>
+              <stop offset="100%" stop-color="#121316"/>
+            </linearGradient>
+            <linearGradient id="carRoofLight" x1="70" y1="60" x2="310" y2="80" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#808591" stop-opacity="0.2"/>
+              <stop offset="45%" stop-color="#FFFFFF" stop-opacity="0.75"/>
+              <stop offset="85%" stop-color="#6A6F7B" stop-opacity="0.3"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+
+    </div>
+
+    <!-- 下半部分：操作区 (4 个等宽快捷操作，高度 98px) -->
+    <div class="w-full h-[92px] grid grid-cols-4 gap-[12px]">
+      
+      <!-- 快捷格 1: 解锁 -->
+      <div class="bg-[#F5F6F8] rounded-[22px] flex flex-col items-center justify-center p-2 cursor-pointer transition-transform duration-100 active:scale-[0.98]">
+        <div class="w-[40px] h-[40px] rounded-full bg-[#EDEDEF] flex items-center justify-center mb-1.5">
+          <span class="material-symbols-outlined text-[#111214] text-[20px]">lock_open</span>
+        </div>
+        <span class="text-[13px] font-medium text-[#111214] leading-none">解锁</span>
+      </div>
+
+      <!-- 快捷格 2: 远程解锁 -->
+      <div class="bg-[#F5F6F8] rounded-[22px] flex flex-col items-center justify-center p-2 cursor-pointer transition-transform duration-100 active:scale-[0.98]">
+        <div class="w-[40px] h-[40px] rounded-full bg-[#EDEDEF] flex items-center justify-center mb-1.5">
+          <span class="material-symbols-outlined text-[#111214] text-[20px]">vpn_key</span>
+        </div>
+        <span class="text-[13px] font-medium text-[#111214] leading-none">远程解锁</span>
+      </div>
+
+      <!-- 快捷格 3: 开启空调 -->
+      <div class="bg-[#F5F6F8] rounded-[22px] flex flex-col items-center justify-center p-2 cursor-pointer transition-transform duration-100 active:scale-[0.98]">
+        <div class="w-[40px] h-[40px] rounded-full bg-[#EDEDEF] flex items-center justify-center mb-1.5">
+          <span class="material-symbols-outlined text-[#111214] text-[20px]">ac_unit</span>
+        </div>
+        <span class="text-[13px] font-medium text-[#111214] leading-none">开启空调</span>
+      </div>
+
+      <!-- 快捷格 4: 闪灯 -->
+      <div class="bg-[#F5F6F8] rounded-[22px] flex flex-col items-center justify-center p-2 cursor-pointer transition-transform duration-100 active:scale-[0.98]">
+        <div class="w-[40px] h-[40px] rounded-full bg-[#EDEDEF] flex items-center justify-center mb-1.5">
+          <span class="material-symbols-outlined text-[#111214] text-[20px]">highlight</span>
+        </div>
+        <span class="text-[13px] font-medium text-[#111214] leading-none">闪灯</span>
+      </div>
+
+    </div>
+
+  </div>
+</body>
+</html>
