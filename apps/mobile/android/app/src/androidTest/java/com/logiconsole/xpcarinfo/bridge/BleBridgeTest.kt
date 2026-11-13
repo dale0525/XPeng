@@ -67,8 +67,8 @@ class BleBridgeTest {
             val secondFrame = "ed118b" + "00".repeat(139)
             assertEquals(7, firstFrame.length / 2)
             assertEquals(142, secondFrame.length / 2)
-            module.write(firstFrame, firstWrite.promise)
-            module.write(secondFrame, secondWrite.promise)
+            module.write(mac, firstFrame, firstWrite.promise)
+            module.write(mac, secondFrame, secondWrite.promise)
             firstWrite.assertResolved("first queued GATT write")
             secondWrite.assertResolved("second queued GATT write")
             assertEquals(listOf("first", "second"), completions.toList())
@@ -79,7 +79,7 @@ class BleBridgeTest {
             assertTrue("Expected four raw nonce reply bytes", reply.matches(Regex("[0-9a-f]{8}")))
 
             val disconnect = PromiseResult()
-            module.disconnect(disconnect.promise)
+            module.disconnect(mac, disconnect.promise)
             disconnect.assertResolved("disconnect")
             disconnected = true
             val disconnectEvent = disconnectEvents.poll(15, TimeUnit.SECONDS)
@@ -88,12 +88,12 @@ class BleBridgeTest {
             assertEquals("Disconnected by client", disconnectEvent.getString("reason"))
 
             val afterDisconnect = PromiseResult()
-            module.write("090a0b0c", afterDisconnect.promise)
+            module.write(mac, "090a0b0c", afterDisconnect.promise)
             afterDisconnect.assertRejected("write after disconnect", "E_NOT_READY")
         } finally {
             if (!disconnected) {
                 val cleanup = PromiseResult()
-                module.disconnect(cleanup.promise)
+                module.disconnect(mac, cleanup.promise)
                 cleanup.assertResolved("cleanup disconnect")
             }
         }

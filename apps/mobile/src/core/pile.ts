@@ -33,9 +33,9 @@ interface PileNative {
     autoConnect: boolean,
     timeoutMs: number,
   ): Promise<void>;
-  dumpServices(): Promise<Array<{ service: string; characteristics: Array<{ uuid: string; handle: number; properties: number }> }>>;
-  write(hex: string): Promise<void>;
-  disconnect(): Promise<void>;
+  dumpServices(mac: string): Promise<Array<{ service: string; characteristics: Array<{ uuid: string; handle: number; properties: number }> }>>;
+  write(mac: string, hex: string): Promise<void>;
+  disconnect(mac: string): Promise<void>;
 }
 
 const bridge = NativeModules.XpengBle as PileNative;
@@ -76,7 +76,7 @@ class PileNativeTransport implements PileTransport {
   }
 
   write(frame: Uint8Array): Promise<void> {
-    return bridge.write(toHex(frame));
+    return bridge.write(this.mac, toHex(frame));
   }
 
   nextNotification(timeoutMs = 5000): Promise<Uint8Array> {
@@ -98,7 +98,7 @@ class PileNativeTransport implements PileTransport {
     this.dropSubscription?.remove();
     this.dropSubscription = null;
     this.dropListeners.clear();
-    await bridge.disconnect();
+    await bridge.disconnect(this.mac);
   }
 
   private push(frame: Uint8Array) {
@@ -145,6 +145,6 @@ export async function connectPile(
 }
 
 /** Read the connected device's full GATT layout; used to recover unknown UUIDs. */
-export function dumpPileServices() {
-  return bridge.dumpServices();
+export function dumpPileServices(mac: string) {
+  return bridge.dumpServices(mac);
 }
