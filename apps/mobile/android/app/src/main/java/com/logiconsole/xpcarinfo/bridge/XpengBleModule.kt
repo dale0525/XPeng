@@ -306,7 +306,11 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             putString("mac", g.device.address); putString("hex", value.joinToString("") { "%02x".format(it.toInt() and 255) })
         })
     } }
-    @ReactMethod fun connect(mac: String, p: Promise) = startConnect(mac, false, 10000, p)
+    /**
+     * 车控用的短超时连接：人离车几十米时蓝牙必然连不上，等满 10 秒只是在白等，
+     * 超时才退云端会把一次锁车拖到十几秒。3 秒够车旁的正常建连，不够就立刻走云端。
+     */
+    @ReactMethod fun connect(mac: String, p: Promise) = startConnect(mac, false, 3000, p)
     @ReactMethod fun connectDiagnostic(mac: String, p: Promise) = startConnect(mac, true, 45000, p)
     private fun startConnect(mac: String, autoConnect: Boolean, timeoutMs: Long, p: Promise) { handler.post {
         if (!ready(p)) return@post
