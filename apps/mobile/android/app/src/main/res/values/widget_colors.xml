@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Volt Lime 组件亮色令牌：逐项取自 docs/design/ 六张稿里的实际取值。
+
+  亮色卡片是纯白 + #E5E7EB 发丝描边，格底 #F5F6F8、图标圈 #EDEDEF，
+  强调色 #F4EF00 只出现在电量条填充上。
+-->
+<resources>
+    <color name="widget_card_bg">#FFFFFF</color>
+    <color name="widget_card_border">#E5E7EB</color>
+
+    <!-- 快捷格底与图标圈：稿中 2x2/1x4/2x4 三档一致 -->
+    <color name="widget_tile_bg">#F5F6F8</color>
+    <color name="widget_icon_circle_bg">#EDEDEF</color>
+
+    <!-- 文本三级：主读数 #111214、单位与字段名 #8A8D93 -->
+    <color name="widget_value">#111214</color>
+    <color name="widget_label">#8A8D93</color>
+
+    <!-- 能量条：轨道 #EDEDEF / 填充 #F4EF00 -->
+    <color name="widget_track">#EDEDEF</color>
+    <color name="widget_accent">#F4EF00</color>
+</resources>

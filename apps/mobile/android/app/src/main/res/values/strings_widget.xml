@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 组件文案：与车控页快捷操作的真实文案一致，不另起一套。 -->
+<resources>
+    <string name="widget_label_soc">剩余电量</string>
+    <string name="widget_label_range">续航里程</string>
+    <string name="widget_unit_km">km</string>
+    <string name="widget_placeholder">—</string>
+
+    <string name="widget_desc_2x2">车控快捷操作</string>
+    <string name="widget_desc_1x4">车控快捷操作</string>
+    <string name="widget_desc_2x4">车控状态与快捷操作</string>
+</resources>

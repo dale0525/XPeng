@@ -189,6 +189,24 @@ class XpengNetModule(private val ctx: ReactApplicationContext) :
         promise.resolve(null)
     }
 
+    /**
+     * 让桌面组件重画：JS 拿到新状态或写完快照后调用。
+     *
+     * 不把「写快照」也做成原生方法——快照走 storageSet 已经落到同一个
+     * SharedPreferences（"xpeng"/"widget.snapshot"），原生读得到；这里只补一个
+     * 「该重画了」的触发点，避免 JS 侧每次状态更新都去猜桌面有没有组件。
+     */
+    @ReactMethod
+    fun refreshWidgets(promise: Promise) {
+        try {
+            val count = com.logiconsole.xpcarinfo.widgets.BaseWidgetProvider.refreshAll(ctx)
+            Log.i("XPWidget", "refreshWidgets count=$count")
+            promise.resolve(count)
+        } catch (e: Throwable) {
+            promise.reject("E_WIDGET", e.message ?: e.javaClass.simpleName, e)
+        }
+    }
+
     /** console.* 的 TAG 由 RN 固定为 ReactNativeJS、混着框架日志；这里改用业务 TAG 便于一条 filterspec 收全。 */
     @ReactMethod
     fun log(level: String, tag: String, message: String) {

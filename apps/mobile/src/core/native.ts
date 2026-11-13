@@ -35,6 +35,8 @@ const Native = NativeModules.XpengNet as {
   storageSet(key: string, value: string): Promise<void>;
   storageRemove(key: string): Promise<void>;
   log(level: 'i' | 'w' | 'e', tag: string, message: string): void;
+  /** 让桌面组件重画；返回一共重画了几个组件实例。 */
+  refreshWidgets(): Promise<number>;
 };
 
 /** 真机自测用：统一 TAG，绝不传 token / 信封 / 请求体原文。 */
@@ -79,4 +81,6 @@ export const StorageKey = {
   proximity: 'ui.proximityAutoUnlock',
   proximityCalibration: 'ui.proximityCalibration',
   proximitySuppression: 'ui.proximitySuppression',
+  /** 2x4 组件读的电量/续航快照，键名与原生 `WidgetSnapshot.KEY_SNAPSHOT` 一致。 */
+  widgetSnapshot: 'widget.snapshot',
 } as const;
