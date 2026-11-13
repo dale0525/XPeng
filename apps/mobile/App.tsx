@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AppState, StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
+import { vehicleModelLabel } from '@xpeng/protocol/src/vehicle-model';
 import { carLink, type LinkState } from './src/core/car';
 import { bleLink } from './src/core/ble';
 import { sessionStore, type SessionState } from './src/core/session';
@@ -240,7 +241,7 @@ function Shell() {
   }
 
   const plateNo = vehicle?.plateNo || '—';
-  const modelName = vehicle?.vehicleTypeName || '—';
+  const modelName = (vehicle && vehicleModelLabel(vehicle)) || '—';
   const vehicleLabel = `车牌 ${plateNo} ｜ 车型 ${modelName}`;
 
   return (
