@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2x4 组件：上排是剩余电量、续航里程与车辆图，下排是 4 个快捷操作。
+
+  稿是 640×320，4×2 格位在真机上约 320×150dp（2 倍图）。上排左侧两枚读数竖排、
+  右侧车辆图吃满剩余宽度；下排四格与 1x4 组件同构。除稿中这些内容不出现任何其它
+  元素——无车牌、无车型名、无状态徽章、无时间日期。
+
+  RemoteViews 不允许 inflate 裸 `View`，所以上下两排的间距也走 layout_margin。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_card_bg"
+    android:padding="@dimen/widget_card_padding">
+
+    <!-- 上排：读数区 + 车辆图 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1.15"
+        android:layout_marginBottom="@dimen/widget_tile_gap"
+        android:orientation="horizontal"
+        android:baselineAligned="false"
+        android:gravity="center_vertical">
+
+        <!-- 左：剩余电量 + 续航里程竖排 -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:layout_marginEnd="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:text="@string/widget_label_soc"
+                android:textColor="@color/widget_label"
+                android:textSize="@dimen/widget_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="bottom"
+                android:layout_marginTop="2dp">
+
+                <TextView
+                    android:id="@+id/widget_soc_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:text="@string/widget_placeholder"
+                    android:textColor="@color/widget_value"
+                    android:textSize="@dimen/widget_value_size"
+                    android:fontFamily="@font/space_grotesk" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="1dp"
+                    android:includeFontPadding="false"
+                    android:text="%"
+                    android:textColor="@color/widget_value"
+                    android:textSize="@dimen/widget_unit_size"
+                    android:fontFamily="@font/space_grotesk" />
+            </LinearLayout>
+
+            <!-- 能量条：轨道铺满，填充按 SOC 百分比裁切。用 ProgressBar 而不是改
+                 View 宽度——RemoteViews 的 setViewLayoutWidth 要 API 31，minSdk 是 26。 -->
+            <ProgressBar
+                android:id="@+id/widget_soc_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="@dimen/widget_bar_width"
+                android:layout_height="@dimen/widget_bar_height"
+                android:layout_marginTop="6dp"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/widget_soc_progress" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:includeFontPadding="false"
+                android:text="@string/widget_label_range"
+                android:textColor="@color/widget_label"
+                android:textSize="@dimen/widget_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="bottom"
+                android:layout_marginTop="2dp">
+
+                <TextView
+                    android:id="@+id/widget_range_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:text="@string/widget_placeholder"
+                    android:textColor="@color/widget_value"
+                    android:textSize="@dimen/widget_range_value_size"
+                    android:fontFamily="@font/space_grotesk" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="2dp"
+                    android:includeFontPadding="false"
+                    android:text="@string/widget_unit_km"
+                    android:textColor="@color/widget_label"
+                    android:textSize="@dimen/widget_unit_size"
+                    android:fontFamily="@font/space_grotesk" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 右：车辆图吃满剩余宽度（亮暗各一张，按系统夜间模式挑） -->
+        <ImageView
+            android:id="@+id/widget_car"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="false"
+            android:contentDescription="@null"
+            android:src="@drawable/widget_car_light" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="false">
+        <LinearLayout
+            android:id="@+id/widget_slot_0"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="0dp"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_0"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_0"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_0"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/widget_slot_1"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/widget_tile_gap"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_1"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_1"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/widget_slot_2"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/widget_tile_gap"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_2"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_2"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+        <LinearLayout
+            android:id="@+id/widget_slot_3"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="@dimen/widget_tile_gap"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/widget_tile_bg"
+            android:padding="6dp">
+
+            <FrameLayout
+                android:layout_width="@dimen/widget_icon_circle"
+                android:layout_height="@dimen/widget_icon_circle"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/widget_icon_circle_bg">
+
+                <ImageView
+                    android:id="@+id/widget_icon_3"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/widget_icon_light_3"
+                    android:contentDescription="@null" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/widget_label_3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/widget_value"
+                android:textSize="@dimen/widget_tile_label_size"
+                android:fontFamily="@font/plus_jakarta_sans" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

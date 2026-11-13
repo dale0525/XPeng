@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  电量条：用 ProgressBar 的自定义 progressDrawable 而不是「按百分比改 View 宽度」。
+
+  RemoteViews 的 setViewLayoutWidth 要 API 31，minSdk 是 26；而 setProgressBar
+  从 API 1 就有，且由框架负责裁切，百分比不会因为 MeasureSpec 变成 0。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_track" />
+            <corners android:radius="2dp" />
+        </shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape android:shape="rectangle">
+                <solid android:color="@color/widget_accent" />
+                <corners android:radius="2dp" />
+            </shape>
+        </clip>
+    </item>
+</layer-list>

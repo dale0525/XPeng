@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Volt Lime 组件令牌：形状抄自 docs/design/ 三档稿，尺寸按真实桌面格位换算。
+
+  稿的画布是 640×320（2x4），而 4×2 格位在真机上约 320×150dp——稿就是 2 倍图。
+  所以圆角、内边距、格间距、图标圈一律按 0.5 缩放；但字号不能跟着减半
+  （12px 折半成 6sp 会看不清），按可读下限取，保持稿里「小字段名 + 大读数」的层级。
+
+  四格快捷操作三档共用同一套尺寸，只有排布方向不同。
+-->
+<resources>
+    <!-- 卡片：稿中 28dp 圆角 + 1dp 发丝描边 -->
+    <dimen name="widget_radius">20dp</dimen>
+    <dimen name="widget_card_padding">14dp</dimen>
+
+    <!-- 快捷格：格间距 12dp→6dp、格圆角 22dp→11dp、图标圈 40dp→30dp -->
+    <dimen name="widget_tile_gap">8dp</dimen>
+    <dimen name="widget_tile_radius">14dp</dimen>
+    <dimen name="widget_icon_circle">30dp</dimen>
+
+    <!-- 字号：字段名 10sp、格标签 11sp、主读数 26sp/22sp、单位 12sp。
+         2x2 只有约 180dp 见方、四格各 80dp 宽，11sp 的「远程解锁」约 44dp 放得下；
+         早期用 10sp 时被 launcher 判成窄条，标签仍会截断，问题在格位不在字号。 -->
+    <dimen name="widget_label_size">10sp</dimen>
+    <dimen name="widget_tile_label_size">11sp</dimen>
+    <dimen name="widget_value_size">26sp</dimen>
+    <dimen name="widget_unit_size">12sp</dimen>
+    <dimen name="widget_range_value_size">22sp</dimen>
+
+    <!-- 电量条：稿中宽 124px 高 4px → 80dp × 2dp；轨道按百分比裁切填充 -->
+    <dimen name="widget_bar_width">80dp</dimen>
+    <dimen name="widget_bar_height">3dp</dimen>
+</resources>
