@@ -44,14 +44,40 @@ class XpengWifiLocationModule(private val ctx: ReactApplicationContext) :
     @ReactMethod fun addListener(name: String) = Unit
     @ReactMethod fun removeListeners(count: Double) = Unit
 
-    /** 读 WiFi 名的前提是定位权限：Android 10 起 SSID 被当作位置信息，没权限只回占位串。 */
+    /**
+     * 读 WiFi 名与坐标的前提是定位权限：Android 10 起 SSID 被当作位置信息，没权限只回占位串。
+     *
+     * 判定标准是**精确或粗略任一已授予**，不是两个都要。Android 12 起系统的位置权限是
+     * 二选一：用户可以在对话框里只给「大致位置」，也可以只给精确位置。原实现要求两个都
+     * granted，于是只要用户选过其中一种（2026-11-15 实测 K60 上 FINE=granted、
+     * COARSE=denied），`missingLocation()` 就永远非空、`currentLocation` 直接返回 null，
+     * 坐标例外被当成「拿不到定位」；而 ble.ts 把拿不到定位按抑制处理（`unknown`），
+     * 结果是：配了坐标例外的用户**只要在家就永远不会自动解锁**，界面上看不出原因。
+     */
     private fun locationPermissions(): Array<String> = if (Build.VERSION.SDK_INT >= 31) arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION,
     ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
 
-    private fun missingLocation() =
-        locationPermissions().filter { ctx.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+    /** 还缺哪些权限——只有「一个都没授予」才算缺，二选一授予已经够用。 */
+    private fun missingLocation(): List<String> {
+        val all = locationPermissions().toList()
+        if (all.any { ctx.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) return emptyList()
+        return all
+    }
+
+    /**
+     * 有没有**精确定位**。抑制功能真正依赖的是它，不是「任一权限」。
+     *
+     * 只有粗略位置时两件事都不可靠：
+     * 1. 读不到 WiFi 名——Android 把 SSID 当位置敏感字段，`connectionInfo` 只回
+     *    `<unknown ssid>`，WiFi 例外等于失效（见 `currentSsid` 的说明）。
+     * 2. 坐标精度是城市街区级（约 1~3 km），而地点规则的半径通常只有几百米，
+     *    判定结果没有意义——要么该挡不挡，要么不该挡却挡。
+     * 所以缺精确权限时**放弃抑制**（当作没有规则），而不是拿粗略位置硬算。
+     */
+    private fun hasPreciseLocation(): Boolean =
+        ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     private fun locationEnabled(): Boolean {
         val lm = ctx.getSystemService(LocationManager::class.java) ?: return false
@@ -68,6 +94,9 @@ class XpengWifiLocationModule(private val ctx: ReactApplicationContext) :
         // 系统定位开关关着时，即便权限齐全也读不到真实 SSID、也取不到坐标。
         // 界面要把这件事说出来，否则用户会以为名单生效了而实际一直不生效。
         putBoolean("locationEnabled", locationEnabled())
+        // 只有粗略位置时抑制不可用：界面据此提示用户去给精确定位，
+        // 否则用户会以为规则生效了而实际被静默忽略。
+        putBoolean("precise", hasPreciseLocation())
         putArray("missing", Arguments.fromList(missingLocation()))
     }
 
@@ -121,7 +150,7 @@ class XpengWifiLocationModule(private val ctx: ReactApplicationContext) :
      */
     @ReactMethod fun currentLocation(maxAgeMs: Double, timeoutMs: Double, p: Promise) {
         handler.post {
-            if (missingLocation().isNotEmpty() || !locationEnabled()) { p.resolve(null); return@post }
+            if (missingLocation().isNotEmpty() || !locationEnabled() || !hasPreciseLocation()) { p.resolve(null); return@post }
             val lm = ctx.getSystemService(LocationManager::class.java)
             if (lm == null) { p.resolve(null); return@post }
             val maxAge = maxAgeMs.toLong().coerceIn(0L, 6 * 3600_000L)
