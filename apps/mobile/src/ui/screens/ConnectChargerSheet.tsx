@@ -23,13 +23,9 @@ function CloseButton({ onPress }: { onPress: () => void }) {
  * 桩名字前缀。`XpengBleModule.kt` 的扫描回调注释记明：蓝牙充电桩以 `XPAC…`
  * 广播名出现（此前扫描硬编码 `XPED` 前缀把它过滤掉了，现已按任意非空名字上报）。
  *
- * 注意这是**代码注释给的事实，不是文档 §1 的结论**：`docs/research/xpeng-ble-charging-pile.md`
+ * 注意这是**代码注释给的事实，不是文档「协议要点」一节的结论**：`docs/research/xpeng-ble-charging-pile.md`
  * 记的是「没有本地发现路径，桩地址只能来自缓存或云端」。按名字前缀筛是本仓
  * 现成的唯一可行做法，真机是否稳定命中未验证。筛不到就直接报「未发现」。
- *
- * 另一个真实限制：原生模块同一时刻只允许一条 GATT/扫描（`scan` 与 `connectProfile`
- * 在已有连接时以 `E_BUSY` 拒绝）。车辆数字钥匙链路处于活动态时，这里会失败，
- * 错误原文会显示在弹窗底部，不吞掉。
  */
 const PILE_NAME_PREFIX = 'XPAC';
 
@@ -57,22 +53,23 @@ const STATE_TEXT: Record<PileState['kind'], string> = {
 /**
  * 原生错误码 → 一句能看懂的原因。原文仍然保留在括号里，不吞掉。
  *
- * 三种码都是 `XpengBleModule.kt` 里真实会 reject 的：`E_BUSY`（同刻只允许一条
- * GATT/扫描，车辆数字钥匙在用时必现）、`E_PERMISSION` / `E_BLUETOOTH_OFF`
- * （`ready()` 的两个前置）、`E_SCAN`（`startScan` 失败回调）。之前这些原文只落在
- * 底部 12px 淡灰字上，与背景对比度不足，用户看到的就是「点了没反应」。
+ * 错误码必须读 `code`：RN 的 `reject(code, message)` 把两者分开放，`Error.message`
+ * 里只有 message 原文（这里是 `BLE operation pending`），不含 `E_BUSY`。按 message
+ * 判断会让所有分支都落空、界面只剩一句英文原文。
  */
 function explain(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  if (raw.includes('E_BUSY')) {
-    return `蓝牙通道被占用（车辆数字钥匙正在使用同一条链路），请先断开车辆连接后重试。原生返回：${raw}`;
-  }
-  if (raw.includes('E_PERMISSION')) return `缺少蓝牙权限。原生返回：${raw}`;
-  if (raw.includes('E_BLUETOOTH_OFF')) return `系统蓝牙未开启。原生返回：${raw}`;
-  if (raw.includes('E_SCAN')) return `蓝牙扫描失败。原生返回：${raw}`;
-  if (raw.includes('unexpected command ack payload')) {
-    // 命令回执数据段首字节 00 = 接受、01 = 拒绝。桩不细分拒绝原因。
-    return `充电桩拒绝了这条命令（回执首字节非 00：当前条件不满足，桩不细分原因）。原生返回：${raw}`;
+  // 判定用原生给的 `code`，不在消息文本里找子串：错误消息是给人读的，措辞一变
+  // 判定就静默失效（曾把 `code` 当消息读，E_BUSY 永远匹配不上）。
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'E_BUSY') return `蓝牙通道正忙（同一地址已有一条链路），请稍后重试。原生返回：${raw}`;
+  if (code === 'E_PERMISSION') return `缺少蓝牙权限。原生返回：${raw}`;
+  if (code === 'E_BLUETOOTH_OFF') return `系统蓝牙未开启。原生返回：${raw}`;
+  if (code === 'E_SCAN') return `蓝牙扫描失败。原生返回：${raw}`;
+  if (raw.includes('unexpected start-charging reply shape')) {
+    // 桩回 payload 01 = 条件不满足。实测已插枪且正在充电时同样回 01，所以不能
+    // 把「未插枪」当唯一或主要原因，见 docs/research/xpeng-ble-charging-pile.md。
+    return '充电桩拒绝了启动充电（回执 payload=01：当前条件不满足，桩不细分原因；车已在充电时重复下发也会被拒）。';
   }
   return raw;
 }
@@ -186,7 +183,7 @@ export function ConnectChargerSheet(props: {
     }
   }, []);
 
-  // 打开即自动连接，关闭即释放：原生模块同一时刻只允许一条 GATT。
+  // 打开即自动连接，关闭即释放：桩链路与车辆链路可以并存，但弹窗关掉就该还给电台。
   useEffect(() => {
     if (!visible) return;
     if (opening.current) return;

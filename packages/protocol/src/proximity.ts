@@ -12,6 +12,14 @@
  */
 export type ProximityAction = 'unlock' | 'lock';
 
+/**
+ * 达标轮数的统计窗口（轮）。
+ *
+ * 取 10：扫描约 1.5 s 一轮，10 轮 ≈ 15 s，足以覆盖 `leaveMs`（8 s）的时间跨度，
+ * 同时短到不会把"几分钟前路过时的一个强值"算进来。
+ */
+const SAMPLE_WINDOW = 10;
+
 export interface ProximityConfig {
   /** 进入「附近」的 RSSI 上阈值（dBm，例如 -65）。 */
   nearRssi: number;
@@ -77,15 +85,37 @@ export function evaluateProximity(
  */
 export class ProximityTracker {
   private nearby = false;
-  private nearSince: number | null = null;
-  private farSince: number | null = null;
-  /** 连续同向的样本计数（与时间窗同时满足才触发）。 */
-  private nearHits = 0;
-  private farHits = 0;
   private readonly config: ProximityConfig;
+  /**
+   * 最近 `SAMPLE_WINDOW` 轮里「达标」的时间戳与样本数。
+   *
+   * 为什么不是"连续 N 轮"：2026-11-15 实测走近年，20:51:13 起是
+   * -76 → -88 → -75，一个 -88 就把连续计数清零，整段走完一次也没触发。
+   * 真实多径信号里强弱交替是常态，要求严格连续等于把触发交给运气
+   * （同一形态 12:41 走远凑够了、20:51 走近没凑够，纯属偶然）。
+   * 现在只统计"窗口内够强的有几轮"，夹一两个弱值不影响。
+   */
+  private nearTimes: number[] = [];
+  private farTimes: number[] = [];
 
   constructor(config: ProximityConfig = DEFAULT_PROXIMITY_CONFIG) {
     this.config = config;
+  }
+
+  /**
+   * 用当前信号**直接确立**远近状态，不产生动作。
+   *
+   * 扫描是间歇运行的（前台停、退后台起、抑制解除后起）。每次新起扫描时判距器都
+   * 假定"人不在附近"，于是第一眼看到的就是车旁强信号——它会把"人本来就在车边"
+   * 误判成"刚刚走近"，立刻发一次解锁。2026-11-15 实测：手动解锁后退出 App，
+   * 扫描启动 4 秒就补发了一次解锁（rssi=-35）。
+   * 播种后这种"起扫瞬间贴脸"只被记为"已经近"，不会再触发解锁。
+   */
+  seed(rssi: number | null): void {
+    if (rssi === null) return;
+    this.nearby = rssi >= this.config.nearRssi;
+    this.nearTimes = [];
+    this.farTimes = [];
   }
 
   /** 喂一条样本；返回本条触发的动作，没有则 undefined。 */
@@ -96,30 +126,26 @@ export class ProximityTracker {
     if (rssi === null) return undefined;
 
     if (!this.nearby) {
-      if (rssi < this.config.nearRssi) { this.nearSince = null; this.nearHits = 0; return undefined; }
-      this.nearHits += 1;
-      if (this.nearSince === null) this.nearSince = t;
-      // 时间窗与连续样本数都要满足：只有连续够强的几轮才排除"单轮偶发强值"。
-      if (this.nearHits < this.config.enterSamples) return undefined;
-      if (t - this.nearSince < this.config.enterMs) return undefined;
+      // 弱值只是不计数，不再把已有进度清零。
+      if (rssi < this.config.nearRssi) { this.nearTimes = []; return undefined; }
+      this.nearTimes.push(t);
+      if (this.nearTimes.length > SAMPLE_WINDOW) this.nearTimes.shift();
+      if (this.nearTimes.length < this.config.enterSamples) return undefined;
+      if (t - this.nearTimes[0] < this.config.enterMs) return undefined;
       this.nearby = true;
-      this.nearSince = null;
-      this.nearHits = 0;
-      this.farSince = null;
-      this.farHits = 0;
+      this.nearTimes = [];
+      this.farTimes = [];
       return 'unlock';
     }
 
-    if (rssi > this.config.farRssi) { this.farSince = null; this.farHits = 0; return undefined; }
-    this.farHits += 1;
-    if (this.farSince === null) this.farSince = t;
-    if (this.farHits < this.config.leaveSamples) return undefined;
-    if (t - this.farSince < this.config.leaveMs) return undefined;
+    if (rssi > this.config.farRssi) { this.farTimes = []; return undefined; }
+    this.farTimes.push(t);
+    if (this.farTimes.length > SAMPLE_WINDOW) this.farTimes.shift();
+    if (this.farTimes.length < this.config.leaveSamples) return undefined;
+    if (t - this.farTimes[0] < this.config.leaveMs) return undefined;
     this.nearby = false;
-    this.farSince = null;
-    this.farHits = 0;
-    this.nearSince = null;
-    this.nearHits = 0;
+    this.farTimes = [];
+    this.nearTimes = [];
     return 'lock';
   }
 

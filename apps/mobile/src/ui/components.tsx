@@ -438,10 +438,13 @@ export function Banner({
   text,
   tag,
   tone = 'info',
+  onRetry,
 }: {
   text: string;
   tag?: string;
   tone?: 'info' | 'warn' | 'error';
+  /** 给了就把右侧 tag 变成可点的重试按钮；不给则只是状态标记。 */
+  onRetry?: () => void;
 }) {
   const glyph = tone === 'error' ? Icon.cancel : tone === 'warn' ? Icon.schedule : Icon.verified_user;
   const content = (
@@ -453,16 +456,29 @@ export function Banner({
         </Text>
       </View>
       {tag ? (
-        <View className="flex-row items-center gap-1.5">
-          {tone === 'error' ? (
-            <View className="w-1.5 h-1.5 rounded-full bg-error" />
-          ) : tone === 'warn' ? (
-            <View className="w-1.5 h-1.5 rounded-full bg-primary" />
-          ) : (
-            <View className="w-1.5 h-1.5 rounded-full bg-secondary" />
-          )}
-          <Text className="text-[10px] font-label font-bold text-on-surface">{tag}</Text>
-        </View>
+        onRetry ? (
+          /* 之前 tag 只是一段静态文字：云连接断了横幅上挂着「RETRY」，用户点了
+             毫无反应。有重试动作时必须让它是个真按钮，且触控区要够大。 */
+          <Pressable
+            onPress={onRetry}
+            accessibilityRole="button"
+            accessibilityLabel="重新连接"
+            className="flex-row items-center gap-1 rounded-full bg-surface px-2.5 py-1 active:scale-95">
+            <Text className="text-[13px] font-icon text-on-surface">{Icon.refresh}</Text>
+            <Text className="text-[10px] font-label font-bold text-on-surface">{tag}</Text>
+          </Pressable>
+        ) : (
+          <View className="flex-row items-center gap-1.5">
+            {tone === 'error' ? (
+              <View className="w-1.5 h-1.5 rounded-full bg-error" />
+            ) : tone === 'warn' ? (
+              <View className="w-1.5 h-1.5 rounded-full bg-primary" />
+            ) : (
+              <View className="w-1.5 h-1.5 rounded-full bg-secondary" />
+            )}
+            <Text className="text-[10px] font-label font-bold text-on-surface">{tag}</Text>
+          </View>
+        )
       ) : null}
     </>
   );

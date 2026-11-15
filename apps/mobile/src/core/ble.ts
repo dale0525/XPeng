@@ -17,10 +17,13 @@ import { BlePreconditionError, connectPreparedBle, type BleConnectPermissions } 
 
 type BlePermissions = BleConnectPermissions;
 interface BleDevice { mac: string; name: string | null; rssi: number }
+/** 只扫一台目标设备：`targetSeen` 为 false 表示这台车根本没在广播。 */
+interface BleScanTargetResult { targetSeen: boolean; rssi: number | null; total: number }
 interface BleNative {
   permissionStatus(): Promise<BlePermissions>;
   requestPermissions(): Promise<BlePermissions>;
   scan(timeoutMs: number): Promise<BleDevice[]>;
+  scanTarget(mac: string, timeoutMs: number): Promise<BleScanTargetResult>;
   stopScan(): Promise<void>;
   connect(mac: string): Promise<void>;
   connectProfile(
@@ -33,16 +36,18 @@ interface BleNative {
     autoConnect: boolean,
     timeoutMs: number,
   ): Promise<void>;
-  dumpServices(): Promise<Array<{ service: string; characteristics: Array<{ uuid: string; handle: number; properties: number }> }>>;
-  write(hex: string): Promise<void>;
-  disconnect(): Promise<void>;
+  dumpServices(mac: string): Promise<Array<{ service: string; characteristics: Array<{ uuid: string; handle: number; properties: number }> }>>;
+  write(mac: string, hex: string): Promise<void>;
+  disconnect(mac: string): Promise<void>;
   startKeepAlive(text: string): Promise<void>;
   updateKeepAlive(text: string): Promise<void>;
   stopKeepAlive(): Promise<void>;
   scheduleKeepAliveTimer(mac: string, reauth: boolean, delayMs: number): Promise<void>;
   cancelKeepAliveTimers(): Promise<void>;
+  scheduleSuppressionTimer(intervalMs: number): Promise<void>;
+  cancelSuppressionTimer(): Promise<void>;
   startProximityScan(mac: string): Promise<void>;
-  stopProximityScan(): Promise<void>;
+  stopProximityScan(reason: string): Promise<void>;
   logProximity(message: string): Promise<void>;
 }
 
@@ -50,8 +55,8 @@ const bridge = NativeModules.XpengBle as BleNative;
 
 /** 「哪些 WiFi / 地点附近不执行」要的定位与 WiFi 探针，独立原生模块见 XpengWifiLocationModule.kt。 */
 interface WifiLocationNative {
-  permissionStatus(): Promise<{ granted: boolean; locationEnabled: boolean }>;
-  requestPermissions(): Promise<{ granted: boolean; locationEnabled: boolean }>;
+  permissionStatus(): Promise<{ granted: boolean; locationEnabled: boolean; precise?: boolean }>;
+  requestPermissions(): Promise<{ granted: boolean; locationEnabled: boolean; precise?: boolean }>;
   currentSsid(): Promise<string>;
   currentLocation(maxAgeMs: number, timeoutMs: number): Promise<{ lat: number; lon: number } | null>;
 }
@@ -64,8 +69,8 @@ class NativeBleTransport implements BleTransport {
     this.mac = mac.toUpperCase();
     await connectPreparedBle(bridge, mac);
   }
-  write(data: Uint8Array) { return bridge.write(toHex(data)); }
-  disconnect() { return bridge.disconnect(); }
+  write(data: Uint8Array) { return bridge.write(this.mac, toHex(data)); }
+  disconnect() { return bridge.disconnect(this.mac); }
   onData(callback: (data: Uint8Array) => void) {
     const sub = this.emitter.addListener('xpeng-ble-data', (value) => {
       const event = value as unknown as { mac: string; hex: string };
@@ -150,6 +155,22 @@ bleEmitter.addListener('xpeng-ble-reauth-due', (value) => {
   pending.run();
 });
 
+/**
+ * 通知条文案只描述「现在实际在跑什么」。
+ *
+ * 之前文案跟着最后一条事件走，于是回前台停掉扫描后没人改它：通知一直挂着
+ * 「靠近自动解闭锁运行中」，而扫描早已停了——用户据此以为功能在跑。这里由状态
+ * 直接推出文案，前后台切换与连接变化都走同一个出口，不会漏。
+ */
+function syncKeepAlive(): void {
+  const text = !appForeground
+    ? '靠近自动解闭锁运行中'
+    : link.connected
+      ? '已连接车辆，蓝牙钥匙保持可用'
+      : '正在连接车辆蓝牙';
+  void bridge.updateKeepAlive(text);
+}
+
 const link = new BleLink(new NativeBleTransport(), authMaterialFor, {
   timers: nativeTimers,
   // 常驻模式下一次操作收尾也会报 disconnected，但那只是会话结束、连接还在，
@@ -158,14 +179,18 @@ const link = new BleLink(new NativeBleTransport(), authMaterialFor, {
   isPermanentError: (error) => error instanceof BlePreconditionError,
   onStateChange: (state) => {
     if (state.kind === 'connected') {
-      void bridge.updateKeepAlive('已连接车辆，蓝牙钥匙保持可用');
+      syncKeepAlive();
     } else if (state.kind === 'backoff') {
-      // 重连期间通知条要说明「正在重连」而不是假装已连接，否则用户会以为功能还在。
-      void bridge.updateKeepAlive('连接已断开，正在重连');
+      // 首次尝试就失败说明「从来没连上」，与「连着又掉了」是两回事：人离车几十米时
+      // 每次都落在前一种，写「已断开」会让用户以为刚才还连着。
+      void bridge.updateKeepAlive(
+        state.attempts <= 1 ? '未发现车辆蓝牙，正在重试' : '连接已断开，正在重连',
+      );
     } else if (state.kind === 'idle') {
       // 后台只扫描时连接本来就不该存在（release 必然报 idle），此时服务是扫描的载体，
       // 停了它后台判距立刻失效、进程也会被当普通后台进程回收。只有开关也关着才停服务。
       if (!proximityEnabled) void bridge.stopKeepAlive();
+      else syncKeepAlive();
     }
     publishState();
   },
@@ -248,6 +273,8 @@ function setContextState(next: BleV2ContextState) {
 }
 
 function setOperationStage(stage: BleStage) {
+  // 每次阶段跃迁都落盘：建连、认证、下发、断开的准确时刻是算延迟的唯一依据。
+  void bridge.logProximity(`stage ${stage}`);
   operationStage = stage;
   publishState();
 }
@@ -380,9 +407,60 @@ async function autoPrepareV2(vehicle: Vehicle): Promise<void> {
   await prepareV2(vehicle.vin);
 }
 
-function executePreparedV2(vin: string, commandCode: number, expectCommandAck = true) {
+/**
+ * 车不在蓝牙范围内。
+ *
+ * 与「连上了但握手失败」要区分开：前者说明这台车现在根本没在广播，蓝牙这条路
+ * 走不通，路由应当直接改走云端；后者仍值得在蓝牙上重试。
+ *
+ * 用 `name` 而不是 `instanceof` 跨包传递：路由在 `packages/protocol` 里，不能反向
+ * 依赖 App 的模块，只能按名字认这个错误。
+ */
+export class BleOutOfRangeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BleOutOfRangeError';
+  }
+}
+
+/**
+ * 车在不在蓝牙范围内：扫一眼目标广播，扫不到就别去连。
+ *
+ * 蓝牙连接超时 3 秒，但一次锁车还要算上认证与回执；人已经走远时，这三秒和后面
+ * 那些步骤全是白等。扫描比建连便宜得多（实测 1.5 s 一轮就能覆盖车旁范围），
+ * 而且能明确回答「这台车现在根本没在广播」——那是「走云端」的充分理由，
+ * 与「车在附近但这次握手失败」不是一回事，后者仍值得用蓝牙重试。
+ *
+ * 扫不到不等于一定在范围外（广播是间歇的、人体遮挡也会丢包），所以只在
+ * **连续两轮都没扫到** 时才判定不在范围内；扫到一次就按在范围内处理。
+ */
+async function vehicleInBleRange(mac: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await bridge.scanTarget(mac, 1500);
+      if (result.targetSeen) return true;
+    } catch {
+      // 扫描失败（权限、控制器被占用）不能当成「车不在附近」：那会让车旁的人
+      // 也被推去走云端。返回 true 让调用方照常尝试蓝牙。
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 前台车控入口。先确认车在不在蓝牙范围内，不在就直接抛 `BleOutOfRangeError`
+ * 让路由改走云端，不再花时间做注定失败的建连。
+ *
+ * 只对**临时建连**的场景做这个判断：常驻连接已连着时（`link.connected`）说明
+ * 车就在旁边，没必要多扫一轮。
+ */
+async function executePreparedV2(vin: string, commandCode: number, expectCommandAck = true) {
   const context = contexts.get(activeAccount(), vin);
   if (!context) throw new Error('BLE V2 vehicle context is not prepared');
+  if (!link.connected && !(await vehicleInBleRange(context.mac))) {
+    throw new BleOutOfRangeError('车辆不在蓝牙范围内');
+  }
   return executeV2({ ...context, commandCode, expectCommandAck });
 }
 
@@ -399,6 +477,13 @@ function executePreparedV2(vin: string, commandCode: number, expectCommandAck = 
  */
 /** 判距器按当前生效阈值构建；标定完成后会用新阈值重建。 */
 let proximityTracker = new ProximityTracker();
+/**
+ * 被抑制时多久复查一次 WiFi / 坐标。
+ *
+ * 抑制条件的真实变化都是分钟级的（走出 WiFi 覆盖、离开那个地点），20 s 足够及时；
+ * 又不必像判距那样 1.5 s 一轮——抑制期间既不扫蓝牙、也不该频繁唤醒定位。
+ */
+const SUPPRESSION_RECHECK_MS = 20_000;
 /** 已标定的阈值；空表示还没标定，用的是 DEFAULT_PROXIMITY_CONFIG。 */
 let calibration: ProximityCalibration | null = null;
 /**
@@ -416,19 +501,45 @@ let scanRunning = false;
 let appForeground = AppState.currentState === 'active';
 
 /**
- * 判一次「这次动作该不该被抑制」。
+ * 判一次「现在该不该被抑制」。
  *
  * 省电靠两件事：配置为空时一次探针都不发；有坐标配置时先读 WiFi，命中就不再唤醒定位。
- * 读不到 SSID / 坐标一律判不命中——探针失败不能让功能静默失效。
+ *
+ * 拿不到定位返回 `'unknown'`，**按"抑制"处理**：配了坐标规则却拿不到位置时，无法
+ * 证明人不在抑制区，这时放行等于让那条规则静默失效——2026-11-12 的「设了 100 米
+ * 还在一直解闭锁」就是这么来的。宁可少解锁一次，也不能在明确设了禁区的屋里解锁。
+ * 定位是异步的，拿不到也会在下一个复查周期重试，人一走出屋子立刻恢复。
  *
  * 位置优先用系统缓存的 last-known（120 s 内直接用）；缓存过期时允许原生要一次新定位，
  * 上限 6 s。原先是 `timeoutMs=0`（永不请求），配合"过期即无位置"的判法，导致静止在家时
  * 系统不更新 last-known → 永远拿不到位置 → 100 m 半径规则永不生效（2026-11-12 故障）。
- * 实测主动请求 4 s 内可返回；6 s 上限保证"人站在车边"时解锁不会被拖长，超时就退回旧点。
+ * 实测主动请求 4 s 内可返回；6 s 上限保证"人站在车边"时解锁不会被拖长。
  */
-async function isSuppressed(): Promise<'wifi' | 'place' | null> {
+/** 缓存精确权限结果，避免每 20 秒的复查都跨桥问一次原生。 */
+let preciseLocationKnown: boolean | null = null;
+
+async function lacksPreciseLocation(): Promise<boolean> {
+  if (preciseLocationKnown !== null) return !preciseLocationKnown;
+  try {
+    const status = await wifiBridge.permissionStatus();
+    // 老版本原生模块没有 precise 字段：退回"只要授权了就算有"，保持向后兼容。
+    preciseLocationKnown = status.precise ?? status.granted;
+  } catch {
+    preciseLocationKnown = false;
+  }
+  return !preciseLocationKnown;
+}
+
+async function isSuppressed(): Promise<'wifi' | 'place' | 'unknown' | null> {
   const plan = suppressionPlan(suppression);
   if (!plan.probeWifi) return null;
+  // 没有精确定位时抑制整体不可用：读不到 SSID、坐标误差 1~3 km。此时**放行**
+  // （当作没配规则），而不是当成"在禁区里"——后者会让功能永久不解锁，
+  // 而前者最坏只是在该挡的地方没挡，用户仍能手动解闭锁。
+  if (await lacksPreciseLocation()) {
+    void bridge.logProximity('suppression skipped: no precise location');
+    return null;
+  }
   let ssid: string | null = null;
   try { ssid = await wifiBridge.currentSsid(); } catch { ssid = null; }
   if (suppressReason({ rules: suppression, ssid, location: null }) === 'wifi') return 'wifi';
@@ -438,6 +549,8 @@ async function isSuppressed(): Promise<'wifi' | 'place' | null> {
     const fix = await wifiBridge.currentLocation(120_000, 6_000);
     if (fix && Number.isFinite(fix.lat) && Number.isFinite(fix.lon)) location = { lat: fix.lat, lon: fix.lon };
   } catch { location = null; }
+  // 有坐标规则却拿不到位置：不能证明自己在禁区外，按抑制处理。
+  if (location === null) return 'unknown';
   return suppressReason({ rules: suppression, ssid: null, location });
 }
 
@@ -458,7 +571,7 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
   const mac = proximityMac;
   if (scanRunning) {
     scanRunning = false;
-    await bridge.stopProximityScan().catch(() => {});
+    await bridge.stopProximityScan('action starting').catch(() => {});
   }
   let failed = false;
   let message = '';
@@ -509,7 +622,8 @@ async function runProximityAction(action: ProximityAction): Promise<void> {
   const mac = proximityMac;
   const suppressed = await isSuppressed();
   if (suppressed !== null) {
-    // 抑制期间不碰 GATT：扫描环继续跑，所以人一离开这个 WiFi / 半径，下次靠近立刻恢复。
+    // 兜底：抑制条件在扫描期间也可能变（比如中途连上了名单里的 WiFi），那时扫描
+    // 已经在跑，只有这里能拦住。正常路径下被抑制时扫描根本不会启动。
     void bridge.logProximity(`action=${action} skipped by ${suppressed}`);
     proximityBusy = false;
     return;
@@ -518,7 +632,7 @@ async function runProximityAction(action: ProximityAction): Promise<void> {
   // (GATT_CONN_FAIL_ESTABLISH)，重试也落在同一窗口里失败。两者共用同一个控制器。
   if (scanRunning) {
     scanRunning = false;
-    await bridge.stopProximityScan().catch(() => {});
+    await bridge.stopProximityScan('action starting').catch(() => {});
   }
   try {
     await runProximityActionWithRetry(action);
@@ -538,12 +652,72 @@ proximityEmitter.addListener('xpeng-ble-proximity-rssi', (value) => {
   if (!proximityEnabled || !proximityMac) return;
   if (event.mac.toUpperCase() !== proximityMac) return;
   const action = proximityTracker.push(Date.now(), event.rssi);
-  if (action) void runProximityAction(action);
+  if (action) {
+    logProximityTrigger(action, event.rssi);
+    void runProximityAction(action);
+  }
 });
+/** 扫描失败后的自动恢复计时器（原生侧，后台 JS 定时器不可靠）。 */
+let scanRecoverPending = false;
+
 proximityEmitter.addListener('xpeng-ble-proximity-failed', (value) => {
   const event = value as unknown as { code: number };
-  console.warn(`[ble] 后台扫描失败 code=${event.code}`);
+  // 原实现只打一行 warn 就结束：扫描死了、`scanRunning` 仍为 true、通知仍写「运行中」，
+  // 于是功能静静地再也不工作——用户看到的就是「开着却一直不解锁」。
+  // 现在把状态复位并安排恢复；失败原因留痕，事后能判断是权限、控制器还是被抢占。
+  void bridge.logProximity(`scan failed: code=${event.code}`);
+  scanRunning = false;
+  if (scanRecoverPending) return;
+  scanRecoverPending = true;
+  // 间隔 15 s：控制器被别的 App 抢占、蓝牙刚开启等瞬态原因需要一点时间才恢复，
+  // 立即重试通常还是同一个失败。
+  void bridge.scheduleSuppressionTimer(15_000).catch(() => {});
 });
+
+/**
+ * 扫描恢复：`scanRecoverPending` 为真时由抑制复查的同一个原生心跳驱动。
+ *
+ * 与抑制复查共用一个定时器是刻意的：两者都只在后台、都只在扫描没跑时才有意义，
+ * 两套定时器只会让「现在到底在等什么」变得难以判断。
+ */
+async function recoverScanIfNeeded(): Promise<void> {
+  if (!scanRecoverPending) return;
+  if (!proximityEnabled || appForeground || scanRunning) return;
+  scanRecoverPending = false;
+  void bridge.logProximity('scan recovering');
+  await startScanUnlessSuppressed();
+}
+/**
+ * 抑制复查到点了：重新判一次 WiFi / 坐标。
+ *
+ * 仍命中就什么都不做（定时器会自己续下一次）；一旦不再命中，说明人已经走出那个
+ * 禁区，此时才把蓝牙扫描真正拉起来——这是抑制期间唯一会进入扫描的入口。
+ */
+proximityEmitter.addListener('xpeng-ble-suppression-due', () => {
+  // 扫描失败后的恢复优先：它要先跑，才能决定要不要重新起扫。
+  if (scanRecoverPending) {
+    void recoverScanIfNeeded();
+    return;
+  }
+  if (!proximityEnabled || !proximityMac || scanRunning || appForeground) return;
+  void startScanUnlessSuppressed();
+});
+
+/**
+ * 判距触发点日志。
+ *
+ * 用户报告"解锁太晚"时，唯一能分辨的是这几件事的先后：扫描何时在跑、何时扫到、
+ * 何时判出靠近、何时开始建连。判距器的每次 push 都落一行不划算（1.5 s 一轮刷屏），
+ * 所以只在触发时刻记一行，带上当轮 RSSI 与触发前已经历的轮数。
+ */
+function logProximityTrigger(action: ProximityAction, rssi: number | null): void {
+  void bridge.logProximity(`trigger ${action} rssi=${rssi ?? 'none'} foregroundGated=${appForeground}`);
+}
+
+/** 手动操作也要落盘：事后才能分辨"人点的"和"自动触发的"。 */
+function logUserAction(message: string): void {
+  void bridge.logProximity(`user ${message}`);
+}
 
 /**
  * 开启/关闭「靠近自动解闭锁」，并把扫描拉起或停掉。
@@ -560,22 +734,88 @@ async function setProximityEnabled(enabled: boolean, vin?: string): Promise<void
   if (action === 'stop') {
     scanRunning = false;
     proximityVin = undefined;
-    await bridge.stopProximityScan().catch(() => {});
+    await bridge.stopProximityScan('proximity disabled').catch(() => {});
+    await bridge.cancelSuppressionTimer().catch(() => {});
     return;
   }
   if (action === 'none' || !target || !mac) return;
   proximityVin = target;
   proximityMac = mac.toUpperCase();
+  await startScanUnlessSuppressed();
+}
+
+/**
+ * 起扫描；但抑制条件命中时**根本不启动扫描**，只留一个轻量的复查定时器。
+ *
+ * 抑制看的是连着哪个 WiFi、人在哪个坐标，与蓝牙毫无关系。放在扫描前面判，人待在
+ * 禁区的整段时间就一轮蓝牙都不用扫——既不耗电，也不会因为白跑判距而出现「明明在
+ * 禁区里却停过一次扫描再恢复」的抖动。条件是会变的（走出 WiFi 覆盖、离开那个地点），
+ * 所以留一个原生复查定时器，命中就继续不扫，一旦不命中立刻把扫描拉起来。
+ */
+/**
+ * 起扫前用一次短扫描播种判距器。
+ *
+ * 扫不到（车不广播、人离得远）时**不播种**：保持默认"不在附近"，这样真正走近时
+ * 仍会正常触发解锁。只有确实扫到、且强度足以判断远近时才写入状态。
+ */
+async function seedProximityState(mac: string): Promise<void> {
+  try {
+    const result = await bridge.scanTarget(mac, 1500);
+    if (!result.targetSeen || typeof result.rssi !== 'number') return;
+    proximityTracker.seed(result.rssi);
+    void bridge.logProximity(`seeded rssi=${result.rssi} nearby=${proximityTracker.isNearby}`);
+  } catch {
+    // 播种失败不影响正常判距，让它照旧从"不在附近"起步。
+  }
+}
+
+async function startScanUnlessSuppressed(): Promise<void> {
+  const mac = proximityMac;
+  if (!mac) return;
+  const suppressed = await isSuppressed();
+  void bridge.logProximity(`suppression check: ${suppressed ?? 'clear'}`);
+  if (suppressed !== null) {
+    scanRunning = false;
+    void bridge.logProximity(`scan held by ${suppressed}`);
+    // 服务仍要拉起：它是复查定时器与后续扫描的载体，也是用户在通知条上看到
+    // 「功能在跑」的依据。停掉的只是耗电的蓝牙扫描。
+    await bridge.startKeepAlive(
+      suppressed === 'wifi' ? '已连接指定 WiFi，暂不自动解闭锁'
+        : suppressed === 'place' ? '在指定地点附近，暂不自动解闭锁'
+          : '无法获取位置，暂不自动解闭锁',
+    ).catch(() => {});
+    await bridge.scheduleSuppressionTimer(SUPPRESSION_RECHECK_MS).catch(() => {});
+    return;
+  }
+  // 只清「抑制复查」的定时器；扫描失败后的恢复定时器由 scanRecoverPending 驱动，
+  // 这里无脑取消会把刚排上的恢复一并抹掉。
+  if (!scanRecoverPending) await bridge.cancelSuppressionTimer().catch(() => {});
   scanRunning = true;
   // 扫描必须挂在 connectedDevice 前台服务下：息屏进 Doze 后普通后台进程会被冻结，
   // 服务既抬进程优先级也持唤醒锁。服务只能趁 App 还在前台时拉起。
   await bridge.startKeepAlive('靠近自动解闭锁运行中').catch((error) => {
     console.warn('[ble] 判距前台服务启动失败:', error instanceof Error ? error.message : String(error));
   });
-  await bridge.startProximityScan(mac).catch((error) => {
+  // 起扫前先看一眼当前信号，用它播种判距器。
+  // 不播种的话，判距器从"不在附近"起步，而人可能本来就在车边（手动解锁完退出 App
+  // 就是这种情形），第一眼看到 -35 就会当成"刚走近"补发一次解锁。
+  // 这里不产生动作，只确立"已经在附近/还不在附近"这个前提。
+  await seedProximityState(mac);
+  try {
+    await bridge.startProximityScan(mac);
+    void bridge.logProximity('scan started');
+  } catch (error) {
+    // 启动失败跟扫描中途失败是同一类故障，必须走同一条恢复路径：原实现只把
+    // scanRunning 置 false 然后放弃，功能从此静默失效。
     scanRunning = false;
-    console.warn('[ble] 后台扫描启动失败:', error instanceof Error ? error.message : String(error));
-  });
+    void bridge.logProximity(
+      `scan start failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    if (!scanRecoverPending) {
+      scanRecoverPending = true;
+      await bridge.scheduleSuppressionTimer(15_000).catch(() => {});
+    }
+  }
 }
 
 /** 前后台切换：前台持有常驻连接；后台释放连接、只留扫描。 */
@@ -586,8 +826,13 @@ async function setForeground(foreground: boolean): Promise<void> {
     // 连接槽，也白耗电。
     if (scanRunning) {
       scanRunning = false;
-      await bridge.stopProximityScan().catch(() => {});
+      await bridge.stopProximityScan('app foregrounded').catch(() => {});
     }
+    // 复查定时器同样只在后台有意义：前台靠常驻连接，留着它只会白唤醒定位。
+    await bridge.cancelSuppressionTimer().catch(() => {});
+    // 停掉扫描后必须立刻改通知：下面 holdLink 只有在真的发起连接时才会触发
+    // onStateChange，物料还没就绪时它什么都不做，通知就会一直挂着「运行中」。
+    syncKeepAlive();
     // 前台恢复连接：用已记下的车辆上下文，没有就不连（还没准备好物料）。
     if (holdTarget) await holdLink(holdTarget.mac);
     return;
@@ -626,7 +871,7 @@ async function startCalibration(durationMs = 15000): Promise<{
   // 断开常驻连接，否则车不广播、采不到任何值。
   if (link.connected) await link.release().catch(() => {});
   scanRunning = false;
-  await bridge.stopProximityScan().catch(() => {});
+  await bridge.stopProximityScan('calibration start').catch(() => {});
   const samples: number[] = [];
   return await new Promise((resolve) => {
     calibrationSession = { resolve, samples };
@@ -637,7 +882,7 @@ async function startCalibration(durationMs = 15000): Promise<{
       const collected = calibrationSession.samples;
       calibrationSession = undefined;
       scanRunning = false;
-      void bridge.stopProximityScan().catch(() => {});
+      void bridge.stopProximityScan('calibration done').catch(() => {});
       // 用中位数：抗多径弱值也抗单次强值。上一版取 max 在实机上得 -61，
       // 而门边 149 样本的 p90 才 -62——12 秒窗口的最强值不代表日常贴脸强度。
       const result = buildCalibrationFromMedian(collected);
@@ -681,6 +926,7 @@ export const bleLink = {
   startCalibration,
   currentThresholds,
   applyCalibration,
+  logUserAction,
   get calibration() { return calibration; },
   parseStoredCalibration: parseCalibration,
   serializeCalibration,
@@ -689,11 +935,18 @@ export const bleLink = {
   get suppression() { return suppression; },
   currentWifiSsid: () => wifiBridge.currentSsid(),
   locationPermission: () => wifiBridge.permissionStatus(),
-  requestLocationPermission: () => wifiBridge.requestPermissions(),
+  // 授权结果会变（用户随时可能收回精确权限），每次请求后清掉缓存。
+  requestLocationPermission: async () => {
+    const status = await wifiBridge.requestPermissions();
+    preciseLocationKnown = null;
+    return status;
+  },
   currentLocation: (maxAgeMs = 120_000, timeoutMs = 8_000) => wifiBridge.currentLocation(maxAgeMs, timeoutMs),
   get foreground() { return appForeground; },
   get proximityEnabled() { return proximityEnabled; },
   /** 已准备好的车辆 VIN（`prepareV2` 成功后才非空）。召唤会话靠它取 V2 车控上下文。 */
   currentVin: () => holdTarget?.vin ?? null,
+  /** 已准备车辆的 BLE 地址：原生按 MAC 管理链路，写帧必须指明走哪一条。 */
+  currentMac: () => holdTarget?.mac ?? null,
   executeV2,
 };

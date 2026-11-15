@@ -128,6 +128,10 @@ class MqttClient(
                 }
             }
             "连接已关闭"
+        } catch (e: java.io.IOException) {
+            // JDK 的原文（如 "software caused connection abort"）是给开发者看的，
+            // 直接当提示文案抛到界面上用户无法理解；统一成可读原因。
+            "网络中断"
         } catch (e: Exception) {
             "读取失败: ${e.message}"
         }
