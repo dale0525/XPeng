@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type * as React from 'react';
-import { Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { plateShadow } from '../atoms';
 import { themeVars, useThemeMode } from '../../core/theme';
 import { Icon } from '../icons';
@@ -69,7 +69,13 @@ export function ProximityCalibrationSheet(props: {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <View className="justify-end bg-black/45" style={[themeVars(scheme), { flex: 1 }]}>
+      {/* 键盘弹出时把弹层顶上去：原来整块贴底固定，输入名称/标定值时输入框被键盘
+          完全盖住，用户看不见自己在打什么。iOS 用 padding、Android 用 height 才是
+          各自的正确行为。 */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="justify-end bg-black/45"
+        style={{ flex: 1 }}>
         <View className="bg-surface-container-lowest rounded-t-[28px] overflow-hidden" style={[themeVars(scheme), plateShadow]}>
           <View className="w-full pt-3 pb-1 items-center justify-center">
             <View className="w-9 h-1 rounded-full bg-surface-container-highest" />
@@ -240,7 +246,7 @@ export function ProximityCalibrationSheet(props: {
             ) : null}
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type * as React from 'react';
-import { Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { plateShadow, SpinnerIcon } from '../atoms';
 import { themeVars, useThemeMode } from '../../core/theme';
 import { Icon } from '../icons';
@@ -36,6 +36,31 @@ export function ProximitySuppressionSheet(props: {
     setBusy(null);
   }, [visible, rules]);
 
+  /**
+   * 取坐标/读 WiFi 名之前统一要权限。
+   *
+   * 原来「加入当前 WiFi」根本不申请权限，用户只看到一句"读不到名字"，
+   * 不知道要自己去授权；「记录当前坐标」虽然申请了，但没区分精确权限，
+   * 只有粗略位置时同样读不到 SSID。
+   * 返回 null 表示这次没拿到，调用方直接结束（提示已写好）。
+   */
+  const ensureLocationPermission = async (): Promise<{ granted: boolean; locationEnabled: boolean } | null> => {
+    const permission = await bleLink.requestLocationPermission();
+    if (!permission.granted) {
+      setMessage('缺少定位权限，无法记录。请在弹出的系统对话框里选择「使用精确位置」。');
+      return null;
+    }
+    if (permission.precise === false) {
+      setMessage('只有「大致位置」权限时读不到 WiFi 名、坐标也不够准。请到系统设置里把定位权限改为「精确」。');
+      return null;
+    }
+    if (!permission.locationEnabled) {
+      setMessage('系统定位开关是关的，请先打开定位。');
+      return null;
+    }
+    return permission;
+  };
+
   const addSsid = (raw: string) => {
     const name = raw.trim();
     if (name === '') return;
@@ -50,9 +75,13 @@ export function ProximitySuppressionSheet(props: {
     setBusy('ssid');
     setMessage(null);
     try {
+      // 读 SSID 要精确定位权限（Android 把 WiFi 名当位置敏感字段，缺权限只回占位串）。
+      // 原来直接去读，没权限时用户只看到"读不到名字"这句无解的话，不知道该去授权。
+      const permission = await ensureLocationPermission();
+      if (!permission) return;
       const ssid = await bleLink.currentWifiSsid();
       if (!ssid) {
-        setMessage('读不到当前 WiFi 的名字。请确认已授权定位权限、系统定位开关已打开，并已连上目标网络。');
+        setMessage('读不到当前 WiFi 的名字。请确认已连上目标网络、系统定位开关已打开。');
         return;
       }
       addSsid(ssid);
@@ -68,15 +97,8 @@ export function ProximitySuppressionSheet(props: {
     setBusy('locate');
     setMessage(null);
     try {
-      const permission = await bleLink.requestLocationPermission();
-      if (!permission.granted) {
-        setMessage('缺少定位权限，无法记录坐标。');
-        return;
-      }
-      if (!permission.locationEnabled) {
-        setMessage('系统定位开关是关的，无法记录坐标。');
-        return;
-      }
+      const permission = await ensureLocationPermission();
+      if (!permission) return;
       const fix = await bleLink.currentLocation(30_000, 8_000);
       if (!fix) {
         setMessage('这次没取到坐标，请到室外或靠窗的地方再试。');
@@ -115,7 +137,13 @@ export function ProximitySuppressionSheet(props: {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
-      <View className="justify-end bg-black/45" style={[themeVars(scheme), { flex: 1 }]}>
+      {/* 键盘弹出时把弹层顶上去：原来整块贴底固定，输入名称/标定值时输入框被键盘
+          完全盖住，用户看不见自己在打什么。iOS 用 padding、Android 用 height 才是
+          各自的正确行为。 */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="justify-end bg-black/45"
+        style={{ flex: 1 }}>
         <View className="bg-surface-container-lowest rounded-t-[28px] overflow-hidden" style={[themeVars(scheme), plateShadow]}>
           <View className="w-full pt-3 pb-1 items-center justify-center">
             <View className="w-9 h-1 rounded-full bg-surface-container-highest" />
@@ -174,13 +202,20 @@ export function ProximitySuppressionSheet(props: {
                   <Text className="text-[13px] font-headline font-semibold text-on-primary-fixed">添加</Text>
                 </Pressable>
               </View>
-              <Pressable onPress={addCurrentSsid} disabled={busy !== null} className="flex-row items-center gap-2 active:scale-95">
+              {/* 忙碌时整行降到半透明：原来只有 disabled 生效而外观不变，
+                  用户看不出已经点过了，会反复点。 */}
+              <Pressable
+                onPress={addCurrentSsid}
+                disabled={busy !== null}
+                className={`flex-row items-center gap-2 ${busy !== null ? 'opacity-50' : 'active:scale-95'}`}>
                 {busy === 'ssid' ? (
                   <SpinnerIcon size={14} className="text-primary" />
                 ) : (
                   <Text className="text-[14px] font-icon text-primary">{Icon.add}</Text>
                 )}
-                <Text className="text-[12px] font-headline font-semibold text-primary">加入当前连着的 WiFi</Text>
+                <Text className="text-[12px] font-headline font-semibold text-primary">
+                  {busy === 'ssid' ? '正在读取 WiFi 名…' : '加入当前连着的 WiFi'}
+                </Text>
               </Pressable>
             </View>
 
@@ -204,13 +239,20 @@ export function ProximitySuppressionSheet(props: {
                   ))}
                 </View>
               )}
-              <Pressable onPress={addCurrentPlace} disabled={busy !== null} className="flex-row items-center gap-2 active:scale-95">
+              <Pressable
+                onPress={addCurrentPlace}
+                disabled={busy !== null}
+                className={`flex-row items-center gap-2 ${busy !== null ? 'opacity-50' : 'active:scale-95'}`}>
                 {busy === 'locate' ? (
                   <SpinnerIcon size={14} className="text-primary" />
                 ) : (
                   <Text className="text-[14px] font-icon text-primary">{Icon.gps_fixed}</Text>
                 )}
-                <Text className="text-[12px] font-headline font-semibold text-primary">记录当前坐标</Text>
+                <Text className="text-[12px] font-headline font-semibold text-primary">
+                  {/* 取坐标最多要 8 秒（等一次单次定位）。原来文案不变、只有 14px 的小图标
+                      在转，用户以为点了没反应——实测时就因此被误判成"没响应"。 */}
+                  {busy === 'locate' ? '正在取坐标，最多 8 秒…' : '记录当前坐标'}
+                </Text>
               </Pressable>
             </View>
 
@@ -226,7 +268,7 @@ export function ProximitySuppressionSheet(props: {
             </Pressable>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -264,7 +306,11 @@ function PlaceRow({
             onChange({ radiusM: Number.isFinite(n) ? n : 0 });
           }}
           keyboardType="number-pad"
-          className="w-[72px] h-[34px] rounded-full bg-inset px-3 text-[13px] font-body text-on-surface text-center"
+          className="w-[72px] h-[38px] rounded-full bg-inset px-2 text-[13px] font-body text-on-surface text-center"
+          // Android 的 TextInput 默认带字体额外上下留白（includeFontPadding）与
+          // 自身 vertical padding，在 34~38px 这种矮容器里会把数字顶部切掉。
+          // 关掉额外留白并把竖直内边距清零，数字才能完整落在圆角框内。
+          style={{ paddingVertical: 0, includeFontPadding: false }}
         />
         <Text className="text-[12px] font-body text-on-surface-variant">米内不解锁</Text>
         <Text className="flex-1 text-right text-[11px] font-mono text-outline">
