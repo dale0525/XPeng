@@ -12,6 +12,7 @@ import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
+import java.io.File
 import java.util.UUID
 
 @SuppressLint("MissingPermission")
@@ -82,6 +83,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         }
 
         fun close(reason: String) {
+            XpengLog.log("ble", "close mac=$mac reason=$reason")
             clearDeadline()
             retry?.let { handler.removeCallbacks(it) }; retry = null
             val old = gatt
@@ -167,6 +169,8 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, state: Int) { handler.post {
                 if (g !== gatt) return@post
+                // 建连结果必须落盘：排查「为什么没连上」时，status 与 state 是唯一的一手事实。
+                XpengLog.log("ble", "conn state=$state status=$status mac=${g.device.address}")
                 if (status != BluetoothGatt.GATT_SUCCESS || state == BluetoothProfile.STATE_DISCONNECTED) {
                     if (status == 133 && retryOnEstablishFailure("GATT disconnected: $status")) return@post
                     close("GATT disconnected: $status")
@@ -175,6 +179,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             } }
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) { handler.post {
                 if (g !== gatt) return@post
+                XpengLog.log("ble", "services discovered status=$status")
                 if (status != BluetoothGatt.GATT_SUCCESS) { close("Service discovery failed: $status"); return@post }
                 val byHandle = resolveByHandle(g)
                 val service = byHandle.service ?: g.getService(serviceId)
@@ -234,6 +239,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
 
         fun incoming(g: BluetoothGatt, uuid: UUID, value: ByteArray) { handler.post {
             if (g !== gatt || uuid != readId) return@post
+            XpengLog.log("ble", "rx ${value.size}B ${value.joinToString("") { "%02x".format(it.toInt() and 255) }}")
             emit("xpeng-ble-data", Arguments.createMap().apply {
                 putString("mac", g.device.address); putString("hex", value.joinToString("") { "%02x".format(it.toInt() and 255) })
             })
@@ -267,7 +273,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         } }
         // 扫描失败要主动上报：否则服务静默空转，用户会以为功能开着却从不触发。
         override fun onScanFailed(code: Int) { handler.post {
-            android.util.Log.i("XpengBle", "proximity scan failed: code=$code")
+            XpengLog.log("ble", "scan failed: code=$code")
             proximityMac = null
             proximityTick?.let { handler.removeCallbacks(it) }; proximityTick = null
             scanner2?.stopScan(this); scanner2 = null
@@ -454,6 +460,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             p.reject("E_HEX", "Invalid hexadecimal frame"); return@post
         }
         val bytes = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+        XpengLog.log("ble", "tx ${bytes.size}B $hex")
         link.writes.addLast(Write(bytes, p)); link.drain()
     } }
     @ReactMethod fun disconnect(mac: String, p: Promise) { handler.post {
@@ -595,7 +602,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             p.reject("E_SCAN", e.message ?: "startProximityScan failed")
             return@post
         }
-        android.util.Log.i("XpengBle", "proximity scan start: mac=$proximityMac mode=BALANCED")
+        XpengLog.log("ble", "scan start: mac=$proximityMac mode=BALANCED")
         p.resolve(null)
         scheduleProximityTick()
       }
@@ -609,9 +616,45 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
 
     /** 判距链路的可观测性：release 包下 JS 的 console.warn 不进 logcat。 */
     @ReactMethod fun logProximity(message: String, p: Promise) {
-        android.util.Log.i("XpengBle", "proximity $message")
+        XpengLog.log("ble", message)
         p.resolve(null)
     }
+
+    /**
+     * 导出日志到用户可直接取的位置。
+     *
+     * 返回文件绝对路径；`adb pull <path>` 即可取走。日志本身一直在写外部私有目录，
+     * 这里只是把它复制一份到 Download 下，方便不接电脑时用文件管理器取。
+     */
+    @ReactMethod fun exportLog(p: Promise) { handler.post {
+        try {
+            val src = XpengLog.file()
+            if (src == null) { p.reject("E_NO_LOG", "No log file yet"); return@post }
+            val downloads = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+            downloads.mkdirs()
+            val dst = File(downloads, "xpcarinfo.log")
+            src.copyTo(dst, overwrite = true)
+            XpengLog.log("ble", "log exported to ${dst.absolutePath}")
+            p.resolve(dst.absolutePath)
+        } catch (e: Throwable) {
+            p.reject("E_EXPORT", e.message ?: e.javaClass.simpleName)
+        }
+    } }
+
+    /** 日志文件当前路径与大小，给界面显示"日志在哪、有多少"。 */
+    @ReactMethod fun logInfo(p: Promise) { handler.post {
+        val f = XpengLog.file()
+        p.resolve(Arguments.createMap().apply {
+            putString("path", f?.absolutePath)
+            putDouble("bytes", (f?.length() ?: 0L).toDouble())
+        })
+    } }
+
+    /** 清空日志（用户主动要求时用；平时永不自动清理）。 */
+    @ReactMethod fun clearLog(p: Promise) { handler.post {
+        XpengLog.clear()
+        p.resolve(null)
+    } }
 
     private fun scheduleProximityTick() {
         proximityTick?.let { handler.removeCallbacks(it) }
@@ -626,7 +669,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             // 只能靠这行：没有它就只能看到"没触发"，看不出是没扫到还是阈值不对。
             val seenAny = proximityAllResults
             proximityAllResults = 0
-            android.util.Log.i("XpengBle", "proximity round=$proximityRounds rssi=${rssi ?: "none"} results=$seenAny")
+            XpengLog.log("ble", "round=$proximityRounds rssi=${rssi ?: "none"} results=$seenAny")
             emit("xpeng-ble-proximity-rssi", Arguments.createMap().apply {
                 putString("mac", mac)
                 if (rssi == null) putNull("rssi") else putInt("rssi", rssi)
@@ -645,7 +688,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         proximityTick?.let { handler.removeCallbacks(it) }; proximityTick = null
         try { scanner2?.stopScan(proximityCallback) } catch (_: Exception) {}
         scanner2 = null
-        if (wasRunning) android.util.Log.i("XpengBle", "proximity scan stop: $reason")
+        if (wasRunning) XpengLog.log("ble", "scan stop: $reason")
     }
 
     override fun invalidate() {

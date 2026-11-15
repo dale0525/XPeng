@@ -164,10 +164,12 @@ export function ControlScreen(props: {
 
   async function run(def: CommandDef) {
     setStates((s) => ({ ...s, [def.id]: 'pending' }));
+    bleLink.logUserAction(`command ${def.id} tap`);
     const result = await sendVehicleCommand(vehicle, def, {
       send: (command) => carLink.send(command),
       executePreparedV2: (vin, code) => bleLink.executePreparedV2(vin, code),
     });
+    bleLink.logUserAction(`command ${def.id} result ok=${result.ok}${result.error ? ` err=${result.error}` : ''}`);
     if (!result.ok) console.warn(`[cmd] ${def.id}:`, result.error, 'msgId=', result.msgId);
     // 闪灯没有可读状态字段（只能靠人眼确认），所以「已响应」只跟这次下发成功挂钩，
     // 且限时显示，不能像状态字段那样常驻。
