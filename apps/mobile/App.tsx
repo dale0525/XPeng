@@ -186,6 +186,8 @@ function Shell() {
   useEffect(() => {
     void bleLink.setForeground(true);
     const sub = AppState.addEventListener('change', (next) => {
+      // 前后台切换是解锁快慢的关键变量（前台不扫、后台才扫），必须落盘。
+      bleLink.logUserAction(`appstate ${next}`);
       void bleLink.setForeground(next === 'active');
       // 系统会在进后台后掐断 MQTT 长连接（断开原因实测是 socket 的
       // "software caused connection abort"）。后台期间没有重连时机，回到前台
@@ -196,6 +198,8 @@ function Shell() {
   }, []);
 
   const toggleProximity = (enabled: boolean) => {
+    // 手动操作必须落盘：排查「功能为什么会关着」时，只有记录能证明是谁在什么时候关的。
+    void bleLink.logUserAction(`toggle proximity=${enabled}`);
     setProximityEnabled(enabled);
     native.storageSet(StorageKey.proximity, enabled ? '1' : '0').catch(() => {});
     void bleLink.setProximityEnabled(enabled).catch((error) => {
