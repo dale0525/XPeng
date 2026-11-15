@@ -100,6 +100,16 @@ export function serializeCalibration(calibration: ProximityCalibration): string 
  * 中位数的好处：抗多径弱值（不像均值被 -96 拉低），也抗单次强值（不像 max 被
  * -57 带飞）。门边实测中位 -71，与实际体感最接近。
  */
+/**
+ * 闭锁阈值相对解锁阈值的滞回带宽（dB）。
+ *
+ * 2026-11-15 用当天 23127 轮真实 RSSI 离线回放定的：
+ * - 带 20（-75/-95）：闭锁全天 0 次——人走远到 20 米信号也只有 -80 上下，
+ *   碰不到 -95，锁车等于失效。
+ * - 带 15（-75/-90）：12:41 走远那次正常触发，另有 11:51 一次误锁（当时人在车边
+ *   来回走动，信号在 -92…-96 漂移）。多径下这两个场景信号形态几乎一样，靠阈值
+ *   区分不掉，只能接受偶尔多锁一次。
+ */
 export const CALIBRATION_HYSTERESIS_DB = 15;
 
 /**
@@ -107,11 +117,11 @@ export const CALIBRATION_HYSTERESIS_DB = 15;
  *
  * 用户 2026-11-12 最终定案：标定时把手机放在**主驾门把手旁**，解锁值取中位数 -5 dB。
  * 演进：先定 -12（中位 -57 → -69），后按实际体感改为 -5（中位 -57 → -62）。
- *
- * 为什么需要偏移而不是直接用中位数：门把手旁是采样时最强的位置，而用户希望
- * "走到车边就解锁"，比贴门把手稍远一点。偏移量由用户按实际体感微调。
+ * 2026-11-15 再改为 -20：当晚 20:51 手动解锁前，走近全程最强只有 -75，而 -5 算出的
+ * 阈值是 -60，差 15 dB 永远达不到——门把手是采样时最强的位置，而用户实际希望解锁的
+ * 位置离车还有几米，信号天然弱 15~20 dB。偏移量由用户按实际体感微调。
  */
-export const CALIBRATION_NEAR_OFFSET_DB = 5;
+export const CALIBRATION_NEAR_OFFSET_DB = 20;
 
 export function buildCalibrationFromMedian(
   samples: ReadonlyArray<number | null | undefined>,
