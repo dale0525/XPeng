@@ -495,6 +495,21 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     } }
 
     /**
+     * 发一条一次性动作通知（如「已自动锁车」）。
+     *
+     * 走原生而不是 JS 的推送库：动作发生在后台，此刻 JS 可能已被系统冻结，
+     * 而这条通知的意义正是「事情做完了，即使你没在看手机」。
+     */
+    @ReactMethod fun notifyEvent(title: String, text: String, p: Promise) { handler.post {
+        try {
+            BleKeepAliveService.notifyEvent(ctx, title, text)
+            p.resolve(null)
+        } catch (e: Throwable) {
+            p.reject("E_NOTIFY", e.message ?: e.javaClass.simpleName, e)
+        }
+    } }
+
+    /**
      * 由原生计时驱动常驻连接的重连/重鉴权。
      *
      * 为什么不用 JS 的 `setTimeout`：RN 的定时器走宿主(View)时钟，Activity 退到后台后

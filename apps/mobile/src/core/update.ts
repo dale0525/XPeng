@@ -125,6 +125,22 @@ export function installApk(path: string): Promise<void> {
 }
 
 /**
+ * 系统安装器的结果事件。
+ *
+ * 装成功时本进程会被替换掉，用户再打开 App 就是新版本，所以这个事件主要用于
+ * 失败与取消：签名不一致、降级安装、用户点了取消——原来这些情况界面都会永远
+ * 停在「正在唤起系统安装器」。
+ */
+export function onInstallResult(cb: (ok: boolean, message?: string) => void): () => void {
+  const emitter = new NativeEventEmitter(NativeModules.XpengUpdater);
+  const sub = emitter.addListener('xpeng-update-install-result', (e) => {
+    const r = e as unknown as { ok: boolean; message?: string };
+    cb(r.ok, r.message);
+  });
+  return () => sub.remove();
+}
+
+/**
  * 「关于」卡片的状态机。检查与下载都由用户点出来，不做启动自动检查——
  * 这个 App 的主要用途是车控，启动路径上不该多一个网络请求。
  */
@@ -167,6 +183,19 @@ export function useUpdater() {
       unsubRef.current?.();
       unsubRef.current = null;
       setState({ kind: 'installing', release });
+      // 安装器是独立 Activity，拉起后必须等它的结果事件，否则界面永远停在
+      // 「正在唤起系统安装器」。装成功时进程会被替换，这个回调用不上；它真正
+      // 负责的是失败与取消——签名不一致、降级安装、用户点了取消。
+      unsubRef.current = onInstallResult((ok, message) => {
+        unsubRef.current?.();
+        unsubRef.current = null;
+        if (ok) {
+          // 装成功通常伴随进程重启；万一没重启，退回「当前已是最新」而不是继续转圈。
+          setState({ kind: 'current', version: release.version });
+          return;
+        }
+        setState({ kind: 'failed', message: describeInstallFailure(message) });
+      });
       await installApk(path);
     } catch (e) {
       unsubRef.current?.();
@@ -176,6 +205,18 @@ export function useUpdater() {
   }, [state, version]);
 
   return { version, state, check, download };
+}
+
+/** 系统安装器回报的原文，翻译成能指导用户动作的一句话。 */
+function describeInstallFailure(message?: string): string {
+  const raw = message ?? '';
+  if (/签名|signature|INSTALL_FAILED_UPDATE_INCOMPATIBLE/i.test(raw)) {
+    return `安装包签名与已装版本不一致，系统拒绝覆盖。${raw}`;
+  }
+  if (/降级|downgrade|INSTALL_FAILED_VERSION_DOWNGRADE/i.test(raw)) {
+    return `这是比已装版本更旧的包，系统拒绝降级安装。${raw}`;
+  }
+  return raw || '安装未完成（可能点了取消）';
 }
 
 function describeError(e: unknown): string {

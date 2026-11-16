@@ -116,11 +116,26 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        // release 签名密钥不入库：CI 从 GitHub Secrets 解出 keystore 与口令，再经 -P 传进来。
-        // 本地没有这套属性时该 signingConfig 不创建，release 构建会自动退回 debug 签名。
+        // release 签名密钥不入库：CI 从 GitHub Secrets 解出 keystore 与口令，再经 -P 传进来；
+        // 本地则从 keystore/signing.properties 读同一份密钥（该文件也在 .gitignore 里）。
+        //
+        // 两边必须用同一套密钥：否则本地构建的包与正式版签名不同，互相覆盖安装会被系统
+        // 拒绝（2026-11-16 实际发生：本地 debug 签名装不上 release 签名的 v0.8.0），
+        // 而卸载重装会清掉登录态与蓝牙标定。
+        def localSigning = new Properties()
+        def localSigningFile = rootProject.file('keystore/signing.properties')
+        if (localSigningFile.exists()) {
+            localSigningFile.withInputStream { localSigning.load(it) }
+            // -P 传进来的优先（CI），其次本地文件
+            localSigning.each { k, v ->
+                if (!project.hasProperty(k)) { project.ext.set(k, v) }
+            }
+        }
         if (project.hasProperty("xpReleaseStoreFile")) {
             release {
-                storeFile file(project.property("xpReleaseStoreFile").toString())
+                // 本地属性里写的是相对 android/ 的路径；CI 传的是绝对路径，两者都成立。
+                def storePath = project.property("xpReleaseStoreFile").toString()
+                storeFile new File(storePath).isAbsolute() ? new File(storePath) : rootProject.file(storePath)
                 storePassword project.property("xpReleaseStorePassword").toString()
                 keyAlias project.property("xpReleaseKeyAlias").toString()
                 keyPassword project.property("xpReleaseKeyPassword").toString()

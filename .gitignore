@@ -23,3 +23,7 @@ apps/mobile/android/app/src/main/res/raw/
 .release-keys/
 
 .worktrees/
+
+# release 签名密钥与口令：本地留一份用于构建，CI 从 GitHub Secrets 取同一份。
+apps/mobile/android/keystore/*.jks
+apps/mobile/android/keystore/signing.properties

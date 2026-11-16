@@ -42,6 +42,8 @@ interface BleNative {
   startKeepAlive(text: string): Promise<void>;
   updateKeepAlive(text: string): Promise<void>;
   stopKeepAlive(): Promise<void>;
+  /** 发一条一次性动作通知；后台也能发，不受前台服务启动限制。 */
+  notifyEvent(title: string, text: string): Promise<void>;
   scheduleKeepAliveTimer(mac: string, reauth: boolean, delayMs: number): Promise<void>;
   cancelKeepAliveTimers(): Promise<void>;
   scheduleSuppressionTimer(intervalMs: number): Promise<void>;
@@ -589,7 +591,14 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
       await bridge.startProximityScan(mac!).catch(() => { scanRunning = false; });
     }
   }
-  if (!failed) return;
+  if (!failed) {
+    // 自动锁车成功要告诉用户：这是发生在后台、人已经走开的动作，不给反馈的话
+    // 用户无法确认车到底锁没锁（2026-11-15 就是因为没有反馈，只能掏出官方 App 核对）。
+    if (action === 'lock') {
+      void bridge.notifyEvent('已自动锁车', '离开车辆后已自动上锁').catch(() => {});
+    }
+    return;
+  }
   // 闭锁重试前若人又回到附近，放弃：不能把人锁在车边。
   const decision = decideRetry({ action, failed, attempt, nowNearby: proximityTracker.isNearby });
   if (!decision.retry) {
