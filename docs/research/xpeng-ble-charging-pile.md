@@ -4,7 +4,7 @@
 
 ## 1. 设备与身份
 
-- 桩 BD_ADDR `94:70:6C:44:E3:F4`，与车辆数字钥匙 `00:60:37:85:B9:E0` 严格分离；抓包时按地址与 ACL handle 分流。
+- 桩 BD_ADDR `$XP_PILE_MAC`，与车辆数字钥匙 `$XP_VEHICLE_MAC` 严格分离；抓包时按地址与 ACL handle 分流。
 - 桩不经配对（无 bond），客户端直连。
 - 桩身份来源：`BlePileNetRepoImpl` 缓存对象含 `equipNo`/`ssid`/`secretKey`（`secretKey` 脱敏，不入文档）；`ble_preferences` 的 `BLE_CACHE_KEY<ssid>` 映射到 MAC；`BlePileActivity.onResume` 主动用缓存 MAC 直连。
 - **没有本地发现路径**：扫描过滤只认车辆三个 UUID，桩不在扫描结果里；桩地址只能来自缓存或云端。账号下私桩按业务模型最多一个，无需筛选。
@@ -56,7 +56,7 @@ b0 | cmd | len | data | CRC16
 
 2026-11-13 在官方 App 5.19.0 上抓到完整会话（`work/ble-capture/20261113-235659-official-pile-full-session`），一次连接内完成「开始充电 → 确认出电 → 结束充电」。
 
-完整序列（桩 `94:70:6C:44:E3:F4`，同一 ACL handle）：
+完整序列（桩 `$XP_PILE_MAC`，同一 ACL handle）：
 
 | 时刻 | 方向 | 帧 | 含义 |
 | --- | --- | --- | --- |
@@ -113,7 +113,7 @@ b0 | cmd | len | data | CRC16
 - 首次直连常返回 `status=133`（`GATT_CONN_FAILED_ESTABLISHMENT`），底层日志先有 `Le connection completed` 再有 `eatt disconnect cid:0xffff`，是 Android 建立 GATT 通道失败的典型表现，**不是桩侧拒绝服务，也不是「桩释放慢」**。
 - 官方 App 同样吃这个 133：首次 `auto:false` 失败后，关闭并用 `auto:true` 重连，约 37–40 ms 后成功。差别只在**有没有重试**。
 - 自研客户端实现：首次 `auto:false`，遇 133 关闭后隔约 200 ms 用 **`auto:false`** 重连，最多 3 次。选 `auto:false` 而非官方的 `auto:true`，是因为本机栈上 `auto:true` 的后台连接不回调 `onClientConnectionState`（会一路超时），`auto:false` 每次都能正常回调。
-- 车辆数字钥匙链路与桩链路**可以并存**（2026-11-13 K60 真机实测）：车辆常驻连接持有期间，弹窗扫到桩 `XPAC00053413`（`94:70:6C:44:E3:F4`）并完成握手，`dumpsys bluetooth_manager` 的 `GATT Client Map` 同时出现两条 `Connections: 1`——一条对端 `00:60:37:85:B9:E0`（车辆主模块），一条对端桩地址。关闭弹窗后桩链路释放、车辆链路保持。手机侧不存在「只能连一台」的限制，限制此前只来自原生模块的单槽实现。
+- 车辆数字钥匙链路与桩链路**可以并存**（2026-11-13 K60 真机实测）：车辆常驻连接持有期间，弹窗扫到桩 `XPAC00053413`（`$XP_PILE_MAC`）并完成握手，`dumpsys bluetooth_manager` 的 `GATT Client Map` 同时出现两条 `Connections: 1`——一条对端 `$XP_VEHICLE_MAC`（车辆主模块），一条对端桩地址。关闭弹窗后桩链路释放、车辆链路保持。手机侧不存在「只能连一台」的限制，限制此前只来自原生模块的单槽实现。
 - **连接建立后 200 ms 内的断开不要当成握手失败**：`GATT_CONN_OK` 之后紧接 `TERMINATE_LOCAL_HOST` 且发生在数百毫秒量级，多半是客户端自己结束进程（例如探针为验证握手而强杀 App）。归因前先确认当时进程是否还活着，否则会把自身的终止误判为桩侧拒绝。
 
 ## 7. 自研端实现约束

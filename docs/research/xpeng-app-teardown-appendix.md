@@ -11,6 +11,27 @@ AES IV / CRC 常量、真实抓包样本与统计分布、设备 MAC 与拓扑�
 **这里的结论可能已被正文推翻**——凡遇到「全断」「不可能」「唯一缺口」一类断言，
 以正文对应章节为准。轮次编号沿用拆分前的 §6.x，与正文 §6.x 不是同一套。
 
+**标识已脱敏**：仓库是公开的，所以下面这些真实值换成了占位符，取值写在
+`work/local.env`（该文件不入库，格式见 `scripts/local_env.py`）：
+
+| 占位符 | `work/local.env` 中的键 | 含义 |
+| --- | --- | --- |
+| `<车辆主模块 MAC>` | `XP_VEHICLE_MAC` | 车辆主模块 BD_ADDR |
+| `<从模块 MAC>` | `XP_VEHICLE_MAC_SLAVE` | 数字钥匙所在从模块 BD_ADDR |
+| `<充电桩 MAC>` | `XP_PILE_MAC` | 桩的 BD_ADDR |
+| `$XP_VIN` | `XP_VIN` | 车辆 VIN |
+| `$XP_UID` / `$XP_SUB_UID` | `XP_UID` | 主账号 / 子账号 uid |
+| `$XP_CARD_NO` | `XP_CARD_NO` | 数字钥匙 cardNo |
+| `$XP_PLATE` | `XP_PLATE` | 车牌 |
+
+重跑需要这些值时从 `work/local.env` 读，不要写回文档。
+
+**例外：`scripts/fakecar/strict_protocol.py`、`scripts/fakecar/test_strict_protocol.py`、
+`scripts/ble-session.test.mts` 仍保留真实 MAC**，因为 `keyString` = 该 MAC 去掉冒号后的
+`[-10:][:8]` 直接参与 `ef0110` 的 KDF，替换成别的值会让 `createAuthKey verification failed`、
+`ef0110` 密文对不上（均于 2026-11-16 实测复现）。脱敏这三处只能连断言里的期望密文一起重算，
+代价大于收益，故维持原值——它们出现在测试夹具里，不是运行期配置。
+
 ---
 
 ### 6.19　静态代码定位：APK 版本对不上，dex 被 360 加固，但 native 层是明文
@@ -431,7 +452,7 @@ uidVin  vin  key  keyId  keyVersion  btMac  salt  seed  keyStatus  activeStatus
 
 **`salt` 与 `seed` 与 `key` 在同一个模型里，这一条就定了性**：如果 `KI` 是从 VIN 派生的固定值，根本不需要 `salt`；需要 `salt` 说明**每次激活都用不同的盐派生一份独立密钥**。
 
-补充验证：用 VIN（`L1NSPGH91NA000000`）作输入，试 `SHA-256[:16]`、`SHA-256[-16:]`、`MD5`、`SHA-1` 截断，**全部零命中**。`KI` 不是 VIN 的哈希。
+补充验证：用 VIN（`$XP_VIN`）作输入，试 `SHA-256[:16]`、`SHA-256[-16:]`、`MD5`、`SHA-1` 截断，**全部零命中**。`KI` 不是 VIN 的哈希。
 
 `uidVin` 这个字段名本身也说明作用域是「用户 + 车辆」的二元组，不是「车辆」。
 
@@ -484,7 +505,7 @@ uid=0(root) ...
 
 ```
 收到的车辆授权
-沪A00000
+$XP_PLATE
 车主  130****00  对方帐号
 蓝牙钥匙   ● 已启用
 被授权人将获得以下权限：车辆控制 / 车辆空调 / 数字车钥匙 / 发送地址
@@ -545,18 +566,18 @@ key = serialization.load_der_private_key(der, password=None)
 
 2026-11-02 晚，在用户授权下从 Mac（CoreBluetooth）直连车端数字钥匙模块，完成服务发现、订阅推送、写入握手帧，并收到车端回应。**这是本项目第一次由非官方 App 的客户端与车端完成协议交互。**
 
-#### 6.25a　认错了模块：`00603785B9E0` 不是数字钥匙
+#### 6.25a　认错了模块：`<车辆主模块 MAC 去冒号>` 不是数字钥匙
 
-此前 §6.19 把 `XPED-00603785B9E0` 判为数字钥匙模块，理由是它连不上（「只接受已绑定设备」）。**这个判断是错的。**
+此前 §6.19 把 `XPED-<车辆主模块 MAC 去冒号>` 判为数字钥匙模块，理由是它连不上（「只接受已绑定设备」）。**这个判断是错的。**
 
 实测（4 次连接，3 次完全一致）：
 
 | 设备 | 连接结果 | 服务 |
 | --- | --- | --- |
-| `XPED-00603785B9E0` | **始终超时** | — |
-| `XPED-C00D30B094C4` | **稳定连上** | `180A` + `0000ED28-ABAB-406D-832D-7AD799B479F7` |
+| `XPED-<车辆主模块 MAC 去冒号>` | **始终超时** | — |
+| `XPED-<从模块 MAC 去冒号>` | **稳定连上** | `180A` + `0000ED28-ABAB-406D-832D-7AD799B479F7` |
 
-数字钥匙模块是 **`XPED-C00D30B094C4`**。`00603785B9E0` 是车上另一个 BLE 模块，与数字钥匙无关（可能是胎压/OBU 一类），其连接超时与绑定无关。
+数字钥匙模块是 **`XPED-<从模块 MAC 去冒号>`**。`<车辆主模块 MAC 去冒号>` 那个模块是车上另一个 BLE 模块，与数字钥匙无关（可能是胎压/OBU 一类），其连接超时与绑定无关。
 
 用户已确认**只有一台小鹏车**，所以这两个 XPED 设备是同一台车上的两个模块。
 
@@ -802,7 +823,7 @@ ldursw x4, [x21, #0x15]   key.end() 低 32 位（编译器算 vector size 的方
 
 #### 6.27b　假车已实测可被发现、可连接、可写入
 
-`scripts/fakecar/fake_car.py` 实现 `GattDeviceService`，冒充 `XPED-C00D30B094C4`，GATT 树与真车一致（§6.25b）：
+`scripts/fakecar/fake_car.py` 实现 `GattDeviceService`，冒充 `XPED-<从模块 MAC 去冒号>`，GATT 树与真车一致（§6.25b）：
 
 ```
 svc 0000ED28-ABAB-406D-832D-7AD799B479F7
@@ -816,8 +837,8 @@ guest 侧用自写探针（`scripts/fakecar/probe/`）验证，三个阶段全�
 
 | 阶段 | 结果 |
 | --- | --- |
-| 广播发现 | `DEV 03:00:00:00:00:00 name=XPED-C00D30B094C4 rssi=20` |
-| GATT 连接 | `[conn] 55:b3:fa:0d:99:b4 -> CONNECTION_STATE_CONNECTED` |
+| 广播发现 | `DEV 03:00:00:00:00:00 name=XPED-<从模块 MAC 去冒号> rssi=20` |
+| GATT 连接 | `[conn] <从模块 MAC> -> CONNECTION_STATE_CONNECTED` |
 | 写入握手帧 | `<- WRITE #1 (7B) ef01048fe82373` |
 | 车端回推 | `-> INDICATE (4B) d5f60359` |
 
@@ -910,7 +931,7 @@ tombstone 显示崩在 ART 内部，不是 App 自身代码：
 不管装哪个版本，`registerGattDevice` 这条路都已经实测打通，结论不依赖 App 版本：
 
 - 模拟器启动加 `-grpc 8554` → netsimd 暴露 gRPC
-- `fake_car.py` 注册后，`nimble_bridge` 拉起，guest 侧能扫到 `XPED-C00D30B094C4`
+- `fake_car.py` 注册后，`nimble_bridge` 拉起，guest 侧能扫到 `XPED-<从模块 MAC 去冒号>`
 - 探针完成连接 / 服务发现 / 写特征 / indicate 全链路，帧字节与真车一致
 
 ### 6.29　握手第 2 帧的明文结构已完全解出（5.23.6 反汇编）
@@ -1036,7 +1057,7 @@ IV   = 0x50090 处的常量 ccf3e8342bd6071fde7270dfa0876bb8
 
 ### 6.30　实测：不完成握手，车控帧一律被拒
 
-2026-11-02 深夜，用 Mac 直连车端 BLE（`XPED-C00D30B094C4`，ED28 服务），跳过握手直接写车控帧，验证「车端是否要求先认证」。
+2026-11-02 深夜，用 Mac 直连车端 BLE（`XPED-<从模块 MAC 去冒号>`，ED28 服务），跳过握手直接写车控帧，验证「车端是否要求先认证」。
 
 #### 6.30a　实验方法
 
@@ -1176,14 +1197,14 @@ deviceId  userId  shareFrom  vin  createTime  updateTime  channel  protocol
 `/digital-key/v2/key/ble/getBleInfo` 返回本车 BLE 拓扑，可直接用于连接策略：
 
 ```
-name BLE      mac 00:60:37:85:b9:d0   hv H.2   partNo 8810005DF10000
+name BLE      mac <车辆主模块 MAC>   hv H.2   partNo 8810005DF10000
 slaveMacList:
   BLEFR  dc:0d:30:b0:94:c4   H.3
   BLER   dc:0d:30:b0:c4:a4   H.3
   BLEFL  dc:0d:30:b0:79:01   H.3
 ```
 
-**这解释了 §6.25 的困惑**：`XPED-00603785B9E0` 是主模块（尾号 b9:d0），`XPED-C00D30B094C4` / `B0C4A4` 是左右后视镜与车头的从模块。Mac 能连上 DC0D30 是因为它是从模块，主模块只在被唤起时广播。
+**这解释了 §6.25 的困惑**：`XPED-<车辆主模块 MAC 去冒号>` 是主模块，`XPED-<从模块 MAC 去冒号>` / `B0C4A4` 是左右后视镜与车头的从模块。Mac 端能连上从模块，是因为它是从模块，主模块只在被唤起时广播。
 
 #### 6.34f　服务端下发的 authData 性质（实测三次）
 
@@ -1214,7 +1235,7 @@ slaveMacList:
 > **2026-11-04 更新：手机已 root，且 §6.54 的「296 条帧」已确认是子账号的。**
 >
 > `XpVehicle.db` 的 `xp_vehicle_xp_key_message` 表在 root 手机上共 **296 条**，
-> 但 `xp_vehicle_keys.key_info` 里 `shareFrom=2389271`、`user_id=10000000`
+> 但 `xp_vehicle_keys.key_info` 里 `shareFrom=$XP_UID`、`user_id=$XP_SUB_UID`
 > ——**手机登录的是从主账号分享出来的子账号**，不是主账号本身。
 > 这 296 条的 `KI` 全是 `12a774ba…`（子账号那把，车端 `0x06` 拒绝），
 > 与 §6.54b 记的模拟器情况完全一样。
@@ -1296,7 +1317,7 @@ IFAA 是硬件级生物认证（`org.ifaa.android.manager`），模拟器无信�
 | --- | --- |
 | 取 KI / ED / 签名 | ✅ 服务端 `getXpKeyAuthData` 一次给齐 |
 | 构造合法命令帧 | ✅ 结构已验证，与抓包同构 |
-| 连接车端 GATT | ✅ Mac 可连 `XPED-DC0D30*` 从模块 |
+| 连接车端 GATT | ✅ Mac 可连 `XPED-<从模块 MAC 前缀>*` 从模块 |
 | `ef0104` 发 app_n | ✅ 车端正常回 car_n |
 | **`ef0110` 16 字节** | ❌ **唯一缺口**：需由 `(app_n, car_n, KI)` 每轮派生 |
 | `ed1118` | 待 `ef0110` 成功后验证 |
@@ -1358,7 +1379,7 @@ file_size:  40395592       ← 但文件 40 MB
 | --- | --- | --- |
 | 取 KI / ED / 签名 | ✅ | `getXpKeyAuthData` 一次给齐，KI 稳定、ED 每轮新 |
 | 构造合法命令帧 | ✅ | 与抓包同构，签名有效 |
-| 连接车端 GATT | ✅ | Mac 可连 `XPED-DC0D30*` |
+| 连接车端 GATT | ✅ | Mac 可连 `XPED-<从模块 MAC 前缀>*` |
 | `ef0104` 发 app_n | ✅ | 车端正常回 car_n |
 | **`ef0110` 16 字节** | ❌ | 唯一缺口，需运行时常量 |
 | 握手失败后果 | 已知 | 车端静默丢弃后续所有帧，无跳过余地 |
@@ -1408,7 +1429,7 @@ key  = ede5149349cdcbd2f46c8f081a5efd1e
 假车（`fake_car.py`）注册成功，模拟器内可见：
 
 ```
-00:20:33 INFO registered as '58942' — the guest should now see XPED-00603785B9E0
+00:20:33 INFO registered as '58942' — the guest should now see XPED-<车辆主模块 MAC 去冒号>
 ```
 
 App 也确实发起了扫描：
@@ -1806,8 +1827,8 @@ refreshToken: 968 B  eyJ0eXBlIjoxLCJ2ZXJzaW9uIjoiMS4wLjAiLCJhbGciOiJI…
 #### 6.40b　`xp_vehicle_keys.key_info`：钥匙元数据，但没有 keyId
 
 ```json
-{"cardNo":"B11793348000001","cardType":103,"deviceId":"d2c729...","userId":10000000,
- "vin":"L1NSPGH91NA000000","status":1,"shareFrom":2389271,"effectiveTime":29889138,
+{"cardNo":"$XP_CARD_NO","cardType":103,"deviceId":"d2c729...","userId":$XP_SUB_UID,
+ "vin":"$XP_VIN","status":1,"shareFrom":$XP_UID,"effectiveTime":29889138,
  "validTime":82449138,"keyDfkStatus":0,"isDeviceSupport":false,"isFromInit":false}
 ```
 
@@ -1816,15 +1837,15 @@ refreshToken: 968 B  eyJ0eXBlIjoxLCJ2ZXJzaW9uIjoiMS4wLjAiLCJhbGciOiJI…
 #### 6.40c　`xp_vehicle_mac.mac_info`：完整 BLE 拓扑
 
 ```json
-{"hv":"H.2","macAddress":"00:60:37:85:b9:d0","partNo":"8810005DF10000",
+{"hv":"H.2","macAddress":"<车辆主模块 MAC>","partNo":"8810005DF10000",
  "slaveMacList":[
    {"name":"BLEFR","mac":"dc:0d:30:b0:94:c4","hv":"H.3","partNo":"8810016DG10000"},
    {"name":"BLER", "mac":"dc:0d:30:b0:c4:a4","hv":"H.3","partNo":"8810017DG10000"},
    {"name":"BLEFL","mac":"dc:0d:30:b0:79:01","hv":"H.3","partNo":"8810016DG10000"}],
- "uid":10000000,"vin":"L1NSPGH91NA000000"}
+ "uid":$XP_SUB_UID,"vin":"$XP_VIN"}
 ```
 
-**注意 `BLEFR` 的 MAC `dc:0d:30:b0:94:c4` 正是之前 Mac 直连成功的那个 `XPED-C00D30B094C4`**——
+**注意 `BLEFR` 的 MAC `dc:0d:30:b0:94:c4` 正是之前 Mac 直连成功的那个 `XPED-<从模块 MAC 去冒号>`**——
 它不是别人的车，是本车主驾侧从模块（§6.34 的误判在此彻底纠正）。
 
 #### 6.40d　数据库其他表
@@ -2089,8 +2110,8 @@ com.xiaopeng.mycarinfo.protocol.xp_ble.{
 
 ```sql
 -- xp_vehicle_mac.mac_info
-{"hv":"H.2","macAddress":"00:60:37:85:b9:d0","partNo":"8810005DF10000",
- "slaveMacList":[…],"uid":10000000,"vin":"L1NSPGH91NA000000"}
+{"hv":"H.2","macAddress":"<车辆主模块 MAC>","partNo":"8810005DF10000",
+ "slaveMacList":[…],"uid":$XP_SUB_UID,"vin":"$XP_VIN"}
 ```
 
 把 `macAddress` 改成假车地址、推回设备、重启 App 后，系统蓝牙栈的日志**立刻转向**：
@@ -3683,7 +3704,7 @@ Java 调 native_generateAuthKey(int a, int b, String keyString)
 
 §6.77o 的问题在于把「如果传 KI 会 abort」错读成「所以不是 KI」——它也可能是「`createAuthKey` 这条路与 KI 无关」，即 §6.77j 的 `calculateAuth1SessionKey` 那类「名字带 Auth1 但不含 KI」的情况。
 
-**按 MAC 地址形状试过，188 组仍 0 命中**（`00:60:37:85:B9:E0` / `00603785B9E0` / `XPED-00603785B9E0` 三种写法，配合 §6.77d 的完整式子）。
+**按 MAC 地址形状试过，188 组仍 0 命中**（`<车辆主模块 MAC>` / `<车辆主模块 MAC 去冒号>` / `XPED-<车辆主模块 MAC 去冒号>` 三种写法，配合 §6.77d 的完整式子）。
 
 #### 6.77r　本轮收尾：三条结论，一条阻塞
 
@@ -3840,7 +3861,7 @@ Java 调 native_generateAuthKey(int a, int b, String keyString)
 `-grpc` 版重启后，`fake_car.py` 注册成功：
 
 ```
-10:41:15 INFO  registered as '15548' — the guest should now see XPED-00603785B9E0
+10:41:15 INFO  registered as '15548' — the guest should now see XPED-<车辆主模块 MAC 去冒号>
 ```
 
 **这同时解除了 §6.78e 记的 E1 前置阻塞。**
@@ -3850,9 +3871,9 @@ Java 调 native_generateAuthKey(int a, int b, String keyString)
 子账号登录后拉 `XpVehicle.db`（99 行 `xp_vehicle_xp_key_message`）：
 
 ```
-user_id = 10000000
-vin     = L1NSPGH91NA000000
-cardNo  = B11793348000001
+user_id = $XP_SUB_UID
+vin     = $XP_VIN
+cardNo  = $XP_CARD_NO
 KI      = 12a774ba5b82bddb8bae973e35bed8e8   （99/99 帧全部相同）
 ED      = 99 条互不相同
 ```
@@ -3864,7 +3885,7 @@ ED      = 99 条互不相同
 `xp_vehicle_keys.key_info` 里有一行此前没被注意到的字段：
 
 ```
-shareFrom: 2389271      ← 这张卡是主账号「共享」给子账号的
+shareFrom: $XP_UID      ← 这张卡是主账号「共享」给子账号的
 status:    1            ← 卡状态正常
 ```
 
@@ -3880,7 +3901,7 @@ status:    1            ← 卡状态正常
 
 #### 6.79d　尝试让 App 连假车端：断网成功切到 BLE，但扫描没发现设备
 
-假车端注册成功后（设备名已按 §6.17 改成 `XPED-C00D30B094C4`），点数字钥匙页的「钥匙检查」：
+假车端注册成功后（设备名已按 §6.17 改成 `XPED-<从模块 MAC 去冒号>`），点数字钥匙页的「钥匙检查」：
 
 **第一次（网络通）**：App 弹「**当前网络通畅，请确认解锁并启动车辆**」——走的是**网络通道**，根本没碰 BLE。这与 §6.5 的 `SINGLE_BLE_FIRST`/`SERIAL_BLE_FIRST` 策略一致：有网就先走网络。
 
@@ -3920,7 +3941,7 @@ E AndroidRuntime: at com.android.internal.os.RuntimeInit$KillApplicationHandler.
 | 事实 | 来源 | 性质 |
 | --- | --- | --- |
 | 子账号登录后 KI = `12a774ba…`，99/99 帧一致 | `XpVehicle.db` 实读 | 实测 |
-| 该卡 `shareFrom=2389271`，是主账号共享的，`status=1` | `xp_vehicle_keys.key_info` | 实测 |
+| 该卡 `shareFrom=$XP_UID`，是主账号共享的，`status=1` | `xp_vehicle_keys.key_info` | 实测 |
 | 断网后 App 确实走 BLE 并进入 `BleCheckNewActivity` | logcat | 实测 |
 | 假车端注册成功，但 App 未发起扫描 | fakecar 日志 + logcat | 实测 |
 | 车端是否接受子账号 KI | — | **未测** |
@@ -3975,17 +3996,17 @@ I bt_btif_gattc: btif_gattc_open_impl: Transport=BT_TRANSPORT_LE,
 **App 不是「扫描后发现设备再连」，而是拿一个已知 MAC 直接 `connectGatt`。** 这个 MAC 来自 `XpVehicle.db` 的 `xp_vehicle_mac` 表：
 
 ```json
-{"hv":"H.2","macAddress":"00:60:37:85:b9:d0","partNo":"8810005DF10000",
+{"hv":"H.2","macAddress":"<车辆主模块 MAC>","partNo":"8810005DF10000",
  "slaveMacList":[
    {"name":"BLEFR","mac":"dc:0d:30:b0:94:c4","partNo":"8810016DG10000"},
    {"name":"BLER", "mac":"dc:0d:30:b0:c4:a4","partNo":"8810017DG10000"},
    {"name":"BLEFL","mac":"dc:0d:30:b0:79:01","partNo":"8810016DG10000"}],
- "uid":10000000,"vin":"L1NSPGH91NA000000"}
+ "uid":$XP_SUB_UID,"vin":"$XP_VIN"}
 ```
 
 **这解释了两件长期没对上事**：
 
-1. 为什么 §6.19 那会儿「把假车广播名改成 `XPED-00603785B9E0` 仍然扫不到」——App 根本不扫描，改名没用；
+1. 为什么 §6.19 那会儿「把假车广播名改成 `XPED-<车辆主模块 MAC 去冒号>` 仍然扫不到」——App 根本不扫描，改名没用；
 2. 为什么 §6.61 的桥接链路能工作——桥接是在手机侧做 BLE 中继，绕开了这个直连逻辑。
 
 **这也给出 E1 的正确接法**：把 `xp_vehicle_mac` 里的 `macAddress` 改成假车端的 netsim MAC（本次是 `4b:29:fe:ec:5b:01`），App 就会直连假车端。
@@ -4108,17 +4129,17 @@ ed 11 18 | 00 11 | 8e 4e c8 50 | 00 | db61b5b113d0870e6482ace4772c27e2 | e0
 
 #### 6.81b　`keyString` 该用哪个 MAC：主模块还是当前连接的模块
 
-`keyString` = 服务端下发的 `xp_vehicle_mac.macAddress` = **主模块** `00:60:37:85:B9:E0`（§6.19f）。但 Mac 端能连上的是**从模块** `XPED-C00D30B094C4`，主模块 `XPED-00603785B9E0` 始终超时（§6.25a）。
+`keyString` = 服务端下发的 `xp_vehicle_mac.macAddress` = **主模块** `<车辆主模块 MAC>`（§6.19f）。但 Mac 端能连上的是**从模块** `XPED-<从模块 MAC 去冒号>`，主模块 `XPED-<车辆主模块 MAC 去冒号>` 始终超时（§6.25a）。
 
-已知事实：App 用的 `keyString` 与它**当前连哪个模块无关**——子账号那次走桥接（对端是从模块 `DC0D30B07901`），App 算出的 `ef0110` 用的仍是数据库里的 `08:00:00:00:00:00`，157/157 复现（§6.19f）。
+已知事实：App 用的 `keyString` 与它**当前连哪个模块无关**——子账号那次走桥接（对端是从模块 `<从模块 MAC 前缀>B07901`），App 算出的 `ef0110` 用的仍是数据库里的 `08:00:00:00:00:00`，157/157 复现（§6.19f）。
 
 > **2026-11-04 车旁已判定：车端用「当前连接的那个模块自己的 MAC」校验 `ef0110`。**
 
-按上面那个实验设计实测，同一个从模块 `XPED-C00D30B094C4`，只改 `keyString`：
+按上面那个实验设计实测，同一个从模块 `XPED-<从模块 MAC 去冒号>`，只改 `keyString`：
 
 | `keyString` | `car_n` | `ef0110` | 车端回应 |
 | --- | --- | --- | --- |
-| `00:60:37:85:B9:E0`（主模块） | `1b10c8d5` | `eaf08d74e5954d69010b5c9a45845227` | `0800 0e` **认证失败** |
+| `<车辆主模块 MAC>`（主模块） | `1b10c8d5` | `eaf08d74e5954d69010b5c9a45845227` | `0800 0e` **认证失败** |
 | `DC:0D:30:B0:94:C4`（从模块） | `0605ee4b` | `64bcc353a0553016462d518fe70020fc` | `0800 01 44463030482e33` **认证成功** |
 
 换成从模块 MAC 后稳定 `0x01`，复现多次。
@@ -4126,7 +4147,7 @@ ed 11 18 | 00 11 | 8e 4e c8 50 | 00 | db61b5b113d0870e6482ace4772c27e2 | e0
 **上面那句「App 用的 `keyString` 与它当前连哪个模块无关」要按这个结论重新理解**：
 它只说明**官方 App 往 `ef0110` 里填的值**来自数据库、不随连接目标变，
 不能推出**车端不校验**。车端校验的就是它自己那个模块的 MAC。
-官方 App 之所以一直能用，是因为手机连的正是主模块 `00:60:37:85:B9:E0`，
+官方 App 之所以一直能用，是因为手机连的正是主模块 `<车辆主模块 MAC>`，
 数据库里的值恰好等于当前模块 MAC——两者一致，从未暴露这个约束。
 
 **对自研端的直接后果**：连哪个模块，`keyString` 就必须填那个模块的 MAC。
@@ -4842,7 +4863,7 @@ hits 0
 
 ```
 MAC=DC:0D:30:B0:94:C4  seed=1e41c1a5  K1=2f9dd90bbbb3f537e755c74fdd7b3613
-MAC=00:60:37:85:B9:E0  seed=714896ca  K1=1c1917e742e25bf8d11b7123c86240a0
+MAC=$XP_VEHICLE_MAC  seed=714896ca  K1=1c1917e742e25bf8d11b7123c86240a0
 ```
 
 `K1` 本身、`HMAC-MD5(K1, A‖C)`、`MD5(K1‖A‖C)`、`MD5(K1‖E)` 等**全部 0 命中**。
@@ -4855,7 +4876,7 @@ MAC=00:60:37:85:B9:E0  seed=714896ca  K1=1c1917e742e25bf8d11b7123c86240a0
 
 ```
 POST /digital-key/v1/key/ble/getXpKeyAuthData
-  body {"vin":"L1NSPGH91NA000000","cardNo":"B11793348000001"}
+  body {"vin":"$XP_VIN","cardNo":"$XP_CARD_NO"}
 -> {"code":12010101,"msg":"登录状态已过期，请重新登录"}
 ```
 
@@ -4940,7 +4961,7 @@ renew.py renew -> 12010206 登录状态已过期，请重新登录
 
 `ed1118` 帧在 `:BLE` 堆里以**十六进制字符串**形式驻留，位置在 region space 的
 **block 0 偏移 15005344**（`0x13a4f6a0`），不在堆尾部。此前只扫最后 128MB 因此一直漏掉。
-它紧邻日志串 `mac:00:60:37:85:B9:E0 peripheral:239515523 writing <`。
+它紧邻日志串 `mac:$XP_VEHICLE_MAC peripheral:239515523 writing <`。
 
 #### 6.42d　`generateSessionKey` 的 JNI 签名与 `getSessionKey` 的参数映射
 

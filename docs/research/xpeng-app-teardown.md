@@ -1260,18 +1260,18 @@ ef0110 = HMAC-MD5(K1, msg)                → 16 字节
 
 | 数据集 | 组数 | `keyString` | 命中 |
 | --- | --- | --- | --- |
-| 主账号 / 真车抓包 | 31 | `00:60:37:85:B9:E0` | **31/31** |
+| 主账号 / 真车抓包 | 31 | `$XP_VEHICLE_MAC` | **31/31** |
 | 子账号 / 桥接日志 | 157 | `08:00:00:00:00:00` | **157/157** |
 
-两个 MAC 都来自 `work/db/XpVehicle*.db` 的 `xp_vehicle_mac.macAddress`：`XpVehicle_after_login.db` 里是真车主模块 `00:60:37:85:b9:d0`，`XpVehicle.db` 里是 `08:00:00:00:00:00`——**子账号登录时服务端下发的占位 MAC**，不是笔误。子账号那 155 次 `0x0e` 与算法无关，也与「车端不认子账号钥匙」无关：占位 MAC 算出的 `ef0110` 数学上自洽（故能 157/157 复现），只是车端用真 MAC 派生，两边对不上。
+两个 MAC 都来自 `work/db/XpVehicle*.db` 的 `xp_vehicle_mac.macAddress`：`XpVehicle_after_login.db` 里是真车主模块 `<车辆主模块 MAC>`，`XpVehicle.db` 里是 `08:00:00:00:00:00`——**子账号登录时服务端下发的占位 MAC**，不是笔误。子账号那 155 次 `0x0e` 与算法无关，也与「车端不认子账号钥匙」无关：占位 MAC 算出的 `ef0110` 数学上自洽（故能 157/157 复现），只是车端用真 MAC 派生，两边对不上。
 
 **复现**：`python3 scripts/ble-kdf-verify.py` 输出 31/31 + 157/157 = 188/188；`node --experimental-strip-types scripts/verify-ble-kdf.mts` 同样 188/188。Python 与 TS 两份独立实现同时命中同一批真实抓包，说明式子不是拟合。只要这两行不是满分，实现就是错的。**自研端实现 `ef0110` 所需全部齐备**：`app_n`（自己生成）、`car_n`（`ef0104` 的回应）、`keyString`（见下条规则）；BLE 链路上已无未知算法。
 
-**`keyString` 必须取当前 GATT 连接的对端 MAC，不能取 `xp_vehicle_mac.macAddress`。** 同一台从模块 `XPED-C00D30B094C4`，只改 `--key`：
+**`keyString` 必须取当前 GATT 连接的对端 MAC，不能取 `xp_vehicle_mac.macAddress`。** 同一台从模块 `XPED-<从模块 MAC 去冒号>`（该值取 `$XP_VEHICLE_MAC_SLAVE`，去掉冒号），只改 `--key`：
 
 | `--key` | 车端对 `ef0110` 的回应 | 判定 |
 | --- | --- | --- |
-| `00:60:37:85:B9:E0`（数据库主模块 MAC） | `08000e00000000000000` | `0x0e` 失败 |
+| `$XP_VEHICLE_MAC`（数据库主模块 MAC） | `08000e00000000000000` | `0x0e` 失败 |
 | `DC:0D:30:B0:94:C4`（当前连的从模块自己的 MAC） | `08000144463030482e33` | `0x01` 已认证 |
 
 车端在哪个模块上校验，就用那个模块自己的 MAC。App 能用数据库里的值是因为它连的就是主模块；连从模块时应换成从模块的 MAC（未单独验证，与本结论一致）。
@@ -1594,7 +1594,7 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 
 **官方「靠近自动解闭锁」机制（2026-11-12，静态证据）**：`com.xiaopeng.common.car.ble.ipc.BleService` 跑在独立进程 `:BLE`，由 `ProcessForegroundMonitor` 维持，挂常驻通知「手机钥匙 / 正在运行」（`ble_polling_service_title`、`ble_polling_service_desc_default`=「正在运行」、`ble_polling_service_info`=「手机无感钥匙已启动」）；清单声明 `WAKE_LOCK` 与 `RECEIVE_BOOT_COMPLETED`。判距不是直接换算米数，而是先在「主驾门 1 米 / 后尾门 1 米」做**手动校准**（`AdjustBleByHandActivity`，文案「手机距离主驾门1米」「手机距离后尾门1米」），再按灵敏度档（`PollingSettingActivity`、`desc_polling_sensitivity`）判定；字段名 `pollingIntervalMs`、`pollingUserUnlockDistance`、`scanIntervalDispose`、`keepAliveInterval`。**官方后台是保持连接 + 周期保活**（`keepAliveInterval` 与 §1223 的 ~127 s 重鉴权吻合），不是只扫描。具体阈值/间隔在加密 dex 内，静态取不到，只能在车边标定。
 
-**车端在已有 GATT 连接时不广播（2026-11-12 真车实测）。** 前台持有连接期间，按 `00:60:37:85:B9:E0` 过滤的判距扫描连续 20 轮 `results=0`（连无关设备都收不到），`Connections: 1`；退到后台、`release()` 断开连接后，同一扫描立刻扫到车，`results=1–11`、RSSI 稳定在 `-83…-90 dBm`。因此「前台保持连接」与「后台判距扫描」互斥，不能同时跑；车边标定的阈值必须按「无连接时的广播 RSSI」取，不能用连接期间的信号。另：`SCAN_MODE_LOW_POWER` 在本机实测也能收到结果（02:52 那次 36 条），但为稳妥用 `BALANCED`。
+**车端在已有 GATT 连接时不广播（2026-11-12 真车实测）。** 前台持有连接期间，按 `$XP_VEHICLE_MAC` 过滤的判距扫描连续 20 轮 `results=0`（连无关设备都收不到），`Connections: 1`；退到后台、`release()` 断开连接后，同一扫描立刻扫到车，`results=1–11`、RSSI 稳定在 `-83…-90 dBm`。因此「前台保持连接」与「后台判距扫描」互斥，不能同时跑；车边标定的阈值必须按「无连接时的广播 RSSI」取，不能用连接期间的信号。另：`SCAN_MODE_LOW_POWER` 在本机实测也能收到结果（02:52 那次 36 条），但为稳妥用 `BALANCED`。
 
 **判距扫描与 GATT 建连争用同一控制器（2026-11-12 真车实测）。** 扫描运行中发起连接直接吃 `133`（`GATT_CONN_FAIL_ESTABLISH`），原生层三次重试都落在同一窗口内全部失败；改为「动作前停扫描、动作后恢复」后同一动作 2.4 s 内成功（`action=unlock ok`）。
 
@@ -1612,7 +1612,7 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 
 **扫描是间歇运行的，起扫前必须播种判距状态（2026-11-15 实测）。** 前台停扫描、退后台才起扫；判距器若从「人不在附近」起步，而人本来就在车边（手动解锁完退出 App 就是这种情形），第一眼看到的 -35 会被当成「刚刚走近」，起扫 4 秒后补发一次解锁。修法是起扫前用一次短扫描取当前 RSSI，直接确立远近状态且不产生动作；扫不到时不播种，保持默认「不在附近」，真正走近仍正常触发。
 
-其余会踩的坑：① Android 侧并不限制一个 App 只持有一条 LE 链路（2026-11-13 K60 真机实测：车辆 `00:60:37:85:B9:E0` 与充电桩 `94:70:6C:44:E3:F4` 两条 GATT 链路同时 `Connections: 1`），限制只来自原生模块自身的单槽实现——该实现已改为按 MAC 管理的连接表，同地址重复才回 `E_BUSY`；② 常驻连接仍会占住**车端**那一个连接槽，同车官方 App 的蓝牙钥匙会被挤掉；③ 权限被撤销、蓝牙被关掉这类前置条件错误必须单独识别，否则无限退避会变成每 30 s 一次的无效重连；④ 前台服务保活（`connectedDevice` 类型）在 Android 14+ 缺 `BLUETOOTH_CONNECT` 时 `startForeground` 抛 `SecurityException` 直接崩进程——实测复现，必须在服务里接住并 `stopSelf()`，不能靠调用方先查权限兜底（服务运行期间权限随时可能被撤销）。
+其余会踩的坑：① Android 侧并不限制一个 App 只持有一条 LE 链路（2026-11-13 K60 真机实测：车辆 `$XP_VEHICLE_MAC` 与充电桩 `$XP_PILE_MAC` 两条 GATT 链路同时 `Connections: 1`），限制只来自原生模块自身的单槽实现——该实现已改为按 MAC 管理的连接表，同地址重复才回 `E_BUSY`；② 常驻连接仍会占住**车端**那一个连接槽，同车官方 App 的蓝牙钥匙会被挤掉；③ 权限被撤销、蓝牙被关掉这类前置条件错误必须单独识别，否则无限退避会变成每 30 s 一次的无效重连；④ 前台服务保活（`connectedDevice` 类型）在 Android 14+ 缺 `BLUETOOTH_CONNECT` 时 `startForeground` 抛 `SecurityException` 直接崩进程——实测复现，必须在服务里接住并 `stopSelf()`，不能靠调用方先查权限兜底（服务运行期间权限随时可能被撤销）。
 
 ### 6.21 取证手段与边界
 - **`am dumpheap` 绕过 Frida 的 ptrace 保护**：`adb shell am dumpheap <pid> /data/local/tmp/app.hprof` 产出约 82 MB（约 20 秒）。走 `Debug.dumpHprofData` 系统路径，不需要 ptrace，加固壳挡不住。
@@ -1631,7 +1631,7 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 | 握手是否硬前置 | **未知**。观察到的时序是每条命令前都重新握手，但「跳过握手能否发命令」未做 A/B/C 对照，现有证据不支持「车端必然丢弃」的强断言（§6.12） |
 | `ED` 是否被车端校验内容 | 未验证。若车端只验签名，`ED` 随便填；若当 nonce 防重放，必须与车端协商。需发一帧 `ED` 全零的车控帧看是否被拒，有风险 |
 | `ED` 时效、`KI` 跨会话稳定性 | 接口每轮新发 `ED`，但车端是否拒旧帧未实测；`KI` 同一会话内稳定，跨握手轮次未验证（只有一轮里出现了车控帧） |
-| `0xEC` 通道含义 | 该帧 `TBox type = 0x00`，payload 8 字节 ASCII `23892711`，紧跟解锁回执之后，更像车辆序列号或会话标识，非登录。需更多样本 |
+| `0xEC` 通道含义 | 该帧 `TBox type = 0x00`，payload 8 字节 ASCII，前 7 位等于 `$XP_UID`、末位为 `1`，紧跟解锁回执之后，更像车辆序列号或会话标识，非登录。需更多样本 |
 | 未定位语义的字节/msgId | `header[4..8]`（`6a 7b 5f e0`，作 BE 是 2026-08-11 17:46 UTC，早于抓包 82 天，作 LE 是 2089 年）；`0x0231`/`0x0261`–`0x0263`/`0x02f6`–`0x02fb` 不在 D55 分派表内且 payload 全零，疑为同族状态位图；`0x0082` 三条子字段后 6 字节每轮全变、`0233` 末两字节恒零，非递增计数器；`0x0318` 末字节 `0x93`/`0x01`/`0x23`，疑为状态位 |
 | 2801/3205/3206 组 UUID 的角色分配 | 仅 `406D` 组与 `…6D6C`/`…2802-…573FF530` 经实车证实，其余属结构推断 |
 | RSSI 阈值、超时、退避曲线、`CmdSelectChannel` 判定逻辑 | 在加密 dex 内 |
