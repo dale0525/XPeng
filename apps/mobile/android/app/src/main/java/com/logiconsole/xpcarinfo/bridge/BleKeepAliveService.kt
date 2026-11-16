@@ -145,6 +145,8 @@ class BleKeepAliveService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "ble-keep-alive"
+        private const val EVENT_CHANNEL_ID = "ble-events"
+        private const val EVENT_NOTIFICATION_ID = 4022
         private const val NOTIFICATION_ID = 4021
         private const val EXTRA_TEXT = "text"
 
@@ -186,6 +188,42 @@ class BleKeepAliveService : Service() {
         fun stop(context: Context) {
             instance = null
             context.stopService(Intent(context, BleKeepAliveService::class.java))
+        }
+
+        /**
+         * 发一条独立的一次性通知，比如「已自动锁车」。
+         *
+         * 不能复用前台服务那条常驻通知：那是「功能正在运行」的状态位，被改成
+         * 「已锁车」会让用户以为保活停了，而且它带 setOngoing 撤不掉。这里单开
+         * 一个通道与 id，用户可自行划掉。
+         *
+         * 从后台调用也安全：普通通知不受 Android 12 的前台服务启动限制。
+         */
+        @JvmStatic
+        fun notifyEvent(context: Context, title: String, text: String) {
+            val manager = context.getSystemService(NotificationManager::class.java) ?: return
+            if (manager.getNotificationChannel(EVENT_CHANNEL_ID) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(EVENT_CHANNEL_ID, "车控动作", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                        description = "自动解锁、自动锁车等动作的结果"
+                    },
+                )
+            }
+            if (Build.VERSION.SDK_INT >= 33 &&
+                context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) return
+            val open = PendingIntent.getActivity(
+                context, 0, Intent(context, MainActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val n = Notification.Builder(context, EVENT_CHANNEL_ID)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setSmallIcon(R.drawable.ic_ble)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+            manager.notify(EVENT_NOTIFICATION_ID, n)
         }
 
         @JvmStatic

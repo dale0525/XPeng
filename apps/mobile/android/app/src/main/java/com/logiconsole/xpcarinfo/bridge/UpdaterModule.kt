@@ -1,7 +1,12 @@
 package com.logiconsole.xpcarinfo.bridge
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.Build
 import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Arguments
@@ -124,13 +129,22 @@ class UpdaterModule(private val ctx: ReactApplicationContext) : ReactContextBase
         }
     }
 
-    /** 拉起系统安装器。文件必须经 FileProvider 授权，否则目标进程读不到。 */
+    /**
+     * 拉起系统安装器。文件必须经 FileProvider 授权，否则目标进程读不到。
+     *
+     * 拉起之后必须能知道结果：安装器是另一个 Activity，用户装完（或被系统拒绝）
+     * 返回 App 时这边不会收到任何回调。原实现拉起就 resolve，JS 把状态停在
+     * 「正在唤起系统安装器」再也不动，用户看到的就是永久转圈。
+     * 这里注册安装结果广播，装成功或失败都发 `xpeng-update-install-result` 事件；
+     * 用户直接取消（没装也没报错）时靠「回到前台仍未收到结果」兜底。
+     */
     @ReactMethod
     fun install(filePath: String, promise: Promise) {
         try {
             val file = File(filePath)
             if (!file.exists()) throw IllegalStateException("安装包不存在: $filePath")
             val uri: Uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.updates", file)
+            registerInstallResult()
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -138,8 +152,71 @@ class UpdaterModule(private val ctx: ReactApplicationContext) : ReactContextBase
             ctx.startActivity(intent)
             promise.resolve(null)
         } catch (e: Throwable) {
+            unregisterInstallResult()
             promise.reject("E_UPDATE_INSTALL", e.message ?: e.javaClass.simpleName, e)
         }
+    }
+
+    private var installReceiver: BroadcastReceiver? = null
+    private var installTimeout: Runnable? = null
+
+    private fun registerInstallResult() {
+        unregisterInstallResult()
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val action = intent?.action ?: return
+                // PACKAGE_REPLACED 只有在本应用被替换后才会收到，是唯一可靠的「装成功」信号。
+                if (action == Intent.ACTION_PACKAGE_REPLACED) {
+                    val replaced = intent.data?.schemeSpecificPart
+                    if (replaced != null && replaced != ctx.packageName) return
+                    finishInstall(true, null)
+                    return
+                }
+                // 系统安装器给出的具体原因（例如签名不一致、降级安装）都在这里。
+                val status = intent.getIntExtra("android.content.pm.extra.STATUS", -1)
+                val message = intent.getStringExtra("android.content.pm.extra.STATUS_MESSAGE")
+                // 0 == PackageInstaller.STATUS_SUCCESS；该常量在 PackageManager 上没有。
+                if (status == 0) {
+                    finishInstall(true, null)
+                } else {
+                    finishInstall(false, message ?: "安装未完成（状态码 $status）")
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addAction("android.intent.action.PACKAGE_INSTALL")
+            addDataScheme("package")
+        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Context.RECEIVER_NOT_EXPORTED
+        } else {
+            0
+        }
+        ctx.registerReceiver(receiver, filter, flags)
+        installReceiver = receiver
+        // 用户点「取消」不会发任何广播：给它一个上限，超时按「未安装」回报，别让界面永远转圈。
+        val timeout = Runnable {
+            if (installReceiver != null) finishInstall(false, "安装已取消或未完成")
+        }
+        installTimeout = timeout
+        Handler(Looper.getMainLooper()).postDelayed(timeout, 3 * 60 * 1000)
+    }
+
+    private fun finishInstall(ok: Boolean, message: String?) {
+        unregisterInstallResult()
+        val payload = Arguments.createMap().apply {
+            putBoolean("ok", ok)
+            if (message != null) putString("message", message)
+        }
+        ctx.emitDeviceEvent("xpeng-update-install-result", payload)
+    }
+
+    private fun unregisterInstallResult() {
+        installReceiver?.let { runCatching { ctx.unregisterReceiver(it) } }
+        installReceiver = null
+        installTimeout?.let { Handler(Looper.getMainLooper()).removeCallbacks(it) }
+        installTimeout = null
     }
 
     @Suppress("DEPRECATION")
