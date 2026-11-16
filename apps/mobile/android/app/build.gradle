@@ -95,11 +95,19 @@ android {
         applicationId "com.logiconsole.xpcarinfo"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // CI 用 tag 推导后经 -P 传进来；本地直接 assembleRelease 时回退到这两个默认值。
+        // versionCode 取构建时刻的 epoch 分钟数（约 2.9e7，远低于上限 2.1e9），
+        // 除非显式用 -PxpVersionCode 覆盖。
+        //
+        // 原来 CI 用 run_number + 1000、本地回退到 1，两套号段互不相干：只要本地
+        // 手动传过一个比 CI 大的号（2026-11-15 本地到 1031，CI 才到 1011），此后
+        // 所有正式版都会被系统当成降级包拒装，而 CI 的 run_number 涨得很慢，追不上。
+        // 时间戳天然单调、与构建来源无关，本地与 CI 撞号的可能性为零。
         // 用属性赋值而不是 versionCode(...) 方法调用：AGP 9 的 defaultConfig 上
         // 这两个是属性，调用式写法会把 getter 的返回值当闭包调，报 "Value is null"。
-        versionCode = (project.findProperty("xpVersionCode") ?: 1).toInteger()
-        versionName = (project.findProperty("xpVersionName") ?: "0.1.0").toString()
+        versionCode = (project.findProperty("xpVersionCode")
+            ?: (System.currentTimeMillis() / 60000L)).toLong().toInteger()
+        // CI 用 tag 推导后经 -P 传进来；本地构建回退到这个占位值，仅用于显示。
+        versionName = (project.findProperty("xpVersionName") ?: "0.0.0-local").toString()
     }
     signingConfigs {
         debug {
