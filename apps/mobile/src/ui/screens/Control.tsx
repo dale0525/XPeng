@@ -11,7 +11,7 @@ import { vehicleModelLabel } from '@xpeng/protocol/src/vehicle-model';
 import type { CustomCommandId } from './CustomCommandSheet';
 import { carLink } from '../../core/car';
 import { bleLink } from '../../core/ble';
-import { sendVehicleCommand } from '@xpeng/protocol/src/ble-v2-routing';
+import { sendVehicleCommand, isBleOnlyCommand } from '@xpeng/protocol/src/ble-v2-routing';
 import { isP5BleV2Vehicle } from '@xpeng/protocol/src/ble-v2-context';
 import {
   CapsTag,
@@ -164,10 +164,12 @@ export function ControlScreen(props: {
 
   async function run(def: CommandDef) {
     setStates((s) => ({ ...s, [def.id]: 'pending' }));
+    bleLink.logUserAction(`command ${def.id} tap`);
     const result = await sendVehicleCommand(vehicle, def, {
       send: (command) => carLink.send(command),
       executePreparedV2: (vin, code) => bleLink.executePreparedV2(vin, code),
     });
+    bleLink.logUserAction(`command ${def.id} result ok=${result.ok}${result.error ? ` err=${result.error}` : ''}`);
     if (!result.ok) console.warn(`[cmd] ${def.id}:`, result.error, 'msgId=', result.msgId);
     // 闪灯没有可读状态字段（只能靠人眼确认），所以「已响应」只跟这次下发成功挂钩，
     // 且限时显示，不能像状态字段那样常驻。
@@ -195,7 +197,31 @@ export function ControlScreen(props: {
     return id !== '' && states[id] === 'pending';
   }
 
+  /**
+   * 这条指令在当前车上是否只能走蓝牙。
+   *
+   * 判据是 `isBleOnlyCommand`，不是「P5 上有没有蓝牙命令码」。门锁、车窗、闪灯在 P5
+   * 上确实优先走蓝牙，但它们都有实测过的云端通道（service_type 9 / 12 / 5），蓝牙
+   * 断着照样能远程送达——把它们置灰等于把能用的功能锁死。实测事故：人离车后点「上锁」
+   * 按钮只转 0.x 秒就回弹，就是这里误判成「必须蓝牙」拦下的。真正没有云端表达的只有尾门。
+   */
+  function needsBle(id: string): boolean {
+    return bleV2 && isBleOnlyCommand(id);
+  }
+
+  /** 蓝牙链路没建立时，BLE 指令不下发：写帧会被原生以 E_NOT_READY 拒掉。 */
+  function bleBlocked(id: string): boolean {
+    return needsBle(id) && !bleState.connected;
+  }
+
+  /** 直线召唤是纯蓝牙会话，没有云端退路；入口和方向键共用这个判据。 */
+  const summonBlocked = !bleState.connected;
+
   function runId(id: string) {
+    if (bleBlocked(id)) {
+      onUnsupported('蓝牙未连接');
+      return;
+    }
     const def = COMMAND_DEFS[id];
     if (def) run(def);
   }
@@ -475,6 +501,9 @@ export function ControlScreen(props: {
               pending={isPending(id === 'doorLock' ? (locked ? 'door.unlock' : 'door.lock')
                 : id === 'tailgateOpen' ? (tailgateOpen ? 'trunk.close' : 'trunk.open')
                 : REAL_COMMANDS[id] ?? '')}
+              inactive={bleBlocked(id === 'doorLock' ? (locked ? 'door.unlock' : 'door.lock')
+                : id === 'tailgateOpen' ? (tailgateOpen ? 'trunk.close' : 'trunk.open')
+                : REAL_COMMANDS[id] ?? '')}
               onPress={() => runQuick(id)}
             />
           ))}
@@ -484,7 +513,15 @@ export function ControlScreen(props: {
       {/* ===== 4. Extended Feature Entry Points（三列卡片） ===== */}
       <View className="flex-row gap-2">
         <FeatureEntry icon={Icon.videocam} label="远程查看" note="车身全景环视" onPress={openRemoteView} />
-        <FeatureEntry icon={Icon.swap_vertical_circle} label="直线召唤" note="前后遥控泊车" onPress={onSummon} />
+        {/* 直线召唤是纯蓝牙会话（激活帧、方向帧、心跳全在 GATT 上），没有云端通道，
+            蓝牙没连上时进面板也只会看到方向键全部拒绝，所以入口就该置灰。 */}
+        <FeatureEntry
+          icon={Icon.swap_vertical_circle}
+          label="直线召唤"
+          note={summonBlocked ? '蓝牙未连接' : '前后遥控泊车'}
+          inactive={summonBlocked}
+          onPress={() => (summonBlocked ? onUnsupported('蓝牙未连接') : onSummon())}
+        />
         <FeatureEntry icon={Icon.ev_station} label="连接充电桩" note="智慧家充桩配对" onPress={onConnectCharger} />
       </View>
 
@@ -507,6 +544,7 @@ export function ControlScreen(props: {
               title="中控门锁"
               note={d === undefined ? '读取中' : locked ? '车辆已锁止' : '车辆未锁止'}
               pending={isPending(locked ? 'door.unlock' : 'door.lock')}
+              inactive={bleBlocked(locked ? 'door.unlock' : 'door.lock')}
               onPress={() => runId(locked ? 'door.unlock' : 'door.lock')}
             />
           </View>
@@ -518,6 +556,7 @@ export function ControlScreen(props: {
               title={tailgateOpen ? '关闭尾门' : '打开尾门'}
               note={bleV2 ? 'BLE 直连' : '仅 DF 车型'}
               pending={isPending(tailgateOpen ? 'trunk.close' : 'trunk.open')}
+              inactive={bleBlocked(tailgateOpen ? 'trunk.close' : 'trunk.open')}
               onPress={() => (bleV2 ? runId(tailgateOpen ? 'trunk.close' : 'trunk.open') : onUnsupported('电动尾门'))}
             />
           </View>
@@ -549,8 +588,8 @@ export function ControlScreen(props: {
           <StatPill label="电动尾门状态" value={tailgateText} />
         </View>
         <View className="mt-4 flex-row flex-wrap gap-2.5 pt-1">
-          <View className="basis-[48%]"><TextPill label="全车车窗通风" pending={isPending('window.down')} onPress={() => runId('window.down')} /></View>
-          <View className="basis-[48%]"><TextPill label="全车车窗关闭" pending={isPending('window.up')} onPress={() => runId('window.up')} /></View>
+          <View className="basis-[48%]"><TextPill label="全车车窗通风" pending={isPending('window.down')} inactive={bleBlocked('window.down')} onPress={() => runId('window.down')} /></View>
+          <View className="basis-[48%]"><TextPill label="全车车窗关闭" pending={isPending('window.up')} inactive={bleBlocked('window.up')} onPress={() => runId('window.up')} /></View>
           <View className="basis-[48%]"><TextPill label="打开遮阳帘" pending={isPending('shade.open')} onPress={() => runId('shade.open')} /></View>
           <View className="basis-[48%]"><TextPill label="关闭遮阳帘" pending={isPending('shade.close')} onPress={() => runId('shade.close')} /></View>
         </View>
@@ -645,6 +684,7 @@ export function ControlScreen(props: {
         </View>
         <View className="mt-4 flex-row gap-2.5">
           <Pressable onPress={() => runId('light.flash')} disabled={isPending('light.flash')}
+            style={bleBlocked('light.flash') ? { opacity: 0.45 } : undefined}
             className="flex-1 flex-row items-center justify-center gap-1.5 rounded-full bg-inset px-4 py-2.5 active:scale-95">
             {isPending('light.flash') ? (
               <PendingSpinner color="#111214" />
@@ -711,19 +751,24 @@ function QuickAction({
   meta,
   highlighted,
   pending,
+  inactive,
   onPress,
 }: {
   meta: { label: string; note: string; icon: IconName };
   highlighted: boolean;
   pending: boolean;
+  /** 蓝牙未连接时置灰。仍可点，点了会给出「蓝牙未连接」提示——禁掉点击用户就得不到原因。 */
+  inactive?: boolean;
   onPress: () => void;
 }) {
   // 照 a694：卡片恒为 bg-white/rounded-[22px]/p-3；「闪灯」的高亮只体现在图标圈底色（bg-[#F4EF00]），
   // 不是整卡变色。
+  // 置灰走内联 style 而不是条件拼 className：NativeWind 运行时重解析动态 className 会卡死 JS 线程。
   return (
     <Pressable
       onPress={onPress}
       disabled={pending}
+      style={inactive ? { opacity: 0.45 } : undefined}
       className="flex-1 items-center justify-center rounded-[22px] bg-surface p-3 active:scale-95">
       {pending ? (
         <View className="h-[64px] items-center justify-center">
@@ -748,11 +793,12 @@ function QuickAction({
 
 /** 双行胶囊按钮：照 a694 车门区——12px 粗体主文字 + 10px 次要副文字，rounded-full bg-inset。 */
 /** 双行胶囊按钮：照 a694 车门区——12px 粗体主文字 + 10px 次要副文字，rounded-full bg-inset。 */
-function Pill2({ title, note, pending, onPress }: { title: string; note: string; pending?: boolean; onPress: () => void }) {
+function Pill2({ title, note, pending, inactive, onPress }: { title: string; note: string; pending?: boolean; inactive?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={pending}
+      style={inactive ? { opacity: 0.45 } : undefined}
       className="items-center justify-center rounded-full bg-inset px-4 py-2.5 active:scale-95">
       {pending ? (
         <View className="h-[28px] items-center justify-center">
@@ -768,11 +814,12 @@ function Pill2({ title, note, pending, onPress }: { title: string; note: string;
   );
 }
 
-function TextPill({ label, pending, onPress }: { label: string; pending?: boolean; onPress: () => void }) {
+function TextPill({ label, pending, inactive, onPress }: { label: string; pending?: boolean; inactive?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={pending}
+      style={inactive ? { opacity: 0.45 } : undefined}
       className="rounded-full bg-inset px-3 py-2.5 items-center justify-center active:scale-95">
       {pending
         ? <PendingSpinner color="#111214" />
@@ -808,16 +855,20 @@ function FeatureEntry({
   icon,
   label,
   note,
+  inactive,
   onPress,
 }: {
   icon: string;
   label: string;
   note: string;
+  /** 纯蓝牙入口在蓝牙未连接时置灰；仍可点，点了给出原因。 */
+  inactive?: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      style={inactive ? { opacity: 0.45 } : undefined}
       className="flex-1 min-h-[92px] rounded-[22px] bg-surface p-3 items-start justify-between active:scale-95">
       <View className="w-8 h-8 rounded-full bg-inset items-center justify-center">
         <Text className="text-[18px] font-icon text-on-surface">{icon}</Text>
