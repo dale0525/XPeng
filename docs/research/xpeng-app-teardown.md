@@ -17,7 +17,7 @@
 
 **登录已端到端打通**（2026-11-01）：发码 → 验证码 → 第二道滑块 `drag/validate{sceneType:"LGN"}` → `smsLogin` 200 → 解 `sData` 拿到 AT/RT → 带 `Xp-Uid=<uid>` 打业务接口 200。三个必要条件：第二道滑块场景是 `LGN`（不是发码用的 `SMS`）、换 token 打 `v5/smsLogin`、解 `sData` 必须用同一次请求的服务端密钥池。
 
-**MQTT 车控已打通 14 条**：解锁、锁车、闪灯、遮阳帘开关、空调开关、设温度、全车车窗升降、极速降温、极速升温、高温抑菌、鸣笛、哨兵开关、哨兵灵敏度、临停。均实测成功并有 `code:200` 回执。车主账号真机点击取证另确认：远程查看的开流、后/左/右视角切换及前视初始化走 `service_type:11 / cmd_type:2`（§5.7）；官方名称「远程启动」走云端 MQTT `service_type:9 / cmd_type:6` 加服务端签发的动态 `<TOKEN>`，BLE 路线可并存（§5.6）。未打通的是单扇车窗、除霜、内外循环、座椅加热通风、智能清洁/除味/香氛（风量官方 App 无此功能）；后备箱开合仍走 BLE。`avm_exist=0` 与 `camera_status=-2` 不能再判定实时视频物理不可用。
+**MQTT 车控已打通 14 条**：解锁、锁车、闪灯、遮阳帘开关、空调开关、设温度、全车车窗升降、极速降温、极速升温、高温抑菌、鸣笛、哨兵开关、哨兵灵敏度、临停。均实测成功并有 `code:200` 回执。车主账号真机点击取证另确认：远程查看的开流、后/左/右视角切换及前视初始化走 `service_type:11 / cmd_type:2`（§5.7）；官方名称「远程启动」走云端 MQTT `service_type:9 / cmd_type:6` 加服务端签发的动态 `<TOKEN>`，BLE 路线可并存（§5.6）。未打通的是单扇车窗、内外循环、座椅加热通风、智能清洁/除味/香氛（风量官方 App 无此功能）。除霜两条（`st=3 ct=4` 前除霜、`ct=14` 后挡除霜）通道已于 2026-11-16 确认存在，本车只接受关闭、开启被拒；后备箱 `st=9 ct=2` 带 `cmd_value` 也被接受，但本车不执行开合，实际仍需 BLE。`service_type:31` 是方向盘加热（本车无硬件，回 `13102/13103`），旧「31–70 全部不支持」的断言作废。`avm_exist=0` 与 `camera_status=-2` 不能再判定实时视频物理不可用。
 
 **BLE 链路：P5V2 目标发送路径与 V3 native 必须区分。** 握手第二步 `ef0110` 的 KDF 已完全解出（§6.13）：`HMAC-MD5(MD5(hexIncrement(keyString[-10:][:8])), app_n‖car_n)`，188/188 组真实样本命中，Python 与 TS 双实现。`keyString` 是**当前 GATT 连接对端模块自己的 MAC**（§6.13）。命令帧此前被车端静默丢弃的真因是 CRC 覆盖范围算错（只覆盖 payload、不含 type 字节，§6.15），不是抓不到报文。
 
@@ -447,6 +447,16 @@ XA | ver | keyIndex@3 | … | iv@47..59 | ct@59..
 
 因此「发 `smsLogin` 那次的池」必须与响应绑定保存，事后重取一定解不开；`unwrap_sdata` 以服务端密钥池为主、tee 仅兜底。`token/refresh` 的返回同样只能用同次请求的池解开（AT idx=7、RT idx=5），所以 `renew.py` 必须把「请求所用的池」和响应一起带出。
 
+**密钥池与请求强绑定的三组对照（2026-11-16 实测）**：
+
+1. 用 `smsLogin` 当次请求的池解那份 `sData` → 成功（3189 B 密文，`keyIndex=4`，解出 3114 B 明文）。
+2. 用当场**另取的一套新池**解同一份密文 → `InvalidTag`。两套池 10 个槽位**全部不同**（idx4：`e0619ce6…` vs `6b7b2b6c…`），确认池每次调用都轮换。
+3. **用旧池去发** `token/refresh` → 服务端直接回 `12110009 服务器开小差`，请求本身就没过（信封解不开）；换回现取的新池发同一请求 → `200`，响应只能用本次请求的池解开（AT idx=3、RT idx=7），另取一套池解不开。
+
+第 3 条是新增证据：旧结论只说「响应解不开」，实测是**连请求都发不出去**。所以「池与请求强绑定」在收发两个方向都成立，不只是响应侧的加密约定。
+
+这一点与上游 Home Assistant 集成的做法**不矛盾**：上游的 tenant 是 `teeIndiv4OverseaApp` 下发的 `secreteKey`，用 `md5(deviceId)` 解出后缓存复用；它缓存的是**解池用的原料**，而每次请求的信封仍按当时的状态生成。两边观察到的是同一机制的不同侧面，不必互相推翻。
+
 `mqttAccount` 为空不影响 MQTT：它只是登录响应里的参考值，真正的 MQTT 凭据由 `POST /biz/v5/mqtt/createMqttAccount/app` 独立签发（§5.2）。
 
 ### 4.7 业务请求的 `Xp-Uid`
@@ -656,7 +666,7 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | service_type | 含义 | 已验证指令 |
 | --- | --- | --- |
 | 1 | 心跳/空操作，任意 `cmd_type` 都返回成功 | 无实际作用 |
-| **3** | **空调** | ✅ `{"cmd_type":1,"cmd_value":0/1}` 开关、`{"cmd_type":2,"cmd_value":N}` 设温度、`{"cmd_type":4}` 读状态 |
+| **3** | **空调** | ✅ `{"cmd_type":1,"cmd_value":0/1}` 开关、`{"cmd_type":2,"cmd_value":N}` 设温度；`{"cmd_type":4,"cmd_value":0/1}` 前除霜（本车仅关闭可用）、`{"cmd_type":14,"cmd_value":0/1}` 后挡除霜（本车仅关闭可用）。状态一律读 `st=19` |
 | **5** | **灯光** | ✅ `{"cmd_type":1,"cmd_value":1}` 闪灯 |
 | **8** | **哨兵模式** | ✅ `{"action":1}` 读设置；`{"action":2,"settings":[{"code":"SENTINEL_MODE_VIDEO","value":1/0}]}` 开关哨兵；同格式写 `SENTINEL_MODE_SENSITIVITY` 改灵敏度 |
 | **9** | **门锁 / 车身 / 临停 / 远程启动授权** | ✅ `{"cmd_type":0}` 解锁、`{"cmd_type":1}` 锁车、`{"cmd_type":3}` 临停、`{"cmd_type":6,"token":"<TOKEN>"}` 远程启动 |
@@ -666,7 +676,8 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | 22 | 预约 | ✅ 只读，`function`/`action` |
 | 29 | 未知，仅回 `code:200` 空体 | ⚠️ 无数据 |
 | 26/28 | 驻车、哨兵状态 | ⚠️ 主动请求无响应 |
-| 31–70 | 全部不支持 | — |
+| 31 | 方向盘加热 | ⚠️ 通道存在、本车无硬件：`{cmd_type:1,cmd_value:1}` 回 `13102 方向盘加热调节失败`，`cmd_value:0` 回 `13103 方向盘加热关闭失败`（2026-11-16 实测） |
+| 32–70 | 未逐个验证 | 旧结论「全部不支持」已作废，见下 |
 
 
 ### 5.6 已打通的十三条指令
@@ -713,7 +724,11 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | --- | --- | --- |
 | 11 / 12 | `10330 智能清洁暂不可用` | `OpenACClean`、`openAirClean` |
 | 13 | `10338 智能除味开启失败` | `OpenDeodorization`、`CloseDeodorization` |
-| 14 | `10342 空调香氛通道调节失败` | `OpenFragrance`、`CloseFragrance` |
+| 14 | `10340 后挡除霜开启失败` / `10341 后挡除霜关闭失败` | 后挡除霜（2026-11-16 纠正） |
+
+**`ct=14` 是后挡除霜，不是香氛**（2026-11-16 实测）：带 `cmd_value` 下发 `3/{cmd_type:14,cmd_value:1|0}`，车端分别回 `10340 后挡除霜开启失败` / `10341 后挡除霜关闭失败`。此前把 `ct=14` 归为「香氛」是把 vdex 方法名 `OpenFragrance` 错配到通道号上——方法名与 MQTT `cmd_type` 不是同一套编号。旧记录里的 `10342 空调香氛通道调节失败` 属另一个通道，尚未重新定位。
+
+**`ct=4` 是前除霜，不是读状态**（2026-11-16 实测）：`3/{cmd_type:4,cmd_value:1}` 回 `10307 开启除霜失败`，`cmd_value:0` 回 `200` 并带 `hvac_defrost:0`。本车（D55）上「开启」被拒，空调开着也一样，属车型限制；关闭可正常执行。此前把 `{cmd_type:4}` 记为「读状态」是错的，空调状态一律读 `st=19` 的 `instant.hvac`。
 
 这些码是语义错误而非「不支持」，说明功能存在，只是参数结构或车辆配置不满足。`ct=10` 无回执，疑为除霜但未确认。
 
@@ -732,6 +747,8 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 **后备箱开关不在 MQTT 通道（2026-10-30 22:05 定论，10-31 用户确认）**：App 操作后备箱时提示「蓝牙未连接」，必须连蓝牙才能操作。同时 `CallbacksManagerV1` 的完整回调类清单只有 4 个——`CarCameraControlCallback`（摄像头 st=11）、`CarDoorLockControlCallback`（门锁 st=9）、`CarWindowControlCallback`（车窗 st=12）、`PowerControlCallBack`（电源），**没有任何后备箱回调**。REST 侧 `/sp-vowner-mapp/p/api/rvc/v2/openTrunk` 在 `apps-booster`（唯一要求 mTLS 的主机）上返回 `Content-Length: 0`，与其他 `/sp-vowner-mapp/*` 表现一致。结论：后备箱开关走 **DiDi Davinci 数字钥匙 BLE** 的 `CarService.OpenTrunk` / `CloseTrunk`，与 `startCar` 同属一类，不在云端 MQTT 体系内。
 
 **自研客户端要实现后备箱开合，只能复用 §6 的数字钥匙栈**，无法用 MQTT 补。10-31 09:52 的监听复核（点「后备箱」→ 确认弹窗 → 取消，全程零下行报文）与本结论一致，但该次未点「确定」，因此报文层面的最后一步仍是 App 侧提示与代码结构的证据，不是抓包证据。
+
+**上面这条结论需修正：云端 MQTT 确实有后备箱通道**（2026-11-16 实测）。`9/{cmd_type:2,cmd_value:1}` 回 `code:200` 并带门锁/`trunk_ajar_st` 快照，`cmd_value:3` 回 `10904 后尾箱关闭失败`。此前的 `st=9 ct=2 → code:8` 是**漏发 `cmd_value`** 造成的假阴性，`cmd_type:2` 必须带 `cmd_value` 才被路由。但**通道可用不等于物理生效**：下发后 `trunk_ajar_st` 全程保持 0，车端没有真正开箱，所以本车（D55）上开合后备箱仍需 BLE。结论改为：通道存在且指令被接受，本车不执行。
 
 **注意区分两个「后备箱」**：`trunkPower`（`powerSwitch`、`timeToPowerOffInMin`）是**后备箱 220V 供电**，由 `handlerTrunkPower` 承载、走 MQTT；与开合箱门是两回事，后者走 BLE。用户明确只要箱门开合。
 
@@ -789,7 +806,7 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 | 极速降温 | `hvac_temp:18`、`hvac_quick_cool_mode:1`、`hvac_wind_speed:10` |
 | 高温抑菌 | `hvac_high_temp_mode:1`、`hvac_temp:32`、`hvac_wind_speed:10` |
 
-**除开关与设温度外，其余空调动作的指令码未打通**。`cmd_type:7` 是风量（返回 `10306 调控风量失败`，说明字段名不对）；极速升温/降温、高温抑菌、除霜、内外循环、座椅加热通风的 `cmd_type` 全部未测。
+**除开关、设温度与两条除霜外，其余空调动作的指令码未打通**。`cmd_type:7` 是风量（返回 `10306 调控风量失败`，说明字段名不对）；极速升温/降温、高温抑菌的 `cmd_type` 已实测可用（见上），内外循环、座椅加热通风仍未测。除霜两条（`ct=4` 前除霜、`ct=14` 后挡除霜）通道已确认存在，本车只接受关闭、开启被拒（2026-11-16）。
 
 **鸣笛**：能力表有 `BLE_FLASH_LIGHT_HORN`，闪灯已确认（`st=5 ct=1 cv=1`），鸣笛是否同通道的 `cmd_value:2` 或其他值**未测**。
 
