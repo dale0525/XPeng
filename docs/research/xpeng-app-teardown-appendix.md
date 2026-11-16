@@ -26,11 +26,12 @@ AES IV / CRC 常量、真实抓包样本与统计分布、设备 MAC 与拓扑�
 
 重跑需要这些值时从 `work/local.env` 读，不要写回文档。
 
-**例外：`scripts/fakecar/strict_protocol.py`、`scripts/fakecar/test_strict_protocol.py`、
-`scripts/ble-session.test.mts` 仍保留真实 MAC**，因为 `keyString` = 该 MAC 去掉冒号后的
-`[-10:][:8]` 直接参与 `ef0110` 的 KDF，替换成别的值会让 `createAuthKey verification failed`、
-`ef0110` 密文对不上（均于 2026-11-16 实测复现）。脱敏这三处只能连断言里的期望密文一起重算，
-代价大于收益，故维持原值——它们出现在测试夹具里，不是运行期配置。
+**测试夹具也已换成假 MAC，代价是要重算两个依赖值**：`keyString` = MAC 去掉冒号后的
+`[-10:][:8]`，直接参与 `ef0110` 的 KDF，所以换 MAC 会同时改动
+`scripts/fakecar/test_strict_protocol.py` 里的种子 oracle（现为 `ccddeeff`）与
+`scripts/ble-session.test.mts` 里期望的 `ef0110` 密文（现为
+`ef0110445d815ca9d94afbea9e0836a1a12167`）。只换 MAC 不重算，会分别报
+`createAuthKey verification failed` 与密文不符——2026-11-16 均实测复现过。
 
 ---
 
