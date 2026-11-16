@@ -18,7 +18,7 @@ COMMAND_RAW = (b"XPBKTH" + bytes.fromhex("01000054010203041234")
 
 def auth_frame(app_nonce=APP_NONCE):
     # The public MAC's incremented seed is fixed independently of the core.
-    key = hashlib.md5(bytes.fromhex("714896ca")).digest()
+    key = hashlib.md5(bytes.fromhex("ccddeeff")).digest()
     return b"\xef\x01\x10" + hmac.new(key, app_nonce + TEST_CAR_NONCE, hashlib.md5).digest()
 
 
@@ -48,7 +48,7 @@ class StrictTestProtocolTests(unittest.TestCase):
         return self.protocol.handle(tbox())
 
     def test_public_fixture_identity_and_full_handshake(self):
-        self.assertEqual(TEST_MAC, "00:60:37:85:B9:E0")
+        self.assertEqual(TEST_MAC, "AA:BB:CC:DD:EE:01")
         self.assertEqual(TEST_CAR_NONCE.hex(), "ffdba7e0")
         self.assertEqual(self.nonce(), TEST_CAR_NONCE)
         self.assertEqual(self.protocol.app_nonce, APP_NONCE)

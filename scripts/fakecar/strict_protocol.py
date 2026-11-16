@@ -10,7 +10,7 @@ import hmac
 from collections.abc import Mapping
 
 
-TEST_MAC = "00:60:37:85:B9:E0"
+TEST_MAC = "AA:BB:CC:DD:EE:01"
 TEST_CAR_NONCE = bytes.fromhex("ffdba7e0")
 AUTH_OK = bytes.fromhex("08000144463030482e32")
 CIPHER_OK = bytes.fromhex("02810000000000000000")

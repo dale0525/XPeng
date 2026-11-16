@@ -31,7 +31,7 @@ class FakeTransport implements BleTransport {
 
 const authCipher = fromHex('db61b5b113d0870e6482ace4772c27e2');
 const command = fromHex('ed1109000200000000020102');
-const options = { mac: '00:60:37:85:B9:E0', keyMac: '00:60:37:85:B9:E0', appN: fromHex('d4e5fee5'),
+const options = { mac: 'AA:BB:CC:DD:EE:01', keyMac: 'AA:BB:CC:DD:EE:01', appN: fromHex('d4e5fee5'),
   createAuthCipher: async () => authCipher, frame: command, commandCode: 2, timeoutMs: 50 };
 
 test('subscribes before writes, authenticates then waits for matching vehicle ACK', async () => {
@@ -39,7 +39,7 @@ test('subscribes before writes, authenticates then waits for matching vehicle AC
   const result = await new BleSession(io).execute(options);
   assert.equal(result.code, 200);
   assert.equal(io.writes[0], 'ef0104d4e5fee5');
-  assert.equal(io.writes[1], 'ef011092b7148348c91f370a898d0ce5855afe');
+  assert.equal(io.writes[1], 'ef0110445d815ca9d94afbea9e0836a1a12167');
   assert.ok(io.writes[2].startsWith('ed11180011'));
   assert.equal(io.writes[3], toHex(command));
   assert.equal(io.closed, 1);
@@ -75,7 +75,7 @@ test('reports operation stages from preparation through disconnection', async ()
 test('KDF uses the explicit target-module keyString rather than a transport address', async () => {
   const io = new FakeTransport();
   await new BleSession(io).execute({ ...options, mac: 'AA:BB:CC:DD:EE:FF' });
-  assert.equal(io.writes[1], 'ef011092b7148348c91f370a898d0ce5855afe');
+  assert.equal(io.writes[1], 'ef0110445d815ca9d94afbea9e0836a1a12167');
 });
 
 test('handshake ACKs can follow unrelated ten-byte records', async () => {
