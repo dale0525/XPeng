@@ -9,7 +9,7 @@ const key = '00112233445566778899aabbccddeeff';
 const random = 0x12345678;
 const frame = fromHex('ed1109000200000000020102');
 const status = fromHex('02810000000000000000');
-const options = { mac: '00:60:37:85:B9:E0', keyMac: '00:60:37:85:B9:E0',
+const options = { mac: 'AA:BB:CC:DD:EE:01', keyMac: 'AA:BB:CC:DD:EE:01',
   appN: fromHex('d4e5fee5'), verifyKey: key, verifyRandom: random,
   frame, commandCode: 2, timeoutMs: 50 };
 

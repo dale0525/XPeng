@@ -10,7 +10,7 @@ const phoneKey = '00112233445566778899aabbccddeeff';
 const appN = Buffer.from('d4e5fee5', 'hex');
 const carN = Buffer.from('ffdba7e0', 'hex');
 const mac = 'AA:BB:CC:DD:EE:FF';
-const keyMac = '00:60:37:85:B9:E0';
+const keyMac = 'AA:BB:CC:DD:EE:01';
 const vin = 'OFFLINE-FIXTURE-VIN';
 
 class Vehicle implements BleTransport {

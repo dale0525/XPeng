@@ -43,7 +43,7 @@ import emulated_bluetooth_device_pb2_grpc as dev_grpc
 import grpc_endpoint_description_pb2 as ep
 
 # --- The real module's identity, from a live GATT dump (teardown §6.25a/b) ---
-DEVICE_NAME = "XPED-C00D30B094C4"
+DEVICE_NAME = "XPED-AABBCCDDEE03"
 # 128-bit UUID = msb(64) || lsb(64), i.e. the first and last 16 hex digits.
 #   0000ED28-ABAB-406D-832D-7AD799B479F7
 #     msb = 0000ED28ABAB406D   lsb = 832D7AD799B479F7

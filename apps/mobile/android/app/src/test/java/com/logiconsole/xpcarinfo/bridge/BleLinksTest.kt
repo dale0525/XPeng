@@ -7,17 +7,17 @@ import org.junit.Test
 class BleLinksTest {
     @Test
     fun rejectsSecondLinkToTheSameAddress() {
-        assertFalse(BleLinks.admit(listOf("00:60:37:85:B9:E0"), "00:60:37:85:B9:E0"))
-        assertFalse(BleLinks.admit(listOf("00:60:37:85:B9:E0"), "00:60:37:85:b9:d0"))
+        assertFalse(BleLinks.admit(listOf("AA:BB:CC:DD:EE:01"), "AA:BB:CC:DD:EE:01"))
+        assertFalse(BleLinks.admit(listOf("AA:BB:CC:DD:EE:01"), "AA:BB:CC:DD:EE:01"))
     }
 
     @Test
     fun admitsTheChargingPileWhileTheVehicleLinkIsHeld() {
-        assertTrue(BleLinks.admit(listOf("00:60:37:85:B9:E0"), "94:70:6C:44:E3:F4"))
+        assertTrue(BleLinks.admit(listOf("AA:BB:CC:DD:EE:01"), "AA:BB:CC:DD:EE:02"))
     }
 
     @Test
     fun admitsTheFirstLink() {
-        assertTrue(BleLinks.admit(emptyList(), "00:60:37:85:B9:E0"))
+        assertTrue(BleLinks.admit(emptyList(), "AA:BB:CC:DD:EE:01"))
     }
 }

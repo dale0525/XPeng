@@ -21,7 +21,7 @@ SCRIPT = Path(__file__).resolve().with_name("generic_att_decode.py")
 CHAR_UUID = "8ac32d3f-5cb9-4d44-bec2-ee689169f626"
 SERVICE_UUID = "1b7e8251-2877-41c3-b46e-cf057c562023"
 SERVICE_UUID_WIRE = "2320567c05cf6eb4c341772851827e1b"
-FAKE_ADDR = "94:70:6C:44:E3:F4"
+FAKE_ADDR = "AA:BB:CC:DD:EE:02"
 FAKE_ADDR_HEX = "94706c44e33f"
 
 

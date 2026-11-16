@@ -65,7 +65,7 @@ test('invalid V2 material rejects before connecting', async () => {
   for (const material of [{ verifyKey: '', verifyRandom: 0 }, { verifyKey: key, verifyRandom: -1 }]) {
     const vehicle = new StatusOnlyVehicle();
     await assert.rejects(new BleSession(vehicle).execute({
-      mac: '00:60:37:85:B9:E0', keyMac: '00:60:37:85:B9:E0', appN: fromHex('d4e5fee5'),
+      mac: 'AA:BB:CC:DD:EE:01', keyMac: 'AA:BB:CC:DD:EE:01', appN: fromHex('d4e5fee5'),
       ...material, frame: new Uint8Array(), commandCode: 2,
     }));
     assert.equal(vehicle.connections, 0);
@@ -76,7 +76,7 @@ test('invalid V2 material rejects before connecting', async () => {
 test('execute sends real V2 cipher independently of app nonce, then refuses status-only authentication', async () => {
   const vehicle = new StatusOnlyVehicle();
   await assert.rejects(new BleSession(vehicle).execute({
-    mac: '00:60:37:85:B9:E0', keyMac: '00:60:37:85:B9:E0', appN: fromHex('d4e5fee5'),
+    mac: 'AA:BB:CC:DD:EE:01', keyMac: 'AA:BB:CC:DD:EE:01', appN: fromHex('d4e5fee5'),
     verifyKey: key, verifyRandom: 0xffffffff,
     frame: fromHex('ed1109000200000000020102'), commandCode: 2, timeoutMs: 50,
   }), /BLE response timeout/i);
