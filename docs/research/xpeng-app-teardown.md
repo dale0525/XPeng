@@ -89,7 +89,8 @@ class_defs 区    : 0x557c 起，30 × 32 = 960 B
 30 个可见类名全是混淆串（`CDCCCCCCCCCC`、`CDLCCCCCCCCCLCLC` 等）。
 
 - 真实业务代码在 dex 尾部明文区：`offset 0x14000` 之后约 114 MB，类描述符 `Lcom/xiaopeng/...;` 以明文出现 25,750 处。
-- id 表做了整体位移：`string_ids` 条目值统一加 `0x178BC` 才指向合法的 `string_data_item`。按此可还原 20 段、共 66,862 个字符串，但其中仅 336 条含 `xiaopeng`，且多为混淆类名。**业务层字符串与全部 `code_item` 仍不可读。**
+- id 表做了整体位移：`string_ids` 条目值统一加 `0x178BC` 才指向合法的 `string_data_item`。按此可还原 20 段、共 66,862 个字符串，但其中仅 336 条含 `xiaopeng`，且多为混淆类名。
+- **「业务层字符串不可读」这一半要作废（2026-11-17 复核）**：53–80 MB 区间的 `string_data_item` 流是完好的明文，uleb128 长度前缀逐项自洽（`\x2b`=43 恰为 `()Lcom/xiaopeng/blekey/polling/IPollingSdk;` 的长度），该区间可走出 56,415 条合法字符串项；`com/xiaopeng/blekey/polling/*` 去重 203 个类描述符、偏移跨 `0x32A0BBF`–`0x4C85A9B`，类名与方法名均为真实 Kotlin 编译产物（`$lambda$N`、`_delegate$lambda$N`、`$WhenMappings`）。**受限的是索引与代码，不是字符串**：按合法 type 集合扫不出真实 `map_list`（候选全是 `type=0` 重复的零填充误报，真 `map_list` 每种类型只出现一次），也没有可用的 `class_defs`/`code_item`。故修正为：业务层字符串可读，**全部 `code_item` 仍不可读**。
 - 关键教训：`XmartV1LocalKey`、`XTeeSecurityIv`、`IndivKeySet`、`decryptWithCryptHead` 这些字符串**能在加密区里被搜到，但没有一条能对应到字节码**。搜到名字 ≠ 有实现。
 - 没有任何 `.so` 引用这些键（100+ 个 arm64 库逐个 grep `XmartV1|XTee|tee_id` 全 0）。`liball_in_one.so` 里的 `LocalKeySet` 属阿里播放器 DRM，无关。
 - `jadx` 只能产出 30 个空壳类。**不动壳就拿不到信封解包逻辑。**
@@ -926,6 +927,10 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 
 ### 6.1 Java 侧（在加密 dex 内，需脱壳）
 - `com.xiaopeng.blekey.polling.*` 217 个类：`manager`(79)、`distance`(44)、`config`(25)、`rx`(18)、`defaultconst`(8)；`locksource` 定义 `LockSource`/`UnlockSource`/`LockSourceLevel`。
+- **轮询判距的接口面（2026-11-17 静态复核，纯名称池可得）**：判距与状态机类为 `XPollingSdk`、`XPollingModule`、`IPollingSdk`、`PollingState`/`PollingStateMonitor`、`DistanceManager`、`CurveFittedDistanceCalculator`（含 `CurveFittedConst`/`DirectionCurveFittedConst`）、`BallotBox`、`DistanceLifeCycle`；配置类 `PollingConfigBean$VehicleV1$Rssi`、`PollingConfigBean$VehicleV2$Rssi`、`PollingConfigBean$VehicleV2$DirectionConfig`、`PollingConditions`、`PollingCustomConfigBean`、按车型的 `OptionalConstSet$D22D55SET`。方法名级 hook 目标：`checkTrigger`、`readRssi`、`readRssiIntervalDispose`、`doLockUnLockAction`、`estimateFinalDistance`、`pollingRunTimer`、`collectBleRssiOnce`、`updateDistanceConfig`、`startPollingEnablePeriod`/`stopPollingEnablePeriod`。配置字段名：`unlockDistance`、`configUnlockDistance`、`customUnlockDistance`、`userCustomUnlockDistance`、`lockDistance`、`pollingIntervalMs`、`scanIntervalDispose`、`keepAliveInterval`、`approachNode`、`autoUnlock`、`pollingRunMaxTime`。
+- **同一方法名在 ~12.7 M 与 ~15.4 M 两处出现、且合成名风格不同**（低偏移区 `estimateFinalDistance$lambda$0` 对高偏移区 `estimateFinalDistance$lambda$25`，高偏移区另带 `pollingRunTimer_delegate$lambda$55`、`collectBleRssiOnce$lambda$13..19`）。故文件里存在两份不同编译产物的名称表，不是同一份的重复。
+- **判距阈值与公式取不到，且不在 native**：`libbledata.so` 未 strip，但只是报文编码层（TLV + `calc_crc16_ccitt` + XOR），`pollingIntervalMs`/`keepAliveInterval`/RSSI 均由 Java 作参数传入，so 内无任何阈值常量——靠近判定确在加固 Java/Kotlin 层。`configUnlockDistance=`、`, unlockDistance=`、`, lockDistance: ` 等是 Kotlin `toString` 日志模板（只有字段名、无取值），中文串「使用新的字段 userCustomUnlockDistance 替代」「同步旧版本配置 customUnlockDistance」可读。阈值数值、判距系数、灵敏度档对应偏移、超时退避、状态迁移条件全部不可得。
+- **UI 侧可取到的取值（`res/values/strings.xml` + 车型配置）**：灵敏度只有「标准」「灵敏」两档（`polling_sensitivity_normal`/`_sensitive`）；解锁距离 5 档、文案为「约 2m / 3m / 4m / 5m / 6m 左右解锁」（2m、3m 注「可能出现延迟」，4m、5m「推荐」，6m「更灵敏」）；1 米校准 = 主驾门 1 米 + 后尾门 1 米，要求与门把手等高、平行地面、无遮挡。`integers.xml`/`dimens.xml`/`bools.xml`/`arrays.xml` 内**无**任何 BLE 阈值或间隔——档位不是资源数组，属代码常量或接口下发。`DFVehicleAbilityConfig.json`（D55）为 `bleKeyVersion:2`、`isSupportPollingV1:true`、V2/V3 `false`；5.23.6 与 5.19.0 该文件逐行一致，仅 5.23.6 多出 `DJVehicleAbilityConfig.json`（V3）。
 - `com.xiaopeng.common.car.digitalkey.*` 1206 个类，覆盖 ICCoA、ICCE、CCC 三套标准与华为/小米/vivo/三星/荣耀钱包 SDK。
 - 按车型分协议实现：`D22BleProtocol`、`D55BleProtocol`、`E28ABleProtocol`、`E28BleProtocol`、`E38BleProtocol`、`F30BleProtocol`、`H93BleProtocol`、`XpBleProtocolV1V2`、`XpBleProtocolV3`、`XpNativeBleProtocol`。
 - 第三方数字钥匙引擎 DiDi Davinci SDK（`com/didi/davinci` 1,571 处引用、1,489 个类）：`MonaBleService`、`MonaBleCommunication`、`BleCommandQueueManager`、`ble/encrypt/AesUtils`、`mona/carserviceimpl/{MnaAcCtrlImpl,MnaCarManagerImpl,MnaCarStatusImpl,MnaChargeImpl,MnaNfcImpl}`。数字钥匙本身即第三方代码，小鹏只做集成。
