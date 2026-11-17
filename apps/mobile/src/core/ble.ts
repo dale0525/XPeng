@@ -51,6 +51,9 @@ interface BleNative {
   startProximityScan(mac: string): Promise<void>;
   stopProximityScan(reason: string): Promise<void>;
   logProximity(message: string): Promise<void>;
+  readLinkRssi(mac: string): Promise<void>;
+  startLinkRssiProbe(mac: string, intervalMs: number): Promise<void>;
+  stopLinkRssiProbe(): Promise<void>;
 }
 
 const bridge = NativeModules.XpengBle as BleNative;
@@ -932,6 +935,25 @@ export const bleLink = {
   executePreparedV2,
   setProximityEnabled,
   setForeground,
+  /**
+   * 连接态 RSSI 探针（临时取证用，非功能路径）。
+   *
+   * 目的只有一个：判定「保持 GATT 连接时能否用连接态 RSSI 判距」。车端在已有连接时
+   * 不广播，所以它与广播判距互斥、必须分两遍采样：先连上跑本探针，再断开跑判距扫描。
+   * 读数由原生逐点写进日志文件，`adb pull` 或界面导出即可取。
+   */
+  startLinkRssiProbe: async (intervalMs = 1500) => {
+    const mac = proximityMac ?? holdTarget?.mac.toUpperCase();
+    if (!mac) throw new Error('没有可用的车辆 MAC：先让物料就绪或开启靠近解闭锁');
+    await bridge.startLinkRssiProbe(mac, intervalMs);
+    return mac;
+  },
+  stopLinkRssiProbe: () => bridge.stopLinkRssiProbe(),
+  readLinkRssi: () => {
+    const mac = proximityMac ?? holdTarget?.mac.toUpperCase();
+    if (!mac) return Promise.reject(new Error('没有可用的车辆 MAC'));
+    return bridge.readLinkRssi(mac);
+  },
   startCalibration,
   currentThresholds,
   applyCalibration,

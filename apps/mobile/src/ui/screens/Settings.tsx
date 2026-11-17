@@ -44,6 +44,9 @@ export function SettingsScreen(props: {
   onUnsupported: (label: string) => void;
   suppressionSummary: string;
   onEditSuppression: () => void;
+  /** 连接态 RSSI 探针开关（临时取证）。 */
+  linkRssiProbe: boolean;
+  onToggleLinkRssiProbe: (enabled: boolean) => void;
 }): React.JSX.Element {
   const {
     bottomInset,
@@ -70,6 +73,8 @@ export function SettingsScreen(props: {
     onUnsupported,
     suppressionSummary,
     onEditSuppression,
+    linkRssiProbe,
+    onToggleLinkRssiProbe,
   } = props;
 
   /** SOC 进度条必须跟真实电量走；拿不到时停在 0 而不是假装半满。 */
@@ -219,6 +224,22 @@ export function SettingsScreen(props: {
           </Text>
           <Pressable onPress={onEditSuppression} className="active:scale-95">
             <Text className="text-[12px] font-headline font-semibold text-primary">设置例外</Text>
+          </Pressable>
+        </View>
+        {/* 连接态 RSSI 探针：临时取证入口，用来验证「保持连接时能否据此判距」。
+            与判距扫描互斥（车端在已有连接时不广播），读数逐点写进日志文件。 */}
+        <View className="flex-row items-center justify-between pt-1">
+          <Text className="flex-1 text-[12px] font-headline font-normal text-on-surface-variant leading-snug pr-3">
+            {linkRssiProbe
+              ? '采样进行中：保持手机不动，结束后导出日志给我'
+              : bluetoothReady
+                ? '连接态信号采样（排查用，会暂停后台扫描）'
+                : '连接态信号采样（需先连上车辆蓝牙）'}
+          </Text>
+          <Pressable onPress={() => onToggleLinkRssiProbe(!linkRssiProbe)} className="active:scale-95">
+            <Text className="text-[12px] font-headline font-semibold text-primary">
+              {linkRssiProbe ? '停止' : '开始采样'}
+            </Text>
           </Pressable>
         </View>
       </SettingsCard>

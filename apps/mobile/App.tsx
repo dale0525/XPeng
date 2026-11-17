@@ -84,6 +84,13 @@ function Shell() {
   const [suppression, setSuppression] = useState<ProximitySuppression>(DEFAULT_SUPPRESSION);
   const [suppressionVisible, setSuppressionVisible] = useState(false);
   const [thresholds, setThresholds] = useState(bleLink.currentThresholds());
+  /**
+   * 连接态 RSSI 探针的开关（临时取证用，非功能路径）。
+   *
+   * 它存在的唯一目的：判定「保持 GATT 连接时能不能用连接态 RSSI 判距」。车端在已有
+   * 连接时不广播，所以这套采样与后台判距扫描互斥——开探针时不能同时跑扫描。
+   */
+  const [linkRssiProbe, setLinkRssiProbe] = useState(false);
   const updater = useUpdater();
 
   useEffect(() => {
@@ -211,6 +218,30 @@ function Shell() {
     });
     // 首次打开且还没标定：先让用户到目标距离采一次，否则阈值只能靠猜。
     if (enabled && !bleLink.calibration) setCalibrationVisible(true);
+  };
+
+  /**
+   * 连接态 RSSI 探针的开关处理。
+   *
+   * 与判距扫描互斥（车端在已有连接时不广播），所以开启前先停掉扫描，避免两条路
+   * 同时跑既白耗电又采不到数。失败要让用户看见——探针跑不起来却显示"运行中"，
+   * 等于拿着空数据去做判断。
+   */
+  const toggleLinkRssiProbe = (enabled: boolean) => {
+    void bleLink.logUserAction(`toggle link-rssi-probe=${enabled}`);
+    setLinkRssiProbe(enabled);
+    if (!enabled) {
+      void bleLink.stopLinkRssiProbe().catch(() => {});
+      return;
+    }
+    void (async () => {
+      await bleLink.setProximityEnabled(false).catch(() => {});
+      await bleLink.startLinkRssiProbe();
+    })().catch((error) => {
+      setLinkRssiProbe(false);
+      const message = error instanceof Error ? error.message : String(error);
+      setUnsupported(`连接态 RSSI 探针启动失败：${message}`);
+    });
   };
 
   const saveSuppression = (rules: ProximitySuppression) => {
@@ -343,6 +374,8 @@ function Shell() {
             onUnsupported={setUnsupported}
             suppressionSummary={suppressionSummary}
             onEditSuppression={() => setSuppressionVisible(true)}
+            linkRssiProbe={linkRssiProbe}
+            onToggleLinkRssiProbe={toggleLinkRssiProbe}
           />
         )}
       </View>
