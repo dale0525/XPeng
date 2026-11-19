@@ -64,39 +64,38 @@ test('garbage or inconsistent stored values are rejected, not silently used', ()
 // 2) 闭锁只减 7 dB（-68），而门边信号 p10 已到 -85，站着不动也会被误判"走远"而锁车。
 // 改为：进入阈值取中位数（抗多径、抗单次强值），闭锁 = 进入 - 15 dB。
 
-// ── 2026-11-12 定案（用户口径）：解锁 = 中位数 - 5，闭锁 = 解锁 - 15 ──
+// ── 现行口径（2026-11-19 定案）：解锁 = 采样中位数，闭锁 = 解锁 - 15 ──
 //
-// 标定时把手机放在主驾门把手旁。两次实测中位数分别是 -57（贴门把手）与 -71（门边）：
-// -57 - 5 = -62；-62 - 15 = -77。
-// 偏移量由用户按实际体感定，先 -12 后改 -5。
+// 偏移量演进：-12（初版）→ -5（按体感调）→ -20（2026-11-15）→ 0（2026-11-19）。
+// 归零的原因：站位语义改成「站到你希望解锁的那个位置」，采样点就是期望触发点，
+// 中位数本身即阈值。若仍减 20，站 3 米采到 -75 会算出 -95，要走到 20 米外才解锁。
 
-test('解锁 = 中位数 - 5，闭锁 = 解锁 - 15（本次实测中位 -57 → -62/-77）', () => {
+test('解锁 = 采样中位数本身，闭锁 = 解锁 - 15（中位 -56 → -56/-71）', () => {
   // 用户第二次标定的真实 30 秒样本（-56/-57 为主，中位数 -56）
   const samples = [-56, -56, -56, -57, -57, -58, -56, -57, -56];
   const r = buildCalibrationFromMedian(samples);
   assert.equal(r.ok, true);
   if (r.ok) {
-    // 中位 -56 → 解锁 -61 → 闭锁 -76
-    assert.equal(r.calibration.nearRssi, -61, '解锁应为 中位-5');
-    assert.equal(r.calibration.farRssi, -76, '闭锁应为 解锁-15');
+    assert.equal(r.calibration.nearRssi, -56, '解锁应等于中位数');
+    assert.equal(r.calibration.farRssi, -71, '闭锁应为 解锁-15');
   }
 });
 
-test('门边中位 -71 时得到 -76/-91（站位不同结果不同，属预期）', () => {
+test('站位不同得到不同阈值（正是「站到你希望解锁的位置」的意义）', () => {
   const samples = [-71, -72, -70, -71, -73];
   const r = buildCalibrationFromMedian(samples);
   assert.equal(r.ok, true);
   if (r.ok) {
-    assert.equal(r.calibration.nearRssi, -76);
-    assert.equal(r.calibration.farRssi, -91);
+    assert.equal(r.calibration.nearRssi, -71);
+    assert.equal(r.calibration.farRssi, -86);
   }
 });
 
 test('中位数标定对异常值免疫', () => {
   const r = buildCalibrationFromMedian([-70, -72, -20, -71, -69]);
   assert.equal(r.ok, true);
-  // 中位 -70（-20 被中位数天然忽略）→ 解锁 -75
-  if (r.ok) assert.equal(r.calibration.nearRssi, -75, '单条 -20 不应影响中位数');
+  // 中位 -70（-20 被中位数天然忽略）
+  if (r.ok) assert.equal(r.calibration.nearRssi, -70, '单条 -20 不应影响中位数');
 });
 
 test('中位数标定样本不足时拒绝', () => {
@@ -104,19 +103,19 @@ test('中位数标定样本不足时拒绝', () => {
   assert.equal(buildCalibrationFromMedian([]).ok, false);
 });
 
-// ── 手动修改阈值（用户可直接改两个数字，不填负号、不填 dB）──
+// ── 手动修改阈值（2026-11-19 起只填解锁值，闭锁值自动减 15）──
 
-test('手动输入按正数解析：填 69 84 得 -69 / -84', () => {
-  const r = parseManualThresholds('69', '84');
+test('手动输入只填解锁值：填 75 得 -75，闭锁自动 -90', () => {
+  const r = parseManualThresholds('75');
   assert.equal(r.ok, true);
   if (r.ok) {
-    assert.equal(r.calibration.nearRssi, -69);
-    assert.equal(r.calibration.farRssi, -84);
+    assert.equal(r.calibration.nearRssi, -75);
+    assert.equal(r.calibration.farRssi, -90);
   }
 });
 
 test('手动输入容忍前导负号与空白', () => {
-  const r = parseManualThresholds(' -69 ', '-84');
+  const r = parseManualThresholds(' -69 ');
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.calibration.nearRssi, -69);
@@ -124,14 +123,8 @@ test('手动输入容忍前导负号与空白', () => {
   }
 });
 
-test('手动输入拒绝解锁不弱于闭锁的组合', () => {
-  assert.equal(parseManualThresholds('84', '69').ok, false);
-  assert.equal(parseManualThresholds('69', '69').ok, false);
-});
-
 test('手动输入拒绝空值与越界', () => {
-  assert.equal(parseManualThresholds('', '84').ok, false);
-  assert.equal(parseManualThresholds('69', '').ok, false);
-  assert.equal(parseManualThresholds('0', '84').ok, false);
-  assert.equal(parseManualThresholds('69', '200').ok, false);
+  assert.equal(parseManualThresholds('').ok, false);
+  assert.equal(parseManualThresholds('0').ok, false);
+  assert.equal(parseManualThresholds('200').ok, false);
 });
