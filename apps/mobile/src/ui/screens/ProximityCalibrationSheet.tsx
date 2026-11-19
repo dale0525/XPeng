@@ -12,15 +12,16 @@ type Phase =
   | { kind: 'intro' }
   | { kind: 'sampling'; secondsLeft: number }
   | { kind: 'done'; calibration: ProximityCalibration }
-  | { kind: 'manual'; nearText: string; farText: string; error: string | null }
+  | { kind: 'manual'; nearText: string; error: string | null }
   | { kind: 'failed'; reason: string; count: number };
 
 /**
  * 首次打开「靠近自动解闭锁」时的就地标定引导。
  *
- * 为什么非要标定：车端广播 RSSI 的绝对值随手机型号、壳体、握持差十几个 dB，
- * 拍脑袋定的阈值会把「近在眼前」判成「很远」。这里让用户站到希望触发的位置静置
- * 采样，取平均值当解锁阈值。采样期间必须断开常驻连接（车端连着就不广播）。
+ * 为什么非要标定：RSSI 的绝对值随手机型号、壳体、握持、环境差十几个 dB，
+ * 拍脑袋定的阈值会把「近在眼前」判成「很远」。这里让用户站到**希望解锁的位置**
+ * 静置采样，取中位数当解锁阈值；闭锁阈值由它减 15 dB 自动推导，无需单独标定。
+ * 采样走**持连接读数**——与判距本身同一条链路、同一种量纲，且零丢失无选择偏差。
  */
 export function ProximityCalibrationSheet(props: {
   visible: boolean;
@@ -96,16 +97,15 @@ export function ProximityCalibrationSheet(props: {
                   为了让自动解锁在「走到车边」时触发，请先做一次就地标定：
                 </Text>
                 <View className="rounded-2xl bg-inset p-4 gap-2">
-                  <Text className="text-[13px] font-body text-on-surface leading-relaxed">1. 拿着手机，站到主驾车门把手旁边，手机贴近门把手。</Text>
+                  <Text className="text-[13px] font-body text-on-surface leading-relaxed">1. 拿着手机，站到你希望车自动解锁的那个位置（比如离车 3 米处）。</Text>
                   <Text className="text-[13px] font-body text-on-surface leading-relaxed">2. 手机保持不动，等 {SAMPLING_SECONDS} 秒采样完成。</Text>
-                  <Text className="text-[13px] font-body text-on-surface leading-relaxed">3. 采样期间会短暂断开蓝牙连接，属正常现象，完成后自动恢复。</Text>
+                  <Text className="text-[13px] font-body text-on-surface leading-relaxed">3. 采样用蓝牙连接读数，过程中连接会保持，不影响正常使用。</Text>
                 </View>
                 <Primary label="开始标定" onPress={start} />
                 <Pressable
                   onPress={() => setPhase({
                     kind: 'manual',
                     nearText: String(Math.abs(current.nearRssi)),
-                    farText: String(Math.abs(current.farRssi)),
                     error: null,
                   })}
                   className="h-[44px] items-center justify-center active:scale-95"
@@ -124,7 +124,7 @@ export function ProximityCalibrationSheet(props: {
                   <Text className="text-[13px] font-body text-on-surface-variant mt-1">请保持手机位置不动…</Text>
                 </View>
                 <View className="rounded-2xl bg-inset p-3">
-                  <Text className="text-[12px] font-body text-on-surface-variant leading-relaxed">正在采集车辆广播的蓝牙信号强度。此刻请保持手机贴在门把手旁不动。</Text>
+                  <Text className="text-[12px] font-body text-on-surface-variant leading-relaxed">正在采集蓝牙连接下的信号强度。请保持手机在刚才的位置不动。</Text>
                 </View>
               </>
             ) : null}
@@ -137,7 +137,7 @@ export function ProximityCalibrationSheet(props: {
                 </View>
                 <View className="rounded-2xl bg-inset p-4 gap-1.5">
                   <Text className="text-[13px] font-body text-on-surface">{`解锁阈值约为 ${phase.calibration.nearRssi} dBm`}</Text>
-                  <Text className="text-[13px] font-body text-on-surface">{`闭锁阈值约为 ${phase.calibration.farRssi} dBm（离开更远处）`}</Text>
+                  <Text className="text-[13px] font-body text-on-surface">{`闭锁阈值自动取 ${phase.calibration.farRssi} dBm（解锁值 − 15 dB）`}</Text>
                   <Text className="text-[12px] font-body text-on-surface-variant">{`共采样 ${phase.calibration.sampleCount} 次`}</Text>
                 </View>
                 <Text className="text-[12px] font-body text-on-surface-variant leading-relaxed">若实际触发距离不满意，可手动改数值或重新标定。</Text>
@@ -146,7 +146,6 @@ export function ProximityCalibrationSheet(props: {
                     onPress={() => setPhase({
                       kind: 'manual',
                       nearText: String(Math.abs(phase.calibration.nearRssi)),
-                      farText: String(Math.abs(phase.calibration.farRssi)),
                       error: null,
                     })}
                     className="flex-1 h-[50px] rounded-full bg-inset items-center justify-center active:scale-95"
@@ -164,7 +163,7 @@ export function ProximityCalibrationSheet(props: {
                   <Text className="text-[15px] font-headline font-semibold text-on-surface">手动设置阈值</Text>
                 </View>
                 <Text className="text-[12px] font-body text-on-surface-variant leading-relaxed">
-                  只填数字即可，负号和 dB 已标在框外。数字越小，离车越近才触发；数字越大，离得远一点就触发。
+                  只填解锁值即可，负号和 dB 已标在框外。数字越小，离车越近才触发；数字越大，离得远一点就触发。闭锁值会自动取「解锁值 − 15 dB」。
                 </Text>
                 <View className="rounded-2xl bg-inset p-4 gap-3">
                   <View className="flex-row items-center justify-between">
@@ -176,22 +175,7 @@ export function ProximityCalibrationSheet(props: {
                         onChangeText={(t) => setPhase((p) => (p.kind === 'manual' ? { ...p, nearText: t, error: null } : p))}
                         keyboardType="number-pad"
                         className="w-[78px] h-10 rounded-xl bg-surface-container-lowest text-center text-[16px] font-headline font-semibold text-on-surface" style={{ paddingHorizontal: 0, paddingVertical: 0, includeFontPadding: false, textAlignVertical: 'center' }}
-                        placeholder="70"
-                        placeholderTextColor="#8a8f98"
-                      />
-                      <Text className="text-[13px] font-body text-on-surface-variant">dBm</Text>
-                    </View>
-                  </View>
-                  <View className="flex-row items-center justify-between">
-                    <Text className="text-[13px] font-body text-on-surface">闭锁阈值</Text>
-                    <View className="flex-row items-center gap-1.5">
-                      <Text className="text-[15px] font-headline font-semibold text-on-surface-variant">−</Text>
-                      <TextInput
-                        value={phase.farText}
-                        onChangeText={(t) => setPhase((p) => (p.kind === 'manual' ? { ...p, farText: t, error: null } : p))}
-                        keyboardType="number-pad"
-                        className="w-[78px] h-10 rounded-xl bg-surface-container-lowest text-center text-[16px] font-headline font-semibold text-on-surface" style={{ paddingHorizontal: 0, paddingVertical: 0, includeFontPadding: false, textAlignVertical: 'center' }}
-                        placeholder="85"
+                        placeholder="75"
                         placeholderTextColor="#8a8f98"
                       />
                       <Text className="text-[13px] font-body text-on-surface-variant">dBm</Text>
@@ -213,10 +197,10 @@ export function ProximityCalibrationSheet(props: {
                     flex
                     onPress={() => {
                       if (phase.kind !== 'manual') return;
-                      const parsed = parseManualThresholds(phase.nearText, phase.farText);
+                      const parsed = parseManualThresholds(phase.nearText);
                       if (!parsed.ok) {
                         setPhase((p) => (p.kind === 'manual'
-                          ? { ...p, error: '请填两个正整数，且解锁阈值要比闭锁阈值更靠近 0（数字更小）。' }
+                          ? { ...p, error: '请填一个 1~120 的整数（例如 75）。' }
                           : p));
                         return;
                       }
@@ -253,7 +237,7 @@ export function ProximityCalibrationSheet(props: {
 
 // 2026-11-12 由 15 s 延长到 30 s：15 s 只有约 7 个有效样本，取中位数也偏噪声；
 // 门边实测 149 个样本才稳定反映分布，30 s（约 15~20 个样本）是可接受的下限。
-const SAMPLING_SECONDS = 30;
+const SAMPLING_SECONDS = 15;
 
 function Primary({ label, onPress, flex }: { label: string; onPress: () => void; flex?: boolean }): React.JSX.Element {
   return (

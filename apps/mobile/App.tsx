@@ -27,8 +27,9 @@ import { StatusScreen } from './src/ui/screens/Status';
 import { RemoteViewSheet } from './src/ui/screens/RemoteViewSheet';
 import { StraightSummonSheet } from './src/ui/screens/StraightSummonSheet';
 import { ConnectChargerSheet } from './src/ui/screens/ConnectChargerSheet';
-import { ProximityCalibrationSheet } from './src/ui/screens/ProximityCalibrationSheet';
 import { ProximitySuppressionSheet } from './src/ui/screens/ProximitySuppressionSheet';
+import { ProximityCalibrationSheet } from './src/ui/screens/ProximityCalibrationSheet';
+import { parseCalibration } from '@xpeng/protocol/src/proximity-calibration';
 import { DEFAULT_SUPPRESSION, parseSuppression, serializeSuppression, type ProximitySuppression } from '@xpeng/protocol/src/proximity-suppression';
 
 const PAGE_TITLE: Record<TabKey, string> = {
@@ -80,17 +81,17 @@ function Shell() {
   const [unsupported, setUnsupported] = useState<string | null>(null);
   const [theme, setTheme, scheme] = useThemeMode();
   const [proximityEnabled, setProximityEnabled] = useState(false);
+  const [verboseLog, setVerboseLog] = useState(false);
   const [calibrationVisible, setCalibrationVisible] = useState(false);
   const [suppression, setSuppression] = useState<ProximitySuppression>(DEFAULT_SUPPRESSION);
   const [suppressionVisible, setSuppressionVisible] = useState(false);
   const [thresholds, setThresholds] = useState(bleLink.currentThresholds());
   /**
-   * 连接态 RSSI 探针的开关（临时取证用，非功能路径）。
+   * 站位对照采样的当前状态（临时取证用，非功能路径）。
    *
    * 它存在的唯一目的：判定「保持 GATT 连接时能不能用连接态 RSSI 判距」。车端在已有
-   * 连接时不广播，所以这套采样与后台判距扫描互斥——开探针时不能同时跑扫描。
+   * 连接时不广播，两条测量路径物理互斥，`measureStation` 会先后跑完再恢复原状。
    */
-  const [linkRssiProbe, setLinkRssiProbe] = useState(false);
   const updater = useUpdater();
 
   useEffect(() => {
@@ -103,9 +104,9 @@ function Shell() {
     native.storageGet(StorageKey.quickCommands)
       .then((saved) => setQuickCommands(parseQuickCommands(saved)))
       .catch(() => {});
-    // 开关状态要恢复：否则每次冷启动都显示"关"，而扫描可能已经按上次设置跑着。
+    // 阈值：标定入口已移除，但此前存下的标定值仍然生效（不必强制重新标定）。
     native.storageGet(StorageKey.proximityCalibration).then((raw) => {
-      bleLink.applyCalibration(bleLink.parseStoredCalibration(raw));
+      bleLink.applyCalibration(parseCalibration(raw));
       setThresholds(bleLink.currentThresholds());
     }).catch(() => {});
     // 例外名单要在判距动作能触发之前就装进运行时，否则冷启动后第一次靠近会按"无例外"执行。
@@ -119,6 +120,12 @@ function Shell() {
       setProximityEnabled(true);
       // 决策函数自己会看前后台：前台开开关也不会起扫描（车端连上就不广播）。
       void bleLink.setProximityEnabled(true).catch(() => {});
+    }).catch(() => {});
+    // 详细日志开关：重启后要恢复，否则用户以为还开着、实际已经回到只记关键事件。
+    native.storageGet(StorageKey.proximityVerboseLog).then((saved) => {
+      const on = saved === '1';
+      setVerboseLog(on);
+      bleLink.setVerboseLog(on);
     }).catch(() => {});
     return bleLink.subscribe((state) => {
       setBluetoothReady(state.phase === 'ready');
@@ -169,6 +176,29 @@ function Shell() {
     const unsubStatus = carLink.subscribeStatus((s) => {
       setStatus(s);
       setLatency(carLink.latencyMs);
+      // 车速与挡位等车辆状态从这里取；车坐标不再参与判距或扫描决策。
+      const drive = s?.interval?.drive;
+      // 行驶状态：只看 speed 是否大于 0，不解读单位（任何单位下 0 都是静止）。
+      const speed = drive?.speed;
+      const n = typeof speed === 'number' ? speed : Number.parseFloat(String(speed ?? ''));
+      bleLink.setVehicleMoving(Number.isFinite(n) ? n > 0 : null);
+      // 车锁状态：driver_door_lock_st 为 1 表示已锁。它用来校准判距器的「是否解锁」，
+      // 使解闭锁失败后状态不会被卡错（失败时车锁没变，下一轮校准拉回真值）。
+      const lockState = s?.instant?.door?.driver_door_lock_st;
+      bleLink.setVehicleLocked(typeof lockState === 'number' ? lockState === 1 : null);
+      // 车辆状态快照：只在详细日志打开时落盘。
+      // 已确认 driver_seat_state=1 表示驾驶位有人（2026-11-19 上下车实测），
+      // 保留这些字段便于事后判断"当时车是什么状态"。
+      if (verboseLog) {
+        const seat = s?.instant?.seat;
+        const power = s?.instant?.power;
+        void bleLink.logUserAction(
+          `vehicle-state driver_seat=${seat?.driver_seat_state} ` +
+          `power_state=${power?.car_power_state} igon=${power?.car_igon_state} ` +
+          `shift=${s?.instant?.drive?.shift_state} ` +
+          `lock=${s?.instant?.door?.driver_door_lock_st} speed=${speed}`,
+        );
+      }
       // 2x4 组件要显示的电量与续航：每次拿到新状态就落一份快照并让桌面重画。
       // 组件的 updatePeriodMillis 是 0（系统最短 30 分钟、不够用），只能靠这里推。
       void publishWidgetSnapshot(s).catch(() => {});
@@ -216,32 +246,16 @@ function Shell() {
     void bleLink.setProximityEnabled(enabled).catch((error) => {
       console.warn('[shell] 靠近自动解闭锁切换失败:', error instanceof Error ? error.message : String(error));
     });
-    // 首次打开且还没标定：先让用户到目标距离采一次，否则阈值只能靠猜。
-    if (enabled && !bleLink.calibration) setCalibrationVisible(true);
   };
 
   /**
-   * 连接态 RSSI 探针的开关处理。
-   *
-   * 与判距扫描互斥（车端在已有连接时不广播），所以开启前先停掉扫描，避免两条路
-   * 同时跑既白耗电又采不到数。失败要让用户看见——探针跑不起来却显示"运行中"，
-   * 等于拿着空数据去做判断。
+   * 详细日志开关。落盘到 StorageKey.proximityVerboseLog，重启后保持。
+   * 打开后每轮 RSSI 与状态切换都会写进日志文件（外部私有目录，adb pull 可取）。
    */
-  const toggleLinkRssiProbe = (enabled: boolean) => {
-    void bleLink.logUserAction(`toggle link-rssi-probe=${enabled}`);
-    setLinkRssiProbe(enabled);
-    if (!enabled) {
-      void bleLink.stopLinkRssiProbe().catch(() => {});
-      return;
-    }
-    void (async () => {
-      await bleLink.setProximityEnabled(false).catch(() => {});
-      await bleLink.startLinkRssiProbe();
-    })().catch((error) => {
-      setLinkRssiProbe(false);
-      const message = error instanceof Error ? error.message : String(error);
-      setUnsupported(`连接态 RSSI 探针启动失败：${message}`);
-    });
+  const changeVerboseLog = (enabled: boolean) => {
+    setVerboseLog(enabled);
+    bleLink.setVerboseLog(enabled);
+    native.storageSet(StorageKey.proximityVerboseLog, enabled ? '1' : '0').catch(() => {});
   };
 
   const saveSuppression = (rules: ProximitySuppression) => {
@@ -369,13 +383,14 @@ function Shell() {
             proximityEnabled={proximityEnabled}
             onProximityChange={toggleProximity}
             thresholds={thresholds}
-            onRecalibrate={() => setCalibrationVisible(true)}
+
             bluetoothReady={materialsReady}
             onUnsupported={setUnsupported}
             suppressionSummary={suppressionSummary}
             onEditSuppression={() => setSuppressionVisible(true)}
-            linkRssiProbe={linkRssiProbe}
-            onToggleLinkRssiProbe={toggleLinkRssiProbe}
+            verboseLog={verboseLog}
+            onVerboseLogChange={changeVerboseLog}
+            onRecalibrate={() => setCalibrationVisible(true)}
           />
         )}
       </View>

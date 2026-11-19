@@ -38,15 +38,16 @@ export function SettingsScreen(props: {
   proximityEnabled: boolean;
   onProximityChange: (enabled: boolean) => void;
   thresholds: { nearRssi: number; farRssi: number; calibrated: boolean };
+  /** 重新标定：站到希望解锁的位置静置，用连接态读数算阈值。 */
   onRecalibrate: () => void;
-  /** 数字钥匙物料是否已就绪。标定要先断开常驻连接去听广播，所以判据是「就绪」而不是「链路持有」。 */
+  /** 详细日志开关：打开后每轮 RSSI 与状态切换都落盘。 */
+  verboseLog: boolean;
+  onVerboseLogChange: (enabled: boolean) => void;
+  /** 数字钥匙物料是否已就绪（蓝牙指示用）。 */
   bluetoothReady: boolean;
   onUnsupported: (label: string) => void;
   suppressionSummary: string;
   onEditSuppression: () => void;
-  /** 连接态 RSSI 探针开关（临时取证）。 */
-  linkRssiProbe: boolean;
-  onToggleLinkRssiProbe: (enabled: boolean) => void;
 }): React.JSX.Element {
   const {
     bottomInset,
@@ -69,12 +70,12 @@ export function SettingsScreen(props: {
     onProximityChange,
     thresholds,
     onRecalibrate,
+    verboseLog,
+    onVerboseLogChange,
     bluetoothReady,
     onUnsupported,
     suppressionSummary,
     onEditSuppression,
-    linkRssiProbe,
-    onToggleLinkRssiProbe,
   } = props;
 
   /** SOC 进度条必须跟真实电量走；拿不到时停在 0 而不是假装半满。 */
@@ -203,14 +204,8 @@ export function SettingsScreen(props: {
         </View>
         <View className="flex-row items-center justify-between pt-1">
           <Text className="text-[12px] font-headline font-normal text-on-surface-variant">
-            {thresholds.calibrated
-              ? `解锁约 ${thresholds.nearRssi} dBm · 闭锁约 ${thresholds.farRssi} dBm`
-              : `未标定，暂用默认 ${thresholds.nearRssi}/${thresholds.farRssi} dBm`}
+            {`解锁约 ${thresholds.nearRssi} dBm · 闭锁约 ${thresholds.farRssi} dBm`}
           </Text>
-          {/* 标定要在车里静置采广播样本：钥匙物料没准备好时它必然采不到值，
-              置灰并说明原因，好过点进去等 30 秒再报「样本不足」。
-              注意判据是「物料就绪」而不是「GATT 是否持有」——标定本身要先断开
-              常驻连接车端才广播（ble.ts startCalibration）。 */}
           <Pressable
             onPress={() => (bluetoothReady ? onRecalibrate() : onUnsupported('蓝牙未连接'))}
             style={bluetoothReady ? undefined : { opacity: 0.45 }}
@@ -226,19 +221,15 @@ export function SettingsScreen(props: {
             <Text className="text-[12px] font-headline font-semibold text-primary">设置例外</Text>
           </Pressable>
         </View>
-        {/* 连接态 RSSI 探针：临时取证入口，用来验证「保持连接时能否据此判距」。
-            与判距扫描互斥（车端在已有连接时不广播），读数逐点写进日志文件。 */}
+        {/* 详细日志开关：打开后把每轮 RSSI、状态切换、抑制判定都写进日志文件。
+            日志文件在应用外部私有目录，adb pull 即可取走，不需要导出操作。 */}
         <View className="flex-row items-center justify-between pt-1">
           <Text className="flex-1 text-[12px] font-headline font-normal text-on-surface-variant leading-snug pr-3">
-            {linkRssiProbe
-              ? '采样进行中：保持手机不动，结束后导出日志给我'
-              : bluetoothReady
-                ? '连接态信号采样（排查用，会暂停后台扫描）'
-                : '连接态信号采样（需先连上车辆蓝牙）'}
+            {verboseLog ? '详细日志已开启：每轮信号、状态切换都会记录' : '详细日志关闭：只记录触发与失败等关键事件'}
           </Text>
-          <Pressable onPress={() => onToggleLinkRssiProbe(!linkRssiProbe)} className="active:scale-95">
+          <Pressable onPress={() => onVerboseLogChange(!verboseLog)} className="active:scale-95">
             <Text className="text-[12px] font-headline font-semibold text-primary">
-              {linkRssiProbe ? '停止' : '开始采样'}
+              {verboseLog ? '关闭' : '开启'}
             </Text>
           </Pressable>
         </View>

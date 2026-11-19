@@ -81,6 +81,8 @@ export const StorageKey = {
   proximity: 'ui.proximityAutoUnlock',
   proximityCalibration: 'ui.proximityCalibration',
   proximitySuppression: 'ui.proximitySuppression',
+  /** 详细日志开关：打开后每轮 RSSI 与状态切换都落盘，便于排查判距问题。 */
+  proximityVerboseLog: 'ui.proximityVerboseLog',
   /** 2x4 组件读的电量/续航快照，键名与原生 `WidgetSnapshot.KEY_SNAPSHOT` 一致。 */
   widgetSnapshot: 'widget.snapshot',
 } as const;
