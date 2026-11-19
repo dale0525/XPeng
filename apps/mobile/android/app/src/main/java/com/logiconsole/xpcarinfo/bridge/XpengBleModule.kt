@@ -787,11 +787,10 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             val rssi = if (seen) proximityRssi else null
             proximityRssi = Int.MIN_VALUE
             proximityRounds += 1
-            // 判距是本功能唯一的输入，扫不到车与"车很远"在行为上无法区分，真车排障
-            // 只能靠这行：没有它就只能看到"没触发"，看不出是没扫到还是阈值不对。
-            val seenAny = proximityAllResults
+            // 每轮读数不再单独落盘：JS 侧在详细日志打开时会把它与判距器内部状态
+            // 合成一行写盘（见 feedProximity），合并后一天只需 5 MB 左右；
+            // 这里再写一份既重复又会让日志一天内就滚掉。
             proximityAllResults = 0
-            XpengLog.log("ble", "round=$proximityRounds rssi=${rssi ?: "none"} results=$seenAny")
             emit("xpeng-ble-proximity-rssi", Arguments.createMap().apply {
                 putString("mac", mac)
                 if (rssi == null) putNull("rssi") else putInt("rssi", rssi)
