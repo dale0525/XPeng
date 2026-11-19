@@ -38,9 +38,3 @@ test('重试间隔递增（退避），避免连续撞同一个失败窗口', ()
 test('成功就不重试', () => {
   assert.equal(decideRetry({ action: 'lock', failed: false, attempt: 1 }).retry, false);
 });
-
-test('重试期间信号已变好（人又回来了）应放弃闭锁，避免人站在车边被锁', () => {
-  const d = decideRetry({ action: 'lock', failed: true, attempt: 1, nowNearby: true });
-  assert.equal(d.retry, false);
-  assert.equal(d.abandonReason, 'now-nearby');
-});

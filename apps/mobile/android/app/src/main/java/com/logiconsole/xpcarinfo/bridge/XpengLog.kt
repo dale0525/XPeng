@@ -20,8 +20,15 @@ import java.util.Locale
  * 单次失败只吞掉，记日志失败绝不能影响业务。
  */
 object XpengLog {
-    /** 单个文件上限；超过就滚到 `.1`，只保留一代，避免长期运行吃满存储。 */
-    private const val MAX_BYTES = 8L * 1024 * 1024
+    /**
+     * 单个文件上限；超过就滚到 `.1`，只保留一代，避免长期运行吃满存储。
+     *
+     * 2026-11-20 由 8 MB 提到 16 MB：详细日志打开后每轮一行（约 46 B），
+     * 一天 57600 轮约 2.5 MB，加上触发、建连、抑制等事件，一天约 3.5 MB。
+     * 8 MB 只够两天且滚动时会把前一天整段覆盖掉；16 MB 能完整留存约 4 天，
+     * 出问题后隔几天再取也还在。
+     */
+    private const val MAX_BYTES = 16L * 1024 * 1024
     private const val FILE_NAME = "xpcarinfo.log"
     private const val TAG = "XpengLog"
 

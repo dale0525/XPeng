@@ -89,7 +89,8 @@ class_defs 区    : 0x557c 起，30 × 32 = 960 B
 30 个可见类名全是混淆串（`CDCCCCCCCCCC`、`CDLCCCCCCCCCLCLC` 等）。
 
 - 真实业务代码在 dex 尾部明文区：`offset 0x14000` 之后约 114 MB，类描述符 `Lcom/xiaopeng/...;` 以明文出现 25,750 处。
-- id 表做了整体位移：`string_ids` 条目值统一加 `0x178BC` 才指向合法的 `string_data_item`。按此可还原 20 段、共 66,862 个字符串，但其中仅 336 条含 `xiaopeng`，且多为混淆类名。**业务层字符串与全部 `code_item` 仍不可读。**
+- id 表做了整体位移：`string_ids` 条目值统一加 `0x178BC` 才指向合法的 `string_data_item`。按此可还原 20 段、共 66,862 个字符串，但其中仅 336 条含 `xiaopeng`，且多为混淆类名。
+- **「业务层字符串不可读」这一半要作废（2026-11-17 复核）**：53–80 MB 区间的 `string_data_item` 流是完好的明文，uleb128 长度前缀逐项自洽（`\x2b`=43 恰为 `()Lcom/xiaopeng/blekey/polling/IPollingSdk;` 的长度），该区间可走出 56,415 条合法字符串项；`com/xiaopeng/blekey/polling/*` 去重 203 个类描述符、偏移跨 `0x32A0BBF`–`0x4C85A9B`，类名与方法名均为真实 Kotlin 编译产物（`$lambda$N`、`_delegate$lambda$N`、`$WhenMappings`）。**受限的是索引与代码，不是字符串**：按合法 type 集合扫不出真实 `map_list`（候选全是 `type=0` 重复的零填充误报，真 `map_list` 每种类型只出现一次），也没有可用的 `class_defs`/`code_item`。故修正为：业务层字符串可读，**全部 `code_item` 仍不可读**。
 - 关键教训：`XmartV1LocalKey`、`XTeeSecurityIv`、`IndivKeySet`、`decryptWithCryptHead` 这些字符串**能在加密区里被搜到，但没有一条能对应到字节码**。搜到名字 ≠ 有实现。
 - 没有任何 `.so` 引用这些键（100+ 个 arm64 库逐个 grep `XmartV1|XTee|tee_id` 全 0）。`liball_in_one.so` 里的 `LocalKeySet` 属阿里播放器 DRM，无关。
 - `jadx` 只能产出 30 个空壳类。**不动壳就拿不到信封解包逻辑。**
@@ -926,6 +927,10 @@ broker **只校验 username/password**，clientId 任意（实测换包名后缀
 
 ### 6.1 Java 侧（在加密 dex 内，需脱壳）
 - `com.xiaopeng.blekey.polling.*` 217 个类：`manager`(79)、`distance`(44)、`config`(25)、`rx`(18)、`defaultconst`(8)；`locksource` 定义 `LockSource`/`UnlockSource`/`LockSourceLevel`。
+- **轮询判距的接口面（2026-11-17 静态复核，纯名称池可得）**：判距与状态机类为 `XPollingSdk`、`XPollingModule`、`IPollingSdk`、`PollingState`/`PollingStateMonitor`、`DistanceManager`、`CurveFittedDistanceCalculator`（含 `CurveFittedConst`/`DirectionCurveFittedConst`）、`BallotBox`、`DistanceLifeCycle`；配置类 `PollingConfigBean$VehicleV1$Rssi`、`PollingConfigBean$VehicleV2$Rssi`、`PollingConfigBean$VehicleV2$DirectionConfig`、`PollingConditions`、`PollingCustomConfigBean`、按车型的 `OptionalConstSet$D22D55SET`。方法名级 hook 目标：`checkTrigger`、`readRssi`、`readRssiIntervalDispose`、`doLockUnLockAction`、`estimateFinalDistance`、`pollingRunTimer`、`collectBleRssiOnce`、`updateDistanceConfig`、`startPollingEnablePeriod`/`stopPollingEnablePeriod`。配置字段名：`unlockDistance`、`configUnlockDistance`、`customUnlockDistance`、`userCustomUnlockDistance`、`lockDistance`、`pollingIntervalMs`、`scanIntervalDispose`、`keepAliveInterval`、`approachNode`、`autoUnlock`、`pollingRunMaxTime`。
+- **同一方法名在 ~12.7 M 与 ~15.4 M 两处出现、且合成名风格不同**（低偏移区 `estimateFinalDistance$lambda$0` 对高偏移区 `estimateFinalDistance$lambda$25`，高偏移区另带 `pollingRunTimer_delegate$lambda$55`、`collectBleRssiOnce$lambda$13..19`）。故文件里存在两份不同编译产物的名称表，不是同一份的重复。
+- **判距阈值与公式取不到，且不在 native**：`libbledata.so` 未 strip，但只是报文编码层（TLV + `calc_crc16_ccitt` + XOR），`pollingIntervalMs`/`keepAliveInterval`/RSSI 均由 Java 作参数传入，so 内无任何阈值常量——靠近判定确在加固 Java/Kotlin 层。`configUnlockDistance=`、`, unlockDistance=`、`, lockDistance: ` 等是 Kotlin `toString` 日志模板（只有字段名、无取值），中文串「使用新的字段 userCustomUnlockDistance 替代」「同步旧版本配置 customUnlockDistance」可读。阈值数值、判距系数、灵敏度档对应偏移、超时退避、状态迁移条件全部不可得。
+- **UI 侧可取到的取值（`res/values/strings.xml` + 车型配置）**：灵敏度只有「标准」「灵敏」两档（`polling_sensitivity_normal`/`_sensitive`）；解锁距离 5 档、文案为「约 2m / 3m / 4m / 5m / 6m 左右解锁」（2m、3m 注「可能出现延迟」，4m、5m「推荐」，6m「更灵敏」）；1 米校准 = 主驾门 1 米 + 后尾门 1 米，要求与门把手等高、平行地面、无遮挡。`integers.xml`/`dimens.xml`/`bools.xml`/`arrays.xml` 内**无**任何 BLE 阈值或间隔——档位不是资源数组，属代码常量或接口下发。`DFVehicleAbilityConfig.json`（D55）为 `bleKeyVersion:2`、`isSupportPollingV1:true`、V2/V3 `false`；5.23.6 与 5.19.0 该文件逐行一致，仅 5.23.6 多出 `DJVehicleAbilityConfig.json`（V3）。
 - `com.xiaopeng.common.car.digitalkey.*` 1206 个类，覆盖 ICCoA、ICCE、CCC 三套标准与华为/小米/vivo/三星/荣耀钱包 SDK。
 - 按车型分协议实现：`D22BleProtocol`、`D55BleProtocol`、`E28ABleProtocol`、`E28BleProtocol`、`E38BleProtocol`、`F30BleProtocol`、`H93BleProtocol`、`XpBleProtocolV1V2`、`XpBleProtocolV3`、`XpNativeBleProtocol`。
 - 第三方数字钥匙引擎 DiDi Davinci SDK（`com/didi/davinci` 1,571 处引用、1,489 个类）：`MonaBleService`、`MonaBleCommunication`、`BleCommandQueueManager`、`ble/encrypt/AesUtils`、`mona/carserviceimpl/{MnaAcCtrlImpl,MnaCarManagerImpl,MnaCarStatusImpl,MnaChargeImpl,MnaNfcImpl}`。数字钥匙本身即第三方代码，小鹏只做集成。
@@ -1604,7 +1609,17 @@ REQ_REJECTED / REQ_CODE_TEAM_NAME / REQ_OVERLAY_PERMISSION_CODE
 
 **判距阈值要按「人希望解锁的位置」标定，不能按门把手（2026-11-15 全天 23127 轮实测回放）。** 标定公式取采样中位数再减偏移；若标定时把手机贴在门把手旁，中位数是全场最强的位置，算出的阈值会比人实际走近时的信号强 15~20 dB。当晚实例：门把手标定中位数 -55 → 阈值 -60，而人走近全程最强只有 -75，**一次都不可能触发**。同一天另一处证据是反例：车旁驻留时信号可到 -35，说明 -60 并非永远够不到，只是「走近」与「贴着」是两个相差 20 dB 的场景。结论：标定站位必须等于用户期望触发解锁的那个距离，偏移量只用来微调体感。
 
-**「连续 N 轮达标」在多径环境下不可用，应改为「窗口内达标轮数」（2026-11-15 实测）。** 真实序列是强弱交替：走近时 `-76 → -88 → -75`，走远时 `-85 → -74 → -80`。严格连续判定会被中间那一个弱值清零，能否触发取决于运气——同一形态的两次走远，12:41 凑够了、11:51 没凑够。改为「最近 10 轮内达标轮数 ≥ 3 且时间跨度够」后，夹一两个弱值不再打断。
+**「30 米比 5 米信号强」不是多径，是广播采样的幸存者偏差（2026-11-19 复核，推翻旧归因）。** 旧记载把「门边 -72.6 / 5 米 -79 / 30 米 -73.8」里 30 米反而更强的现象归因为多径反射。把同一份 656 轮数据按漏扫率分桶后，机制是明确的：漏扫 0–20% 的窗口中位读数 -69.1，40–60% 为 -76.0，60–80% 为 -78.3——**漏扫越多读数越弱，反过来就是漏扫少时读数被抬高**。30 米段漏扫仅 28.9%，而门边静置高达 48.9%，于是 30 米的中位数比门边只差 1 dB、比 5 米还强。远端只有强包能到达、弱包全部丢失，剩下的样本是幸存者。**推论：广播 RSSI 的绝对值随漏扫率系统性漂移，不能直接当距离代理；漏扫率本身必须作为置信度参与判定。** 同日的五点对照实测（1/3/5/10/20 m 各 30 s）给出旁证：广播漏扫率随距离单调上升（21%→11%→32%→26%→53%），20 米处过半时间扫不到。
+
+**持连接读 RSSI 优于广播，且无选择偏差（2026-11-19 五点对照实测）。** 同一站位先后用「持 GATT 连接读 `readRemoteRssi`」与「断开采广播」各采 30 s：持连接 100/100 个样本零缺失、各档标准差 0.66–1.60 dB；广播 68/95 轮（漏扫 28%，20 米处 53%）、标准差 2.34–5.66 dB，是前者的 3.5 倍。两者中位数在各档相差 ≤3 dB，说明量纲可比、可互换标定基线。用 1/3/5/20 米四点拟合对数距离模型得 `RSSI(d) = -70.9 - 18·log10(d)`，残差均在 ±1.4 dB 内（10 米点偏离 +6.9 dB，判定为单点异常）。按 20 样本均值折算定位误差：3 米处 ±0.09 m、5 米 ±0.19 m、10 米 ±0.24 m。
+
+**连接态 RSSI 跟随移动，可用于判距（2026-11-19 沿车走动实测）。** 保持 GATT 连接、每 1.5 s 读一次 `readRemoteRssi`，人从远处走到车边再走回远处，90 s 共 60 个样本**零缺失**，读数覆盖 **-98 ~ -66 dBm（跨度 32 dB）**，且与走位严格对应：两次走近的峰值 -66 / -71、两次走远的谷值 -98 / -95 全部落在对应时段。这否定了「连接态只返回最后一个报文的旧值、无法判距」的担心——BLE 连接即使应用层不发送数据，底层仍按连接间隔交换空包，每次都会刷新链路 RSSI。
+
+**冷启动无盲区：连上即可读到 RSSI（2026-11-19 三次实测，推翻旧结论）。** 断开后重新建链，从发起连接到拿到第一个可用读数：1178→1192 ms、1706→1717 ms、1596→1609 ms，差值稳定在 **11–14 ms**（即探针 200 ms 轮询的调度误差）。建链本身 1.2–1.7 s，但在 `hold()` 返回（已完成 GATT 建链、服务发现、CCCD 订阅）后**立刻**就有 RSSI，无需等待鉴权、也无需等待任何业务报文往返。**旧记载「鉴权完成到首个 RSSI 读数需 6.5~40 秒」据此作废**——它与机制（RSSI 随连接事件刷新）和三次实测都不符，推测当时测的是别的环节或探针启动方式不同。含义：把「持连接」用于判距没有冷启动盲区，只有约 1.2–1.7 s 的建链代价。
+
+**车辆坐标 `coordType=2` 是 GCJ-02，手机定位是 WGS-84，两者不能直接算距离（2026-11-20 实测，推翻 11-19 的「数据陈旧」归因）。** `interval.drive.latitude/longitude` 在 `coordType=2` 时是火星坐标（GCJ-02），而 Android `FusedLocationProvider` 给出的是 WGS-84。同一次实测：车 `31.129404, 121.747421`、手机 `31.131572, 121.743060`，直接算 **480.0 m**；把车坐标按 GCJ-02 → WGS-84 换算后得 `31.131470, 121.743052`，与手机只差 **11.4 m**（在定位误差内）。分项偏差 `dlat=-241 m`、`dlon=+416 m`，属几百米量级，与「人车相距几米」完全对不上。**11-19 把同一现象归因为「手机定位停在 15 天前」，是读错了 `dumpsys location` 的 `et` 字段**：`et=+15d14h` 是**开机以来的经过时间**（该机 uptime 恰为 15 天 23 小时），不是定位年龄；换算后 fused 定位其实只有约 35 秒。**两条推论：① 任何「车 vs 手机」距离计算必须先按 `coordType` 归一坐标系，否则误差固定是几百米；② 用 `dumpsys location` 判断定位新鲜度时，`et` 必须先减去设备 uptime（`/proc/uptime`）才是年龄，直接拿 `et` 会得出「15 天前」的错误结论。** 由此推论：基于车-手机距离做「车太远就不扫描」的粗筛在坐标系未归一前不可靠（480 m 与真实 11 m 会跨过 500 m 阈值），该粗筛已在自研端移除，只保留 WiFi/地点抑制作为扫描前置条件。
+
+**"连续 N 轮达标"在多径环境下不可用，应改为「窗口内达标轮数」（2026-11-15 实测）。** 真实序列是强弱交替：走近时 `-76 → -88 → -75`，走远时 `-85 → -74 → -80`。严格连续判定会被中间那一个弱值清零，能否触发取决于运气——同一形态的两次走远，12:41 凑够了、11:51 没凑够。改为「最近 10 轮内达标轮数 ≥ 3 且时间跨度够」后，夹一两个弱值不再打断。
 
 **闭锁阈值的深度受「人走多远」限制，不能按滞回带对称外推（2026-11-15 实测）。** 人走到 20 米外信号通常只有 -80 上下，把闭锁线设到 -95 会让闭锁**永远不触发**；而闭锁不触发又会让状态机停在「已在附近」，连带后续解锁也不再触发，表现为功能整体失效。实测 -75/-95 全天仅触发 1 次，-75/-90 正常触发 5 次。多径下同一个地点也能出现 -103 的单点尖峰，不能拿它当「走远」的证据。
 

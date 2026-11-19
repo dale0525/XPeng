@@ -7,10 +7,10 @@ import { buildV2Command, validateV2Command } from '@xpeng/protocol/src/ble-v2-co
 import { decideRetry } from '@xpeng/protocol/src/proximity-retry';
 import { BleV2ContextService, isP5BleV2Vehicle } from '@xpeng/protocol/src/ble-v2-context';
 import type { Vehicle } from '@xpeng/protocol/src/vehicles';
-import { ProximityTracker, decideScanAction, decideScanDuringAction, DEFAULT_PROXIMITY_CONFIG, type ProximityAction, type ProximityConfig } from '@xpeng/protocol/src/proximity';
+import { ProximityTracker, decideScanAction, decideScanDuringAction, decideUnlockGate, decideLockGate, decideLinkAttempt, shouldLogSample, DEFAULT_PROXIMITY_CONFIG, type ProximityAction, type ProximityConfig } from '@xpeng/protocol/src/proximity';
 import { parseCalibration, serializeCalibration, buildCalibrationFromMedian, type ProximityCalibration } from '@xpeng/protocol/src/proximity-calibration';
 import {
-  DEFAULT_SUPPRESSION, suppressReason, suppressionPlan, type GeoPoint, type ProximitySuppression,
+  DEFAULT_SUPPRESSION, decideLinkUnderSuppression, suppressReason, suppressionPlan, type GeoPoint, type ProximitySuppression,
 } from '@xpeng/protocol/src/proximity-suppression';
 import { sessionStore } from './session';
 import { BlePreconditionError, connectPreparedBle, type BleConnectPermissions } from './ble-connect';
@@ -51,6 +51,9 @@ interface BleNative {
   startProximityScan(mac: string): Promise<void>;
   stopProximityScan(reason: string): Promise<void>;
   logProximity(message: string): Promise<void>;
+  readLinkRssi(mac: string): Promise<void>;
+  startLinkRssiProbe(mac: string, intervalMs: number): Promise<void>;
+  stopLinkRssiProbe(): Promise<void>;
 }
 
 const bridge = NativeModules.XpengBle as BleNative;
@@ -60,7 +63,12 @@ interface WifiLocationNative {
   permissionStatus(): Promise<{ granted: boolean; locationEnabled: boolean; precise?: boolean }>;
   requestPermissions(): Promise<{ granted: boolean; locationEnabled: boolean; precise?: boolean }>;
   currentSsid(): Promise<string>;
-  currentLocation(maxAgeMs: number, timeoutMs: number): Promise<{ lat: number; lon: number } | null>;
+  /**
+   * 取一次坐标。`timeMs` 是该定位的产生时刻——**必须校验**：
+   * 原生实现拿不到新定位时会退回陈旧缓存（室内/地库必然如此），
+   * 直接使用会把"15 天前的位置"当成当前位置。
+   */
+  currentLocation(maxAgeMs: number, timeoutMs: number): Promise<{ lat: number; lon: number; timeMs?: number; accuracyM?: number } | null>;
 }
 const wifiBridge = NativeModules.XpengWifiLocation as WifiLocationNative;
 
@@ -193,6 +201,29 @@ const link = new BleLink(new NativeBleTransport(), authMaterialFor, {
       // 停了它后台判距立刻失效、进程也会被当普通后台进程回收。只有开关也关着才停服务。
       if (!proximityEnabled) void bridge.stopKeepAlive();
       else syncKeepAlive();
+    }
+    // 链路掉线：停掉连接态 RSSI 探针，并退回扫描态。
+    //
+    // 不退回去就会卡在"既没连接、也没扫描"的空档里——判距彻底停摆，用户看到的是
+    // 功能开着却什么都不发生。holdLink 自带退避重连，重连成功后下一轮扫描会重新
+    // 触发 enterLinkMode。
+    // 同一次断开会被上报多次（实测启动时 idle 连报两次，间隔约 100 ms；退避重连
+    // 期间 backoff 会每隔几秒再报一次）。逐次处理会重复停探针、重复起扫——起扫要
+    // 先停扫描再启动，两次叠在一起会互相打断。
+    //
+    // 用时间去抖不够：退避期长达数十秒，每轮上报都落在窗口外，日志里就是每隔几秒
+    // 刷一条。改成"一次断开只处理一次"——从连上到下次连上之间，无论上报多少次都
+    // 只处理并记录一次；真正重新连上才复位。
+    if (state.kind === 'connected') {
+      disconnectHandled = false;
+    } else if (state.kind !== 'connecting' && !disconnectHandled) {
+      disconnectHandled = true;
+      // 掉线是"为什么突然不判距了"的第一嫌疑，必须留痕。
+      void bridge.logProximity(`link dropped (state=${state.kind}), falling back to scan`);
+      void bridge.stopLinkRssiProbe().catch(() => {});
+      if (proximityEnabled && !scanRunning && proximityMac) {
+        void startScanUnlessSuppressed().catch(() => {});
+      }
     }
     publishState();
   },
@@ -503,6 +534,29 @@ let scanRunning = false;
 let appForeground = AppState.currentState === 'active';
 
 /**
+ * 车辆是否在行驶（`speed > 0`）。
+ *
+ * 只存布尔：`speed` 的单位未证实，但「大于 0 即在动」与单位无关。
+ * 初值 null 表示还没收到过车辆状态——此时门控放行，不能因为缺数据就挡住解锁。
+ */
+let vehicleMoving: { moving: boolean; at: number } | null = null;
+
+/**
+ * 车辆是否已锁（`driver_door_lock_st === 1`）。
+ *
+ * 用来校准判距器的「是否解锁」状态——解闭锁的真实结果只有车知道，本地"我发成功了"
+ * 不可靠（失败时状态会停错）。初值 null = 不知道，校准器会维持原值不覆盖。
+ */
+let vehicleLocked: { locked: boolean; at: number } | null = null;
+
+/** 车速字符串 -> 是否在动。解析不出数字时返回 null（按"不知道"处理）。 */
+function parseMoving(speed: unknown): boolean | null {
+  const n = typeof speed === 'number' ? speed : Number.parseFloat(String(speed ?? ''));
+  if (!Number.isFinite(n)) return null;
+  return n > 0;
+}
+
+/**
  * 判一次「现在该不该被抑制」。
  *
  * 省电靠两件事：配置为空时一次探针都不发；有坐标配置时先读 WiFi，命中就不再唤醒定位。
@@ -586,7 +640,7 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
     void bridge.logProximity(`action=${action} failed: ${message}`);
   } finally {
     // 恢复判距；重试期间也要恢复，否则下一次靠近就再也不会触发。
-    if (decideScanDuringAction({ enabled: proximityEnabled, foreground: appForeground, hasMac: Boolean(mac) }) === 'resume') {
+    if (decideScanDuringAction({ enabled: proximityEnabled, foreground: appForeground, hasMac: Boolean(mac), linkHeld: link.connected }) === 'resume') {
       scanRunning = true;
       await bridge.startProximityScan(mac!).catch(() => { scanRunning = false; });
     }
@@ -600,7 +654,10 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
     return;
   }
   // 闭锁重试前若人又回到附近，放弃：不能把人锁在车边。
-  const decision = decideRetry({ action, failed, attempt, nowNearby: proximityTracker.isNearby });
+  // 不再把"车解锁"当成"人回到车边"：车锁着也可能是人站在车旁正准备解锁，
+  // 车开着也可能是人已走远但车没锁。那不是一个可用的"人在附近"判据。
+  // 这里只按重试次数退避，不再因状态提前放弃。
+  const decision = decideRetry({ action, failed, attempt });
   if (!decision.retry) {
     void bridge.logProximity(
       `action=${action} give up after ${attempt} attempt(s): ${decision.abandonReason ?? 'unknown'}`,
@@ -637,6 +694,20 @@ async function runProximityAction(action: ProximityAction): Promise<void> {
     proximityBusy = false;
     return;
   }
+  // 行驶门控：车在动时人不可能站在车旁，**解锁与闭锁都不做**。
+  // 这是语义判断，不受多径/漏扫/坐标系影响，是本功能里最可靠的一条判据。
+  // 闭锁也挡的理由：车开走时信号本来就在快速变弱，容易被误判成"人走远了"而误锁，
+  // 而人根本没走——这时锁车没有意义，还可能打断正在进行的其他车控。
+  const moving = vehicleMoving;
+  const movingAge = moving ? Date.now() - moving.at : undefined;
+  const gate = action === 'unlock'
+    ? decideUnlockGate({ moving: moving?.moving ?? null, ageMs: movingAge })
+    : decideLockGate({ moving: moving?.moving ?? null, ageMs: movingAge });
+  if (gate === 'block') {
+    void bridge.logProximity(`action=${action} blocked: vehicle moving`);
+    proximityBusy = false;
+    return;
+  }
   // 建连前必须停扫描：实测扫描在跑时 GATT 建连直接吃 `133`
   // (GATT_CONN_FAIL_ESTABLISH)，重试也落在同一窗口里失败。两者共用同一个控制器。
   if (scanRunning) {
@@ -653,19 +724,133 @@ async function runProximityAction(action: ProximityAction): Promise<void> {
 const proximityEmitter = new NativeEventEmitter(NativeModules.XpengBle);
 proximityEmitter.addListener('xpeng-ble-proximity-rssi', (value) => {
   const event = value as unknown as { mac: string; rssi: number | null; round: number };
-  // 标定采样期间：只收集强度，不做任何判距动作。
-  if (calibrationSession) {
-    if (typeof event.rssi === 'number') calibrationSession.samples.push(event.rssi);
-    return;
-  }
+  // 标定期间不做判距（采样走连接态，见 startCalibration）。
+  if (calibrating) return;
   if (!proximityEnabled || !proximityMac) return;
   if (event.mac.toUpperCase() !== proximityMac) return;
-  const action = proximityTracker.push(Date.now(), event.rssi);
+  // 扫到车了（任何强度）：从扫描态转连接态。
+  //
+  // 为什么"有信号就切"而不是设一个可疑门槛：连接态 RSSI 每 1.5 s 刷新、零丢失
+  // （2026-11-19 实测，走动 32 dB 全程跟随），所以切过去信息只会更准、不会更差；
+  // 而门槛本身需要额外标定、还会让"该精测时没切"。这是自用项目，接受在
+  // 有信号/无信号交界处反复建连——建链 1.2~1.7 s，且 ble-link 自带退避，
+  // 不会疯狂重试。真正的耗电大头（人在家里且车停得近）已由抑制检查挡住。
+  if (typeof event.rssi === 'number' && !link.connected && !proximityBusy) {
+    void enterLinkMode();
+    return;
+  }
+  feedProximity(event.rssi);
+});
+
+/** 上一次建连失败的时刻；用于 5 秒退避，避免"扫到就建连"反复撞墙。 */
+let lastLinkFailureAt: number | null = null;
+
+/** 本次断开是否已处理；连上时复位。退避期会持续上报非连接态，只该处理一次。 */
+let disconnectHandled = false;
+
+/**
+ * 详细日志开关。
+ *
+ * 关着时只记关键事件（触发、建连、抑制、失败）；打开后把每轮 RSSI、状态切换、
+ * 建连耗时都写进日志文件。不分开的话每轮 1.5 s 一条明细几分钟就把 8 MB 滚满，
+ * 真正要查的那几行会被冲掉。
+ */
+let verboseLog = false;
+
+/**
+ * 扫描态 → 连接态：停扫描、建常驻连接，之后改读连接态 RSSI 判距。
+ *
+ * 必须先停扫描再建连：两者共用同一个控制器，扫描在跑时建连直接吃 `133`
+ * （GATT_CONN_FAIL_ESTABLISH）。
+ */
+async function enterLinkMode(): Promise<void> {
+  const mac = proximityMac;
+  if (!mac || link.connected) return;
+  // 建连失败后 5 秒内不再尝试：扫描马上又会扫到车，否则会变成
+  // "扫描→建连失败→退回扫描→再建连失败"的快速循环（车端连接槽被占用时尤其糟）。
+  if (decideLinkAttempt({ lastFailureAtMs: lastLinkFailureAt, nowMs: Date.now() }) === 'wait') {
+    return;
+  }
+  void bridge.logProximity('switch scan -> link (target seen)');
+  const linkStartAt = Date.now();
+  if (scanRunning) {
+    scanRunning = false;
+    await bridge.stopProximityScan('switching to link mode').catch(() => {});
+  }
+  // holdLink 内部会拉起前台保活服务并建链；失败时保持扫描态，不阻塞功能。
+  await holdLink(mac).catch(() => {});
+  if (!link.connected) {
+    lastLinkFailureAt = Date.now();
+    void bridge.logProximity('link mode failed, staying on scan (backoff 5s)');
+    if (proximityEnabled) await startScanUnlessSuppressed().catch(() => {});
+    return;
+  }
+  // 连上了就清掉失败时刻，下次正常切换不受影响。
+  lastLinkFailureAt = null;
+  // 建连耗时是排查"解锁慢"的关键：它直接加在响应时间上。
+  void bridge.logProximity(`link mode ready in ${Date.now() - linkStartAt} ms`);
+  await startLinkRssiFeed(mac);
+}
+
+/** 判距器喂样本（扫描态与连接态共用同一条判定路径）。 */
+/**
+ * 标定进行中的标记。
+ *
+ * 标定期间读数只进标定样本，**不参与判距**：否则用户站在"希望解锁的位置"静置
+ * 十几秒，会先触发一次自动解锁，把标定过程变成一次真实车控动作。
+ */
+let calibrating = false;
+
+function feedProximity(rssi: number | null): void {
+  if (calibrating) return;
+  // 每轮先用车辆真实锁状态校准「是否解锁」，再判距。
+  // 这样解闭锁失败后状态不会卡死：动作失败时车锁没变，下一轮校准会把状态拉回真值，
+  // 于是还能重新触发（2026-11-12 真车实测过闭锁失败后"只解锁、从不闭锁"）。
+  proximityTracker.calibrate(vehicleLocked ? vehicleLocked.locked : null);
+  // 每轮明细只在开关打开时记：这是排查"为什么没触发/为什么触发了"唯一的一手数据。
+  //
+  // 紧凑单行（约 40 字节）：开关打开时它就是日志的全部内容，一天 57600 轮，
+  // 每多一个字节一天就多 56 KB。字段用单字母 + 冒号，? 表示不知道。
+  //   s=信号  u=判距器是否已解锁  m=当前态(1 连接/0 扫描)  l=车锁  v=车速在动
+  if (shouldLogSample({ verbose: verboseLog })) {
+    void bridge.logProximity(
+      `s=${rssi ?? '?'} u=${proximityTracker.isUnlocked ? 1 : 0} m=${link.connected ? 1 : 0} ` +
+      `l=${vehicleLocked ? (vehicleLocked.locked ? 1 : 0) : '?'} ` +
+      `v=${vehicleMoving ? (vehicleMoving.moving ? 1 : 0) : '?'}`,
+    );
+  }
+  const action = proximityTracker.push(Date.now(), rssi);
   if (action) {
-    logProximityTrigger(action, event.rssi);
+    logProximityTrigger(action, rssi);
     void runProximityAction(action);
   }
+}
+
+// 连接态 RSSI：与扫描态走同一条判距路径，只是样本来源不同。
+proximityEmitter.addListener('xpeng-ble-link-rssi', (value) => {
+  const event = value as unknown as { rssi: number | null };
+  if (!proximityEnabled || !proximityMac) return;
+  if (calibrating) return;
+  if (proximityBusy) return;
+  // 只在连接态下采纳：链路已断时这条流可能还有残留回调。
+  if (!link.connected) return;
+  feedProximity(typeof event.rssi === 'number' ? event.rssi : null);
 });
+
+/**
+ * 进入连接态后必须启动 RSSI 读取探针。
+ *
+ * 连接态没有"广播包"这个被动来源，读数只能主动 `readRemoteRssi` 去要。
+ * 不启动探针就永远没有连接态读数，判距会停在切换前那一刻。
+ */
+async function startLinkRssiFeed(mac: string): Promise<void> {
+  await bridge.startLinkRssiProbe(mac, 1500).catch((error) => {
+    void bridge.logProximity(
+      `link rssi probe failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+}
+
 /** 扫描失败后的自动恢复计时器（原生侧，后台 JS 定时器不可靠）。 */
 let scanRecoverPending = false;
 
@@ -691,7 +876,9 @@ proximityEmitter.addListener('xpeng-ble-proximity-failed', (value) => {
  */
 async function recoverScanIfNeeded(): Promise<void> {
   if (!scanRecoverPending) return;
-  if (!proximityEnabled || appForeground || scanRunning) return;
+  // 不再按前后台拦截：两态架构下前台也可能是扫描态（连接态掉线后退回），
+  // 拦住会让功能在前台静默失效。
+  if (!proximityEnabled || scanRunning || link.connected) return;
   scanRecoverPending = false;
   void bridge.logProximity('scan recovering');
   await startScanUnlessSuppressed();
@@ -708,9 +895,38 @@ proximityEmitter.addListener('xpeng-ble-suppression-due', () => {
     void recoverScanIfNeeded();
     return;
   }
-  if (!proximityEnabled || !proximityMac || scanRunning || appForeground) return;
+  if (!proximityEnabled || !proximityMac) return;
+  // 连接态与扫描态都要受抑制约束。
+  //
+  // 原实现只处理"没在扫描"的情形，于是连接态完全绕过了抑制：人走进标记地点
+  // （家里、车又停得近）会一直连着，比扫描还费电——扫描至少还被抑制挡住了。
+  // 前台时连接由 holdLink 持有、后台时由扫描态转连接，两条路都要能断开。
+  if (link.connected) {
+    void releaseLinkIfSuppressed();
+    return;
+  }
+  if (scanRunning) return;
   void startScanUnlessSuppressed();
 });
+
+/**
+ * 连接态下复查抑制：命中就主动断开，退回扫描态（扫描态自己会再被抑制挡住）。
+ *
+ * 断开后不立即重连：抑制复查定时器会继续跑，等走出禁区才重新拉起。
+ */
+async function releaseLinkIfSuppressed(): Promise<void> {
+  const suppressed = await isSuppressed();
+  const action = decideLinkUnderSuppression({ suppressed, connected: link.connected });
+  void bridge.logProximity(`link suppression check: ${suppressed ?? 'clear'} -> ${action}`);
+  if (action !== 'release') return;
+  await link.release().catch(() => {});
+  await bridge.startKeepAlive(
+    suppressed === 'wifi' ? '已连接指定 WiFi，暂不自动解闭锁'
+      : suppressed === 'place' ? '在指定地点附近，暂不自动解闭锁'
+        : '无法获取位置，暂不自动解闭锁',
+  ).catch(() => {});
+  await bridge.scheduleSuppressionTimer(SUPPRESSION_RECHECK_MS).catch(() => {});
+}
 
 /**
  * 判距触发点日志。
@@ -739,7 +955,7 @@ async function setProximityEnabled(enabled: boolean, vin?: string): Promise<void
   const mac = target && (holdTarget?.vin === target ? holdTarget.mac : contexts.get(activeAccount(), target)?.mac);
   // 判据只能是「扫描有没有真的在跑」：开关可能先于物料就绪被拨开，也可能来自冷启动
   // 恢复，那些情况下开关已为「开」而扫描没跑，按开关状态早退会让功能静默失效。
-  const action = decideScanAction({ enabled, scanRunning, hasTarget: Boolean(mac), foreground: appForeground });
+  const action = decideScanAction({ enabled, scanRunning, hasTarget: Boolean(mac), foreground: appForeground, linkConnected: link.connected });
   if (action === 'stop') {
     scanRunning = false;
     proximityVin = undefined;
@@ -747,9 +963,16 @@ async function setProximityEnabled(enabled: boolean, vin?: string): Promise<void
     await bridge.cancelSuppressionTimer().catch(() => {});
     return;
   }
-  if (action === 'none' || !target || !mac) return;
+  if (!target || !mac) return;
   proximityVin = target;
   proximityMac = mac.toUpperCase();
+  // 已持有链路时 decideScanAction 返回 none（连接与扫描互斥），但此时不是"什么都
+  // 不做"——连接态要接着判距，否则刚打开开关而链路恰好已在，判距永远不启动。
+  if (link.connected) {
+    await startLinkRssiFeed(mac.toUpperCase()).catch(() => {});
+    return;
+  }
+  if (action === 'none') return;
   await startScanUnlessSuppressed();
 }
 
@@ -772,7 +995,7 @@ async function seedProximityState(mac: string): Promise<void> {
     const result = await bridge.scanTarget(mac, 1500);
     if (!result.targetSeen || typeof result.rssi !== 'number') return;
     proximityTracker.seed(result.rssi);
-    void bridge.logProximity(`seeded rssi=${result.rssi} nearby=${proximityTracker.isNearby}`);
+    void bridge.logProximity(`seeded rssi=${result.rssi} unlocked=${proximityTracker.isUnlocked}`);
   } catch {
     // 播种失败不影响正常判距，让它照旧从"不在附近"起步。
   }
@@ -827,37 +1050,64 @@ async function startScanUnlessSuppressed(): Promise<void> {
   }
 }
 
-/** 前后台切换：前台持有常驻连接；后台释放连接、只留扫描。 */
+/**
+ * 前后台切换。
+ *
+ * 2026-11-19 起不再由前后台决定"连还是扫"：判距改成两态自动切换——
+ * 扫描态扫到车就进连接态，链路掉线就退回扫描态（见 enterLinkMode / onStateChange）。
+ *
+ * 原实现在退到后台时无条件 `release()` 断连，那会直接抵消刚建立的连接态：
+ * 人走到车边、刚切成连接态，一锁屏就被断回扫描，连接态白建。现在只在
+ * **没有开判距功能**时才维持"前台连、后台断"的旧行为。
+ */
 async function setForeground(foreground: boolean): Promise<void> {
   appForeground = foreground;
   if (foreground) {
-    // 前台不做判距扫描：连接由 holdLink 持有，扫描与连接同时跑只会互相抢车端的
-    // 连接槽，也白耗电。
+    // 开着判距时连接态由自动切换管理，不在这里抢占；关着判距时才沿用
+    // "前台持连接"的老语义（车控需要链路）。
+    if (proximityEnabled) {
+      // 前台仍然不能扫描与连接并存（争控制器），若正在扫描则停掉，
+      // 下一轮判断会按需重新进入连接态。
+      if (scanRunning) {
+        scanRunning = false;
+        await bridge.stopProximityScan('app foregrounded').catch(() => {});
+      }
+      // 前台同样要跑抑制复查：否则人在家里（标记地点）且车停得近、又开着 App 时，
+      // 连接会一直被保持——这正是"家里离车近就持续耗电"的场景。
+      await bridge.scheduleSuppressionTimer(SUPPRESSION_RECHECK_MS).catch(() => {});
+      // 命中抑制时不主动建链：进了前台就无脑 holdLink 会把刚被抑制断开的连接
+      // 又接回去，形成每 20 秒"断开→重连"的抖动。车控本身会退回云端，不依赖这条链路。
+      const suppressedNow = await isSuppressed();
+      if (suppressedNow !== null) {
+        void bridge.logProximity(`foreground: suppressed by ${suppressedNow}, not linking`);
+        await link.release().catch(() => {});
+        syncKeepAlive();
+        return;
+      }
+      syncKeepAlive();
+      if (holdTarget && !link.connected) await holdLink(holdTarget.mac);
+      return;
+    }
     if (scanRunning) {
       scanRunning = false;
       await bridge.stopProximityScan('app foregrounded').catch(() => {});
     }
-    // 复查定时器同样只在后台有意义：前台靠常驻连接，留着它只会白唤醒定位。
     await bridge.cancelSuppressionTimer().catch(() => {});
-    // 停掉扫描后必须立刻改通知：下面 holdLink 只有在真的发起连接时才会触发
-    // onStateChange，物料还没就绪时它什么都不做，通知就会一直挂着「运行中」。
     syncKeepAlive();
-    // 前台恢复连接：用已记下的车辆上下文，没有就不连（还没准备好物料）。
     if (holdTarget) await holdLink(holdTarget.mac);
+    return;
+  }
+  // 退后台：开着判距时保留已有连接（否则刚建立的连接态会被立刻断掉），
+  // 只确保抑制复查定时器在跑——连接态同样要受抑制约束。
+  if (proximityEnabled) {
+    await bridge.scheduleSuppressionTimer(SUPPRESSION_RECHECK_MS).catch(() => {});
+    if (!link.connected && !scanRunning) await setProximityEnabled(true);
     return;
   }
   await link.release().catch(() => {});
   // 释放连接后车端才恢复广播（实测），此时才可能扫到车。
   if (proximityEnabled) await setProximityEnabled(true);
 }
-
-/**
- * 标定采样。
- *
- * 硬约束：车端在已有 GATT 连接时不广播（实测持连接扫描 20 轮 0 结果），所以标定
- * 期间必须先断开常驻连接、只保留扫描；采完恢复原状。每一步都由原生驱动，JS 只收样本。
- */
-let calibrationSession: { resolve: (r: { ok: boolean; reason?: string; calibration?: ProximityCalibration; count: number }) => void; samples: number[]; timer?: ReturnType<typeof setTimeout> } | undefined;
 
 function applyCalibration(next: ProximityCalibration | null): void {
   calibration = next;
@@ -872,39 +1122,50 @@ function applyCalibration(next: ProximityCalibration | null): void {
  * 在给定距离静置采样，按平均值生成阈值。调用方负责在采完后落盘（设置页做）。
  * 采样窗口时长与次数由 `durationMs` 决定，原生每 5 s 一轮。
  */
+/**
+ * 标定：在「你希望解锁的位置」静置采样，用**持连接**读数算阈值。
+ *
+ * 2026-11-19 改成持连接采样，原因有二：
+ * ① 判距本身已经跑在连接态上（扫描态扫到车就切连接），标定必须采同一种量纲，
+ *    否则标定出来的阈值与实际判据不是一回事；
+ * ② 持连接零丢失、无选择偏差（广播在远端只有强包能到达，读数被幸存者偏差抬高）。
+ *
+ * 站位语义也随之改变：以前是"贴到门把手"（那是广播最强处），现在是**站到你希望
+ * 它自动解锁的那个位置**——阈值直接对应你的实际期望，不再需要一个偏移量去猜。
+ */
 async function startCalibration(durationMs = 15000): Promise<{
   ok: boolean; reason?: string; calibration?: ProximityCalibration; count: number;
 }> {
   const mac = proximityMac ?? (holdTarget ? holdTarget.mac.toUpperCase() : undefined);
   if (!mac) return { ok: false, reason: 'no-target', count: 0 };
-  // 断开常驻连接，否则车不广播、采不到任何值。
-  if (link.connected) await link.release().catch(() => {});
-  scanRunning = false;
-  await bridge.stopProximityScan('calibration start').catch(() => {});
+  // 标定要用连接态读数：先确保链路在。没连就建一条（同时把扫描停掉，两者互斥）。
+  if (scanRunning) {
+    scanRunning = false;
+    await bridge.stopProximityScan('calibration start').catch(() => {});
+  }
+  if (!link.connected) {
+    await holdLink(mac).catch(() => {});
+    if (!link.connected) return { ok: false, reason: 'no-target', count: 0 };
+  }
   const samples: number[] = [];
-  return await new Promise((resolve) => {
-    calibrationSession = { resolve, samples };
-    bridge.startProximityScan(mac).catch(() => {});
-    scanRunning = true;
-    const timer = setTimeout(() => {
-      if (!calibrationSession) return;
-      const collected = calibrationSession.samples;
-      calibrationSession = undefined;
-      scanRunning = false;
-      void bridge.stopProximityScan('calibration done').catch(() => {});
-      // 用中位数：抗多径弱值也抗单次强值。上一版取 max 在实机上得 -61，
-      // 而门边 149 样本的 p90 才 -62——12 秒窗口的最强值不代表日常贴脸强度。
-      const result = buildCalibrationFromMedian(collected);
-      // 采完恢复原有分工：前台重新持有连接，后台恢复判距扫描。
-      void (async () => {
-        if (appForeground && holdTarget) await holdLink(holdTarget.mac);
-        else if (proximityEnabled) await setProximityEnabled(true);
-      })();
-      if (result.ok) resolve({ ok: true, calibration: result.calibration, count: result.calibration.sampleCount });
-      else resolve({ ok: false, reason: result.reason, count: result.count });
-    }, durationMs);
-    if (calibrationSession) calibrationSession.timer = timer;
+  calibrating = true;
+  // 标定期间由这里独占收集，判距路径不参与（见 feedProximity 的 calibrating 判断）。
+  const sub = proximityEmitter.addListener('xpeng-ble-link-rssi', (value) => {
+    const e = value as unknown as { rssi: number | null };
+    if (typeof e.rssi === 'number') samples.push(e.rssi);
   });
+  await bridge.startLinkRssiProbe(mac, 500).catch(() => {});
+  await new Promise<void>((r) => setTimeout(r, durationMs));
+  await bridge.stopLinkRssiProbe().catch(() => {});
+  sub.remove();
+  calibrating = false;
+  // 用中位数：抗多径弱值也抗单次强值。12 秒窗口的最强值不代表日常站位强度。
+  const result = buildCalibrationFromMedian(samples);
+  // 采完恢复判距：连接还在就继续用连接态判距，不在就退回扫描。
+  if (link.connected) await startLinkRssiFeed(mac);
+  else if (proximityEnabled) await setProximityEnabled(true);
+  if (result.ok) return { ok: true, calibration: result.calibration, count: result.calibration.sampleCount };
+  return { ok: false, reason: result.reason, count: result.count };
 }
 
 /** 当前生效阈值（用于界面显示）。 */
@@ -932,13 +1193,58 @@ export const bleLink = {
   executePreparedV2,
   setProximityEnabled,
   setForeground,
-  startCalibration,
+  /**
+   * 更新车辆坐标快照（来自 MQTT `interval.drive`）。
+   *
+   * 传 null 表示当前没有可信坐标（例如 `coordValid` 为 0），此时距离粗筛会让路、
+   * 退化成正常扫描——缺数据只该少省点电，不该让功能停摆。
+   */
+  /**
+   * 更新「车辆是否在行驶」；传 null 表示当前不知道，门控会放行。
+   *
+   * 记下收到时刻：MQTT 只在状态变化时推送，状态可能很久不更新。门控据此判断
+   * 是否过期（见 MOVING_STATE_TTL_MS），避免车已停下却因缓存仍停在"在动"而永久不解锁。
+   */
+  setVehicleMoving(moving: boolean | null) {
+    vehicleMoving = moving === null ? null : { moving, at: Date.now() };
+  },
+  /** 详细日志开关（运行时值）；落盘由设置页负责。 */
+  setVerboseLog(enabled: boolean) { verboseLog = enabled; },
+  /** 更新车辆锁状态；传 null 表示不知道，判距器维持原值。 */
+  setVehicleLocked(locked: boolean | null) {
+    vehicleLocked = locked === null ? null : { locked, at: Date.now() };
+  },
+  /**
+   * 站位对照采样：一个站位一次调用，自动跑完「持连接」与「断开采广播」两遍。
+   *
+   * 为什么必须自动跑两遍：车端在已有 GATT 连接时不广播（2026-11-12 实测），
+   * 两条测量路径物理互斥，只能先后做。让用户自己去"断开再打开"既容易做错，
+   * 也无法保证两遍落在同一站位、同一姿态——那样采到的两条曲线就没法比。
+   *
+   * 参数 `station` 只用于写进日志，事后对齐用（例如 1m/3m/5m）。
+   * 两遍各采 `holdMs`，期间原生按 `intervalMs` 逐点读，读数落日志。
+   */
+  startLinkRssiProbe: async (intervalMs = 1500) => {
+    const mac = proximityMac ?? holdTarget?.mac.toUpperCase();
+    if (!mac) throw new Error('没有可用的车辆 MAC：先让数字钥匙物料就绪');
+    await bridge.startLinkRssiProbe(mac, intervalMs);
+    return mac;
+  },
+  stopLinkRssiProbe: () => bridge.stopLinkRssiProbe(),
+  readLinkRssi: () => {
+    const mac = proximityMac ?? holdTarget?.mac.toUpperCase();
+    if (!mac) return Promise.reject(new Error('没有可用的车辆 MAC'));
+    return bridge.readLinkRssi(mac);
+  },
   currentThresholds,
+  /** 应用一组阈值（标定结果或冷启动恢复的历史值）。 */
   applyCalibration,
-  logUserAction,
-  get calibration() { return calibration; },
+  /** 现场标定：站到你希望解锁的位置静置，用持连接读数算阈值。 */
+  startCalibration,
   parseStoredCalibration: parseCalibration,
   serializeCalibration,
+  logUserAction,
+  get calibration() { return calibration; },
   /** 抑制名单（运行时值）；落盘由设置页负责，与开关、标定值同一套约定。 */
   setSuppression(next: ProximitySuppression) { suppression = next; },
   get suppression() { return suppression; },

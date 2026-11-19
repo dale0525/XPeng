@@ -113,15 +113,17 @@ export function serializeCalibration(calibration: ProximityCalibration): string 
 export const CALIBRATION_HYSTERESIS_DB = 15;
 
 /**
- * 解锁阈值相对采样中位数的偏移。
+ * 解锁阈值相对采样中位数的偏移。**2026-11-19 起为 0。**
  *
- * 用户 2026-11-12 最终定案：标定时把手机放在**主驾门把手旁**，解锁值取中位数 -5 dB。
- * 演进：先定 -12（中位 -57 → -69），后按实际体感改为 -5（中位 -57 → -62）。
- * 2026-11-15 再改为 -20：当晚 20:51 手动解锁前，走近全程最强只有 -75，而 -5 算出的
- * 阈值是 -60，差 15 dB 永远达不到——门把手是采样时最强的位置，而用户实际希望解锁的
- * 位置离车还有几米，信号天然弱 15~20 dB。偏移量由用户按实际体感微调。
+ * 这个偏移量原本用来补偿「站位与期望位置不一致」：早期标定要求把手机**贴到主驾门
+ * 把手旁**（那是信号最强处），而用户实际希望解锁的位置离车还有几米，信号天然弱
+ * 15~20 dB，所以算阈值时要减掉 20 去补偿。演进：-12 → -5 → -20。
+ *
+ * 2026-11-19 站位语义改成「站到你希望解锁的那个位置」之后，补偿就成了**重复扣减**：
+ * 站到 3 米处采到中位 -75，再减 20 会得到 -95（要走到 20 米外才解锁）。既然采样点
+ * 就是期望触发点，采样中位数本身就该是阈值，偏移归零。
  */
-export const CALIBRATION_NEAR_OFFSET_DB = 20;
+export const CALIBRATION_NEAR_OFFSET_DB = 0;
 
 export function buildCalibrationFromMedian(
   samples: ReadonlyArray<number | null | undefined>,
@@ -143,31 +145,24 @@ export function buildCalibrationFromMedian(
 }
 
 /**
- * 手动修改阈值：用户直接填两个正数（如 69、84），界面上不出现负号也不出现 dB。
+ * 手动修改解锁阈值：只需填一个正数（如 75），界面上不出现负号也不出现 dB。
  *
+ * 2026-11-19 起只填解锁值——闭锁值由它自动减 `CALIBRATION_HYSTERESIS_DB` 推导，
+ * 与自动标定同一条规则，用户不必自己算滞回带。
  * 允许带前导负号只是为了让"粘回来的旧值"仍能解析；正常输入是纯数字。
- * 拒绝解锁不弱于闭锁的组合——那样滞回带为负，状态机会在两条线之间来回跳。
  */
 export function parseManualThresholds(
   nearText: string,
-  farText: string,
   now: Date = new Date(),
 ): CalibrationResult | { ok: false; reason: 'invalid' } {
-  const parse = (t: string): number | null => {
-    const n = Number(t.trim().replace(/^-/, ''));
-    if (!Number.isFinite(n) || n <= 0 || n > 120) return null;
-    return -Math.round(n);
-  };
-  const near = parse(nearText);
-  const far = parse(farText);
-  if (near === null || far === null) return { ok: false, reason: 'invalid' };
-  // 解锁必须比闭锁更强（数值更大，因为都是负数）。
-  if (near <= far) return { ok: false, reason: 'invalid' };
+  const n = Number(nearText.trim().replace(/^-/, ''));
+  if (!Number.isFinite(n) || n <= 0 || n > 120) return { ok: false, reason: 'invalid' };
+  const near = -Math.round(n);
   return {
     ok: true,
     calibration: {
       nearRssi: near,
-      farRssi: far,
+      farRssi: near - CALIBRATION_HYSTERESIS_DB,
       sampleCount: 0,
       calibratedAt: now.toISOString(),
     },

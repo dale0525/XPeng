@@ -48,14 +48,22 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     private var suppressionTimer: Runnable? = null
 
     /**
+     * 连接态 RSSI 探针的常驻计时（见 startLinkRssiProbe）。
+     *
+     * 与判距扫描一样必须在原生侧计时：Doze 下 RN 的 `setTimeout` 一次都不触发，
+     * 采样节奏乱掉就无法与广播采样逐点对齐。
+     */
+    private var linkRssiProbeMac: String? = null
+    private var linkRssiProbeTick: Runnable? = null
+
+    /**
      * 一条 GATT 链路的全部状态。
      *
      * 这些字段 2026-11-13 之前是模块级单例，于是同一时刻只允许一条链路：车辆数字钥匙的
      * 常驻连接是登录后的默认状态，充电桩弹窗的 `connectProfile` 必然拿到 `E_BUSY`。
      * 车与桩是两台独立外设，手机侧也没有「只能连一台」的限制，限制纯粹来自那份单例状态。
      */
-    private inner class Link(val mac: String) {
-        var gatt: BluetoothGatt? = null
+    private inner class Link(val mac: String) {        var gatt: BluetoothGatt? = null
         var writer: BluetoothGattCharacteristic? = null
         var ccDescriptor: BluetoothGattDescriptor? = null
         var cccdValue: ByteArray? = null
@@ -80,6 +88,30 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         fun armDeadline(timeoutMs: Long = 10000) {
             clearDeadline()
             deadline = Runnable { close("BLE operation timeout") }.also { handler.postDelayed(it, timeoutMs) }
+        }
+
+        /**
+         * 读一次连接态 RSSI（探针，用于判定「保持连接时能否据此判距」）。
+         *
+         * 为什么要单独探：车端在已有 GATT 连接时不广播（2026-11-12 实测），所以
+         * 「常驻连接」与「广播扫描判距」互斥。若连接态 RSSI 可用，就能在保持连接
+         * 的同时判距，从而绕开扫描与建连争用控制器（吃 133）那条路。
+         * 回调是异步的，结果经 `xpeng-ble-link-rssi` 上报。
+         */
+        fun readRssi() {
+            val g = gatt ?: run {
+                emit("xpeng-ble-link-rssi", Arguments.createMap().apply {
+                    putString("mac", mac); putNull("rssi"); putString("error", "no-gatt")
+                })
+                return
+            }
+            val started = try { g.readRemoteRssi() } catch (e: Exception) {
+                XpengLog.log("ble", "readRemoteRssi threw: ${e.message}")
+                false
+            }
+            if (!started) emit("xpeng-ble-link-rssi", Arguments.createMap().apply {
+                putString("mac", mac); putNull("rssi"); putString("error", "not-started")
+            })
         }
 
         fun close(reason: String) {
@@ -235,6 +267,23 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             override fun onCharacteristicChanged(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
                 incoming(g, characteristic.uuid, value.copyOf())
             }
+
+            /**
+             * 连接态 RSSI 的回调（探针）。`status != GATT_SUCCESS` 时 rssi 无意义，
+             * 必须报 null 而不是 0——0 会被判距逻辑当成"贴脸"，比不报还危险。
+             */
+            override fun onReadRemoteRssi(g: BluetoothGatt, rssi: Int, status: Int) { handler.post {
+                val ok = status == BluetoothGatt.GATT_SUCCESS
+                // 同时落文件：真机对照采样要不接电脑也能事后取（`adb pull` 或界面导出）。
+                // 记「读到的值」本身，不在这里做任何滤波或判定。
+                XpengLog.log("probe", "link-rssi mac=${g.device.address} " +
+                    (if (ok) "rssi=$rssi" else "status=$status"))
+                emit("xpeng-ble-link-rssi", Arguments.createMap().apply {
+                    putString("mac", g.device.address)
+                    if (ok) putInt("rssi", rssi) else putNull("rssi")
+                    if (!ok) putInt("status", status)
+                })
+            } }
         }
 
         fun incoming(g: BluetoothGatt, uuid: UUID, value: ByteArray) { handler.post {
@@ -366,8 +415,66 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
      * 车控用的短超时连接：人离车几十米时蓝牙必然连不上，等满 10 秒只是在白等，
      * 超时才退云端会把一次锁车拖到十几秒。3 秒够车旁的正常建连，不够就立刻走云端。
      */
+    /**
+     * 周期读连接态 RSSI 的探针（站位对照采样用）。
+     *
+     * 与广播采样**不能同时跑**：车端在已有 GATT 连接时不广播（2026-11-12 实测），
+     * 所以两遍分开做——先连上跑本探针采「连接态 RSSI」，再断开跑判距扫描采「广播 RSSI」，
+     * 同一站位各采一遍，之后比对哪条曲线更有分辨力。
+     *
+     * 另一个必须由本探针回答的问题：`HCI_Read_RSSI` 读的是该连接上**最后一次收到报文**
+     * 的 RSSI，而常驻连接约 127 s 才有一次重鉴权流量。若期间无报文，读数可能在两个
+     * 流量点之间冻住不变——那样它就不能用来判距。日志里逐点记值即可看出是否冻住。
+     */
+    @ReactMethod fun startLinkRssiProbe(mac: String, intervalMs: Double, p: Promise) { handler.post {
+        val m = mac.uppercase()
+        stopLinkRssiProbeInternal("restart")
+        linkRssiProbeMac = m
+        val interval = if (intervalMs.isFinite() && intervalMs >= 500) intervalMs.toLong() else PROBE_INTERVAL_MS
+        val tick = object : Runnable {
+            override fun run() {
+                val cur = linkRssiProbeMac ?: return
+                links[cur]?.readRssi()
+                handler.postDelayed(this, interval)
+            }
+        }
+        linkRssiProbeTick = tick
+        XpengLog.log("probe", "link-rssi probe start mac=$m interval=${interval}ms")
+        handler.postDelayed(tick, 0L)
+        p.resolve(null)
+    } }
+
+    @ReactMethod fun stopLinkRssiProbe(p: Promise) { handler.post {
+        stopLinkRssiProbeInternal("stopped by JS"); p.resolve(null)
+    } }
+
+    private fun stopLinkRssiProbeInternal(reason: String) {
+        val was = linkRssiProbeMac
+        linkRssiProbeMac = null
+        linkRssiProbeTick?.let { handler.removeCallbacks(it) }; linkRssiProbeTick = null
+        if (was != null) XpengLog.log("probe", "link-rssi probe stop mac=$was reason=$reason")
+    }
+
     @ReactMethod fun connect(mac: String, p: Promise) = startConnect(mac, false, 3000, p)
     @ReactMethod fun connectDiagnostic(mac: String, p: Promise) = startConnect(mac, true, 45000, p)
+
+    /**
+     * 探针入口：读一次指定链路的连接态 RSSI，结果走 `xpeng-ble-link-rssi` 事件。
+     *
+     * 只做读，不改任何连接状态；链路不存在时立刻回一个带 `error` 的事件，让调用方
+     * 能区分「没链路」与「读了但车端没回」。
+     */
+    @ReactMethod fun readLinkRssi(mac: String, p: Promise) { handler.post {
+        val link = links[mac.uppercase()]
+        if (link == null) {
+            emit("xpeng-ble-link-rssi", Arguments.createMap().apply {
+                putString("mac", mac.uppercase()); putNull("rssi"); putString("error", "no-link")
+            })
+        } else {
+            link.readRssi()
+        }
+        p.resolve(null)
+    } }
     private fun startConnect(mac: String, autoConnect: Boolean, timeoutMs: Long, p: Promise) { handler.post {
         if (!ready(p)) return@post
         if (!BluetoothAdapter.checkBluetoothAddress(mac)) { p.reject("E_ADDRESS", "Invalid BLE address"); return@post }
@@ -680,11 +787,10 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             val rssi = if (seen) proximityRssi else null
             proximityRssi = Int.MIN_VALUE
             proximityRounds += 1
-            // 判距是本功能唯一的输入，扫不到车与"车很远"在行为上无法区分，真车排障
-            // 只能靠这行：没有它就只能看到"没触发"，看不出是没扫到还是阈值不对。
-            val seenAny = proximityAllResults
+            // 每轮读数不再单独落盘：JS 侧在详细日志打开时会把它与判距器内部状态
+            // 合成一行写盘（见 feedProximity），合并后一天只需 5 MB 左右；
+            // 这里再写一份既重复又会让日志一天内就滚掉。
             proximityAllResults = 0
-            XpengLog.log("ble", "round=$proximityRounds rssi=${rssi ?: "none"} results=$seenAny")
             emit("xpeng-ble-proximity-rssi", Arguments.createMap().apply {
                 putString("mac", mac)
                 if (rssi == null) putNull("rssi") else putInt("rssi", rssi)
@@ -712,6 +818,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             kaTimers.forEach { handler.removeCallbacks(it.runnable) }; kaTimers.clear()
             permissionPromise?.reject("E_INVALIDATED", "Module invalidated"); permissionPromise = null }
         stopProximityLoop("module invalidated")
+        stopLinkRssiProbeInternal("module invalidated")
         super.invalidate()
     }
 
@@ -728,5 +835,13 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
          * 变的只是 JS 侧汇总频率——3.5 s 多一次唤醒，相对于每轮扫描本身可忽略。
          */
         const val PROXIMITY_WINDOW_MS = 1500L
+
+        /**
+         * 连接态 RSSI 探针的默认周期。
+         *
+         * 取 1.5 s 与判距窗口一致：两遍采样（连接态 / 广播）要对齐比较，
+         * 节奏不同就没法逐点对照。探针只在用户手动开启时运行，不影响日常耗电。
+         */
+        const val PROBE_INTERVAL_MS = 1500L
     }
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  evaluateProximity, ProximityTracker, decideScanAction, decideScanDuringAction, DEFAULT_PROXIMITY_CONFIG, type ProximityConfig,
+  evaluateProximity, ProximityTracker, decideScanAction, decideScanDuringAction, decideUnlockGate, decideLockGate, unlockedFromLockState, decideLinkAttempt, LINK_RETRY_BACKOFF_MS, shouldLogSample, DEFAULT_PROXIMITY_CONFIG, type ProximityConfig,
 } from '../packages/protocol/src/proximity.ts';
 
 const cfg: ProximityConfig = { nearRssi: -65, farRssi: -80, enterMs: 3000, leaveMs: 8000 };
@@ -108,10 +108,15 @@ test('enabled without a vehicle target waits instead of starting', () => {
   assert.equal(decideScanAction({ ...bg, hasTarget: false }), 'none');
 });
 
-test('foreground never scans: the car stops advertising while connected', () => {
-  // 实测：持有 GATT 连接时连续 20 轮 results=0，释放连接后立刻扫到。
-  assert.equal(decideScanAction({ ...bg, foreground: true }), 'none');
-  assert.equal(decideScanAction({ ...bg, foreground: true, scanRunning: true }), 'stop');
+test('真正决定能不能扫的是「有没有持有链路」，不是前后台', () => {
+  // 原始实测依据仍然成立：持有 GATT 连接时连续 20 轮 results=0，释放连接后立刻扫到
+  // ——车端在已有连接时不广播。但旧实现把这条物理约束错误地表达成了"前台一律不扫"，
+  // 而两态架构下前台也可能是扫描态（连接态掉线后退回），按前台拦截会让功能在前台失效。
+  // 所以判据改成直接看链路状态。
+  assert.equal(decideScanAction({ ...bg, foreground: true, linkConnected: true }), 'none');
+  assert.equal(decideScanAction({ ...bg, foreground: true, linkConnected: true, scanRunning: true }), 'stop');
+  // 前台但没持链路：该扫就扫。
+  assert.equal(decideScanAction({ ...bg, foreground: true, linkConnected: false }), 'start');
 });
 
 test('scan resumes after the action only when it should still be running', () => {
@@ -121,4 +126,283 @@ test('scan resumes after the action only when it should still be running', () =>
   assert.equal(decideScanDuringAction({ ...base, enabled: false }), 'stay-stopped');
   assert.equal(decideScanDuringAction({ ...base, foreground: true }), 'stay-stopped');
   assert.equal(decideScanDuringAction({ ...base, hasMac: false }), 'stay-stopped');
+});
+
+// ── 漏扫率置信度（2026-11-19 五点对照实测后新增）──
+//
+// 实测依据：把 2026-11-12 的 656 轮数据按漏扫率分桶，漏扫 0-20% 的窗口中位读数
+// -69.1，40-60% 为 -76.0，60-80% 为 -78.3。同一份数据里 30 米段漏扫仅 28.9%、
+// 门边 48.9%，于是 30 米的中位数反而比 5 米强——远端只有强包能到达，弱包全丢，
+// 剩下的样本被幸存者偏差抬高。所以「读数强」在漏扫率高时并不可信。
+
+test('高漏扫率窗口里的强读数不得触发解锁', () => {
+  // 20 轮里只有 4 轮扫到，且那 4 轮都很强：这是典型的幸存者偏差形态。
+  const t = 0;
+  const seq: (number | null)[] = [];
+  for (let i = 0; i < 20; i += 1) {
+    // 每 5 轮出现一次强值，其余全漏扫
+    seq.push(i % 5 === 0 ? -50 : null);
+  }
+  const acts = evaluateProximity(seq.map((rssi, i) => ({ t: t + i * 1500, rssi })), cfg);
+  assert.deepEqual(acts, [], `漏扫 80% 时不该解锁，实际: ${acts.join(',')}`);
+});
+
+test('低漏扫率窗口里的同样强读数可以正常解锁', () => {
+  // 同样的强值，但每轮都扫到：应当解锁。
+  const t = 0;
+  const seq = Array.from({ length: 20 }, () => -50 as number | null);
+  const acts = evaluateProximity(seq.map((rssi, i) => ({ t: t + i * 1500, rssi })), cfg);
+  assert.deepEqual(acts, ['unlock']);
+});
+
+test('漏扫率随时间衰减：早期稀疏样本不能永久压制后续可靠样本', () => {
+  // 先 10 轮全漏扫（刚起扫、车还没广播），再来 10 轮稳定强值。
+  // 若把整段历史都算进漏扫率，后者会被前面的空窗拖累而永不解锁。
+  const t = 0;
+  const seq: (number | null)[] = [
+    ...Array.from({ length: 10 }, () => null as number | null),
+    ...Array.from({ length: 10 }, () => -50 as number | null),
+  ];
+  const acts = evaluateProximity(seq.map((rssi, i) => ({ t: t + i * 1500, rssi })), cfg);
+  assert.deepEqual(acts, ['unlock'], `空窗之后稳定强值应解锁，实际: ${acts.join(',')}`);
+});
+
+test('漏扫率门槛只挡解锁、不挡闭锁：走远时漏扫本来就多', () => {
+  // 实测：人走远时漏扫率 70-90%。若闭锁也受该门槛约束，车就永远不锁。
+  // 这里构造「先可靠地进入附近，再在高漏扫环境下走远」的序列。
+  const t = 0;
+  const near = Array.from({ length: 6 }, () => -50 as number | null);
+  // 走远段：每 4 轮才扫到一次弱值，漏扫率 75%
+  const far: (number | null)[] = [];
+  for (let i = 0; i < 24; i += 1) far.push(i % 4 === 0 ? -95 : null);
+  const seq = [...near, ...far];
+  const acts = evaluateProximity(seq.map((rssi, i) => ({ t: t + i * 1500, rssi })), cfg);
+  assert.deepEqual(acts, ['unlock', 'lock'], `应解锁后正常闭锁，实际: ${acts.join(',')}`);
+});
+
+// ── 车辆行驶门控 ──
+//
+// 车在动时人不可能站在车旁等着被解锁，此时任何 RSSI 判断都不该触发解锁。
+// 这是语义判断，比信号推断可靠：不依赖 RSSI 精度，也不受多径与漏扫影响。
+//
+// speed 的单位未证实（字段是字符串，实测 "0.000000"），但「大于 0 即在动」
+// 与单位无关——任何单位下 0 都是静止。
+
+test('车在行驶时不得解锁：RSSI 再强也不代表人在车旁', () => {
+  assert.equal(decideUnlockGate({ moving: true }), 'block');
+});
+
+test('车静止时放行，由 RSSI 自行判断', () => {
+  assert.equal(decideUnlockGate({ moving: false }), 'allow');
+});
+
+test('拿不到车速时放行：缺数据不能挡住解锁', () => {
+  // 代价不对等：误放行最坏是多解一次锁，误挡则是人在车前解不开。
+  assert.equal(decideUnlockGate({ moving: null }), 'allow');
+});
+
+test('闭锁与解锁同样受行驶门控约束：车在动时不做任何操作', () => {
+  // 车开走时蓝牙本来就在快速变弱，容易被误判成"人走远了"而误锁；
+  // 但人根本没走、是车走了，此时锁车没有意义。
+  assert.equal(decideLockGate({ moving: true }), 'block');
+  assert.equal(decideLockGate({ moving: false }), 'allow');
+  assert.equal(decideLockGate({ moving: null }), 'allow');
+  // 过期规则与解锁一致。
+  assert.equal(decideLockGate({ moving: true, ageMs: 31_000 }), 'allow');
+});
+
+// ── 行驶状态的过期保护 ──
+//
+// MQTT 只在状态变化时推送（实测静止车辆 60 秒零推送）。若车停下后没有新的
+// speed=0 推送，缓存会一直停在"在动"，门控就会永久挡住解锁——人站在车边解不开。
+// 所以状态必须有保质期：过期即视为"不知道"，按放行处理。
+
+test('行驶状态在 30 秒内有效', () => {
+  assert.equal(decideUnlockGate({ moving: true, ageMs: 0 }), 'block');
+  assert.equal(decideUnlockGate({ moving: true, ageMs: 29_000 }), 'block');
+});
+
+test('行驶状态超过 30 秒即失效，退回放行', () => {
+  // 这是防"车已停下但缓存仍停在在动"导致永久不解锁的关键。
+  assert.equal(decideUnlockGate({ moving: true, ageMs: 30_001 }), 'allow');
+  assert.equal(decideUnlockGate({ moving: true, ageMs: 300_000 }), 'allow');
+});
+
+test('没有过期信息时按新鲜处理（调用方未提供时间戳）', () => {
+  assert.equal(decideUnlockGate({ moving: true }), 'block');
+});
+
+// ── 以车辆真实锁状态校准「是否在附近」 ──
+//
+// 原实现的 nearby 是纯本地记忆：只有"自己判断解锁成功"才置 true、"自己判断闭锁成功"
+// 才置 false。动作失败时它停在错值上，于是再也触发不了对应动作（2026-11-12 实测：
+// 走到 50 m 外闭锁两次失败，状态机已是"不在附近"，用户看到"只解锁、从不闭锁"）。
+//
+// 改成跟着车辆真实锁状态走：车锁着 = 人不在附近，车开着 = 人在附近。
+// 四种真实场景全部自洽，且失败时车锁没变，nearby 就不会被写错。
+
+test('车锁着即人不在附近：之后走近能触发解锁', () => {
+  assert.equal(unlockedFromLockState({ locked: true }), false);
+});
+
+test('车开着即人在附近：之后走远能触发闭锁', () => {
+  assert.equal(unlockedFromLockState({ locked: false }), true);
+});
+
+test('拿不到车锁状态时返回 null，由调用方维持原值', () => {
+  // 不能默认成"不在附近"：那会让已解锁的车永远不再闭锁。
+  assert.equal(unlockedFromLockState({ locked: null }), null);
+});
+
+// ── 判距器用车锁状态校准 internal 状态 ──
+//
+// calibrate 是治"动作失败后状态卡死"的核心：每轮扫描前用真实车锁状态拉回真值。
+
+test('calibrate：车锁着时判距器视为不在附近', () => {
+  const tr = new ProximityTracker(DEFAULT_PROXIMITY_CONFIG);
+  tr.calibrate(false); // 车开着
+  assert.equal(tr.isUnlocked, true);
+  tr.calibrate(true); // 车锁上（比如人已走远、车自动锁了）
+  assert.equal(tr.isUnlocked, false);
+});
+
+test('calibrate：拿不到车锁状态时维持原值，不清空', () => {
+  const tr = new ProximityTracker(DEFAULT_PROXIMITY_CONFIG);
+  tr.calibrate(false);
+  assert.equal(tr.isUnlocked, true);
+  tr.calibrate(null); // 不知道 -> 不动
+  assert.equal(tr.isUnlocked, true);
+});
+
+test('calibrate：状态变化时清空计时窗口，避免用旧方向的进度误触发', () => {
+  const tr = new ProximityTracker(DEFAULT_PROXIMITY_CONFIG);
+  tr.calibrate(true);   // 不在附近
+  // 喂几条强值攒出解锁进度
+  tr.push(0, -60); tr.push(1500, -60);
+  // 车锁状态翻转为开着（人已进车）：应清空进度、直接视为已解锁
+  tr.calibrate(false);
+  assert.equal(tr.isUnlocked, true);
+  // 立刻喂一条远值不应马上闭锁（进度已被清空）
+  assert.equal(tr.push(3000, -100), undefined);
+});
+
+// ── 两态架构下的起扫判据 ──
+//
+// 旧判据「前台一律不扫描」来自"前台持连接、后台扫描"的粗粒度互斥。两态架构下
+// 连接态由「扫到车」触发、掉线后退回扫描，前后台不再是决定因素；继续按前台拦截
+// 会让前台永远起不了扫、也永远进不了连接态。
+
+test('前台开着功能也要起扫：两态切换靠扫描触发', () => {
+  assert.equal(decideScanAction({ enabled: true, scanRunning: false, hasTarget: true, foreground: true }), 'start');
+});
+
+test('已连着时不该再起扫（两者互斥，会抢控制器）', () => {
+  assert.equal(decideScanAction({ enabled: true, scanRunning: false, hasTarget: true, foreground: false, linkConnected: true }), 'none');
+});
+
+test('功能关着时停止扫描', () => {
+  assert.equal(decideScanAction({ enabled: false, scanRunning: true, hasTarget: true, foreground: false }), 'stop');
+});
+
+// ── 建连失败后的退避 ──
+//
+// "扫到车就建连"在建连失败时会退回扫描，而扫描马上又会扫到车、再次尝试建连。
+// 车端拒绝连接时（例如连接槽被官方 App 占着）这会变成"扫描→失败→扫描→失败"
+// 的快速循环，很耗电。失败后至少等 5 秒才允许再试。
+
+test('刚失败过就不要再试：避免扫描与建连互撞的快速循环', () => {
+  assert.equal(decideLinkAttempt({ lastFailureAtMs: 1000, nowMs: 3000 }), 'wait');
+});
+
+test('退避期满后允许重试', () => {
+  assert.equal(decideLinkAttempt({ lastFailureAtMs: 1000, nowMs: 7000 }), 'retry');
+});
+
+test('从没失败过时直接允许', () => {
+  assert.equal(decideLinkAttempt({ lastFailureAtMs: null, nowMs: 1000 }), 'retry');
+});
+
+test('退避期是 5 秒', () => {
+  assert.equal(LINK_RETRY_BACKOFF_MS, 5_000);
+  // 边界：差 1 ms 仍要等，够了才放行。
+  assert.equal(decideLinkAttempt({ lastFailureAtMs: 0, nowMs: 4_999 }), 'wait');
+  assert.equal(decideLinkAttempt({ lastFailureAtMs: 0, nowMs: 5_000 }), 'retry');
+});
+
+// ── 详细调试日志开关 ──
+//
+// 平常只记"发生了什么"（触发、建连、抑制、失败），一轮 1.5 s 的 RSSI 明细不记，
+// 否则日志几分钟就滚满、把关键事件冲掉。开关打开后把每轮读数都落盘——这是排查
+// "为什么没触发 / 为什么触发了"唯一的一手数据。
+
+test('开关关着时不记每轮明细', () => {
+  assert.equal(shouldLogSample({ verbose: false }), false);
+});
+
+test('开关打开时每轮都记', () => {
+  assert.equal(shouldLogSample({ verbose: true }), true);
+});
+
+// ── 失联判离开 ──
+//
+// 阈值闭锁有个覆盖不到的洞：人快步走远，RSSI 掉到闭锁线以下后计时器要凑满
+// leaveMs（8 s）；但他在 8 s 内走出蓝牙范围 → 链路断开 → 转扫描 → 扫不到车 →
+// 再也收不到弱读数 → 那 8 s 永远凑不满 → 车一直不锁。
+// 所以解锁状态下，连续收不到读数达到「失联退出」时长，就直接判离开。
+
+test('解锁后连续扫不到车，达到失联时长就闭锁', () => {
+  const tr = new ProximityTracker(DEFAULT_PROXIMITY_CONFIG);
+  const t = 0;
+  // 先解锁：默认配置要 3 轮且跨度 ≥ enterMs(1.5s)。
+  assert.equal(tr.push(t, -60), undefined);
+  assert.equal(tr.push(t + 800, -60), undefined);
+  assert.equal(tr.push(t + 1600, -60), 'unlock');
+  // 之后连续 null：每 1.5 s 一轮。首末样本差需 ≥ 9 s，即 7 轮（6 个间隔）。
+  let locked: string | undefined;
+  for (let i = 1; i <= 7; i++) {
+    locked = tr.push(t + 1600 + i * 1500, null);
+    if (locked) break;
+  }
+  assert.equal(locked, 'lock');
+});
+
+test('失联时长不够时不要闭锁：短暂漏扫不能当成走远', () => {
+  const tr = new ProximityTracker(DEFAULT_PROXIMITY_CONFIG);
+  const t = 0;
+  assert.equal(tr.push(t, -60), undefined);
+  assert.equal(tr.push(t + 800, -60), undefined);
+  assert.equal(tr.push(t + 1600, -60), 'unlock');
+  // 连续 3 轮 null（约 4.5 s）还不够 9 s，不能闭锁。
+  for (let i = 1; i <= 3; i++) {
+    assert.equal(tr.push(t + 1600 + i * 1500, null), undefined);
+  }
+  // 一旦重新收到读数，失联计时清零，仍保持解锁。
+  assert.equal(tr.push(t + 6200, -62), undefined);
+  assert.equal(tr.isUnlocked, true);
+});
+
+test('从未解锁时，扫不到不会产生 lock', () => {
+  const tr = new ProximityTracker(DEFAULT_PROXIMITY_CONFIG);
+  for (let i = 0; i < 10; i++) {
+    assert.equal(tr.push(i * 1500, null), undefined);
+  }
+  assert.equal(tr.isUnlocked, false);
+});
+
+// ── 动作后是否恢复扫描（两态架构）──
+//
+// 两态架构下后台也可能走连接态判距。动作执行完若按"后台就恢复扫描"处理，
+// 会把刚用的连接停掉改起扫描，而车端在已有连接时不广播，等于每次后台动作后
+// 都把判距打断一次。
+
+test('后台动作后仍持连接：不要切回扫描', () => {
+  assert.equal(decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: true }), 'stay-stopped');
+});
+
+test('后台动作后链路已断：应恢复扫描', () => {
+  assert.equal(decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: false }), 'resume');
+});
+
+test('前台动作后：由自动切换管理，不手动起扫', () => {
+  assert.equal(decideScanDuringAction({ enabled: true, foreground: true, hasMac: true, linkHeld: false }), 'stay-stopped');
 });
