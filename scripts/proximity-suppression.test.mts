@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_SUPPRESSION,
+  decideLinkUnderSuppression,
   distanceMeters,
   normalizeSsid,
   parseSuppression,
@@ -231,3 +232,28 @@ test('place matching never depends on how old the fix is: same point, same verdi
   assert.equal(second, first);
 });
 
+
+// ── 连接态也要受抑制约束 ──
+//
+// 扫描态在起扫前查抑制，命中就不扫。但连接态是一条已经建好的链路，
+// 若不查，人走进标记地点（例如家里、车又停得近）就会一直连着耗电——
+// 比扫描更费电，因为扫描至少还被挡住了。
+
+test('连接态下命中抑制应主动断开，退回扫描态', () => {
+  // reason 非空 = 当前在禁区；action 决定链路该留还是断。
+  assert.equal(decideLinkUnderSuppression({ suppressed: 'wifi', connected: true }), 'release');
+  assert.equal(decideLinkUnderSuppression({ suppressed: 'place', connected: true }), 'release');
+});
+
+test('未命中抑制时保持连接，不做无谓断开', () => {
+  assert.equal(decideLinkUnderSuppression({ suppressed: null, connected: true }), 'keep');
+});
+
+test('本来就没连着时无事可做', () => {
+  assert.equal(decideLinkUnderSuppression({ suppressed: 'wifi', connected: false }), 'keep');
+});
+
+test('拿不到位置（unknown）也按抑制处理：宁可断开，不要在禁区里持续耗电', () => {
+  // 与扫描态保持一致：unknown 时扫描也不起，这里同样断。
+  assert.equal(decideLinkUnderSuppression({ suppressed: 'unknown', connected: true }), 'release');
+});

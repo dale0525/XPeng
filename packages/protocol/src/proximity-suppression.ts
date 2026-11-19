@@ -171,6 +171,24 @@ export function parseSuppression(raw: string | null | undefined): ProximitySuppr
   return { wifiSsids: ssids, places };
 }
 
+/**
+ * 连接态下命中抑制该怎么处理。
+ *
+ * 扫描态在起扫前查抑制，命中就不扫。但连接态是一条已经建好的链路，
+ * 若不查，人走进标记地点（例如家里、车又停得近）就会一直连着耗电——
+ * 比扫描更费电，因为扫描至少还被抑制挡住了。
+ *
+ * `unknown`（拿不到位置）也按抑制处理：与扫描态保持一致，宁可断开，
+ * 也不要在可能处于禁区时持续耗电。
+ */
+export function decideLinkUnderSuppression(input: {
+  suppressed: 'wifi' | 'place' | 'unknown' | null;
+  connected: boolean;
+}): 'release' | 'keep' {
+  if (!input.connected) return 'keep';
+  return input.suppressed === null ? 'keep' : 'release';
+}
+
 export function serializeSuppression(rules: ProximitySuppression): string {
   return JSON.stringify({ wifiSsids: rules.wifiSsids, places: rules.places });
 }
