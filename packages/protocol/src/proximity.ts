@@ -183,6 +183,8 @@ export class ProximityTracker {
     this.unlocked = next;
     this.nearTimes = [];
     this.farTimes = [];
+    // 判据真正的来源是车辆锁状态时，漏扫率不再是"环境刚切换"的证据，清掉。
+    this.recentMisses = [];
   }
 
   seed(rssi: number | null): void {
@@ -190,6 +192,22 @@ export class ProximityTracker {
     this.unlocked = rssi >= this.config.nearRssi;
     this.nearTimes = [];
     this.farTimes = [];
+    // 播种代表"判距环境刚切换"（新起扫描/新进连接态），上一段环境的漏扫历史对新环境
+    // 不成立，必须一并清掉，否则新环境开头几轮都会被旧漏扫率挡掉。
+    this.recentMisses = [];
+  }
+
+  /**
+   * 清空漏扫窗口。
+   *
+   * 扫描态多数轮次扫不到车（人不在附近，实测一天 26813 轮里 26687 轮为空），
+   * 这些 null 会把漏扫率推到接近 1。切到连接态后窗口若沿用，前 10 轮里仍是大半 null，
+   * 漏扫率 >0.4 一直挡着解锁，直到干净的连接态样本把它稀释下来——2026-11-20 实测这就是
+   * "标定 -93 却要等到 -61（走到门口）才解锁"、白等约 10 秒的根因。
+   * 刻意不用按条数自然淘汰来收敛：那需要 10 轮，等于固定延迟 15 秒。
+   */
+  resetMisses(): void {
+    this.recentMisses = [];
   }
 
   /** 喂一条样本；返回本条触发的动作，没有则 undefined。 */

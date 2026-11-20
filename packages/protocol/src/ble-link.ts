@@ -83,7 +83,15 @@ export interface BleLinkOptions {
 }
 
 const DEFAULT_BASE_DELAY_MS = 1000;
-const DEFAULT_MAX_DELAY_MS = 30_000;
+/**
+ * 退避上限。
+ *
+ * 2026-11-20 由 30 s 降到 10 s：车辆整天不在蓝牙范围时，这个退避会一直空转——
+ * 实测一天白跑 1219 次建连失败（每次 = 退避 30 s + 建连超时 3 s ≈ 33 s 一轮）。
+ * 它只影响"链路掉了之后多久重试一次"，与解锁（走扫描态）无关，所以缩短不会
+ * 让解锁变慢；闭锁已经有云端 MQTT 兜底，也不必靠高频重连来保证送达。
+ */
+const DEFAULT_MAX_DELAY_MS = 10_000;
 const DEFAULT_REAUTH_INTERVAL_MS = 120_000;
 
 /** 默认计时：直接回落 JS setTimeout（会被 RN 后台暂停，故接入层要覆盖）。 */

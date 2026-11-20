@@ -406,3 +406,54 @@ test('后台动作后链路已断：应恢复扫描', () => {
 test('前台动作后：由自动切换管理，不手动起扫', () => {
   assert.equal(decideScanDuringAction({ enabled: true, foreground: true, hasMac: true, linkHeld: false }), 'stay-stopped');
 });
+
+// ── 漏扫窗口在判距环境切换时清空（2026-11-20 实测修复）──
+//
+// 扫描态绝大多数轮次扫不到车（实测一天 26813 轮里 26687 轮为空）。切到连接态后，
+// 若沿用这批 null，前 10 轮漏扫率仍 >0.4，解锁会被一直挡着直到窗口被稀释——这正是
+// 「标定 -93 却要等到 -61（走到门口）才解锁」、白等约 10 秒的根因。
+
+test('切连接态清空漏扫窗口后，强样本立即解锁（2026-11-20 场景）', () => {
+  const tr = new ProximityTracker(cfg);
+  const t0 = 0;
+  // 扫描态：16 轮全扫不到（人还远）
+  for (let i = 0; i < 16; i += 1) tr.push(t0 + i * 1500, null);
+  // 切换连接态：调用方（startLinkRssiFeed）清空漏扫窗口
+  tr.resetMisses();
+  // 连接态开头就强：应立即解锁，而不是被旧漏扫率挡住
+  const acts: string[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const a = tr.push(t0 + 30000 + i * 1500, -50);
+    if (a) acts.push(a);
+  }
+  assert.deepEqual(acts, ['unlock'], `清空窗口后应解锁，实际: ${acts.join(',')}`);
+});
+
+test('不清空漏扫窗口时，连接态开头的强样本会被旧漏扫率挡住（对照）', () => {
+  const tr = new ProximityTracker(cfg);
+  const t0 = 0;
+  for (let i = 0; i < 16; i += 1) tr.push(t0 + i * 1500, null);
+  // 故意不清空，直接推强样本——验证旧行为确实是问题根源
+  const acts: string[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const a = tr.push(t0 + 30000 + i * 1500, -50);
+    if (a) acts.push(a);
+  }
+  assert.deepEqual(acts, [], `未清空时会被挡，实际: ${acts.join(',')}`);
+});
+
+test('seed 确立状态时也清空漏扫窗口，避免起扫/新环境被旧空窗拖累', () => {
+  const tr = new ProximityTracker(cfg);
+  const t0 = 0;
+  for (let i = 0; i < 16; i += 1) tr.push(t0 + i * 1500, null);
+  // 起扫时用当前信号播种（人已在车边，信号强）
+  tr.seed(-50);
+  const acts: string[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const a = tr.push(t0 + 30000 + i * 1500, -50);
+    if (a) acts.push(a);
+  }
+  // seed 已把 unlocked 设为 true（-50 >= -65），不会再触发 unlock；关键是不报错、
+  // 且后续不受旧漏扫窗口影响。
+  assert.deepEqual(acts, []);
+});
