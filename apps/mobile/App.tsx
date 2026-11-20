@@ -9,6 +9,7 @@ import { AppState, StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { vehicleModelLabel } from '@xpeng/protocol/src/vehicle-model';
+import { COMMANDS } from '@xpeng/protocol/src/commands';
 import { carLink, type LinkState } from './src/core/car';
 import { publishWidgetSnapshot } from './src/core/widget-bridge';
 import { bleLink } from './src/core/ble';
@@ -121,6 +122,14 @@ function Shell() {
       // 决策函数自己会看前后台：前台开开关也不会起扫描（车端连上就不广播）。
       void bleLink.setProximityEnabled(true).catch(() => {});
     }).catch(() => {});
+    // 自动闭锁的云端兜底：BLE 发不出去的锁车改走云端 MQTT（service_type 9 / cmd_type 1）。
+    // 闭锁天然发生在人已走远、蓝牙已断的时刻，没有这条退路就会像 2026-11-20 那样锁不上。
+    bleLink.setCloudLockFallback(async () => {
+      const def = COMMANDS.find((c) => c.id === 'door.lock');
+      if (!def) return false;
+      const r = await carLink.send(def);
+      return r.ok;
+    });
     // 详细日志开关：重启后要恢复，否则用户以为还开着、实际已经回到只记关键事件。
     native.storageGet(StorageKey.proximityVerboseLog).then((saved) => {
       const on = saved === '1';

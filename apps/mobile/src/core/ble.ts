@@ -549,6 +549,20 @@ let vehicleMoving: { moving: boolean; at: number } | null = null;
  */
 let vehicleLocked: { locked: boolean; at: number } | null = null;
 
+/**
+ * 云端锁车通道：蓝牙发不出去时用它兜底。
+ *
+ * 闭锁天然发生在"人已走远、蓝牙已断"的时刻，而 BLE 指令必须有一条活着的链路。
+ * 2026-11-20 实测：车锁着走远，阈值闭锁因闭锁线被标定到 -108（-93-15，蓝牙根本
+ * 到不了）永远触发不了，只剩"失联 9 秒"兜底，可它触发时链路刚断，`action=lock
+ * failed: BLE link is not connected`，车一直没锁。云端 MQTT（service_type 9 /
+ * cmd_type 1）不依赖近距离，正是补这个缺口。
+ *
+ * 由 App 层注入（car₂ 依赖本模块同层组件，反向 import 会成环）：
+ * 先执行 BLE，失败再发云端；返回是否最终成功。
+ */
+let cloudLock: (() => Promise<boolean>) | null = null;
+
 /** 车速字符串 -> 是否在动。解析不出数字时返回 null（按"不知道"处理）。 */
 function parseMoving(speed: unknown): boolean | null {
   const n = typeof speed === 'number' ? speed : Number.parseFloat(String(speed ?? ''));
@@ -652,6 +666,24 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
       void bridge.notifyEvent('已自动锁车', '离开车辆后已自动上锁').catch(() => {});
     }
     return;
+  }
+  // 闭锁天然发生在"人已走远、蓝牙已断"的时刻，BLE 这条路在这种场景下基本必失败
+  // （2026-11-20 实测：`action=lock failed: BLE link is not connected`）。先走云端兜底——
+  // 它不依赖距离，是这种场景下唯一能可靠把车锁上的通道。云端成功就不再空耗 BLE 重试。
+  if (action === 'lock' && cloudLock) {
+    try {
+      const ok = await cloudLock();
+      if (ok) {
+        void bridge.logProximity('action=lock ok (cloud fallback)');
+        void bridge.notifyEvent('已自动锁车', '离开车辆后已通过云端上锁').catch(() => {});
+        return;
+      }
+      void bridge.logProximity('action=lock cloud fallback failed');
+    } catch (error) {
+      void bridge.logProximity(
+        `action=lock cloud fallback error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
   // 闭锁重试前若人又回到附近，放弃：不能把人锁在车边。
   // 不再把"车解锁"当成"人回到车边"：车锁着也可能是人站在车旁正准备解锁，
@@ -844,6 +876,11 @@ proximityEmitter.addListener('xpeng-ble-link-rssi', (value) => {
  * 不启动探针就永远没有连接态读数，判距会停在切换前那一刻。
  */
 async function startLinkRssiFeed(mac: string): Promise<void> {
+  // 扫描态几乎每轮都扫不到车，漏扫窗口里塞满 null（实测一天 26687/26813 轮为空）。
+  // 切连接态后若沿用，前 10 轮漏扫率 >0.4，解锁会被一直挡着直到窗口被稀释——
+  // 2026-11-20 实测：标定 -93 却要等到 -61（走到门口）才解锁，白等约 10 秒。
+  // 实测连接态 100/100 轮零漏扫，旧窗口对新环境毫无参考价值，直接清空。
+  proximityTracker.resetMisses();
   await bridge.startLinkRssiProbe(mac, 1500).catch((error) => {
     void bridge.logProximity(
       `link rssi probe failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -1214,6 +1251,8 @@ export const bleLink = {
   setVehicleLocked(locked: boolean | null) {
     vehicleLocked = locked === null ? null : { locked, at: Date.now() };
   },
+  /** 注入云端锁车兜底（App 层用 carLink.send 实现）。 */
+  setCloudLockFallback(fn: (() => Promise<boolean>) | null) { cloudLock = fn; },
   /**
    * 站位对照采样：一个站位一次调用，自动跑完「持连接」与「断开采广播」两遍。
    *
