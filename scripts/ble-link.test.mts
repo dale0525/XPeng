@@ -61,6 +61,10 @@ test('hold authenticates immediately after connecting and keeps the link open', 
   assert.ok(io.writes.some((w) => w.startsWith('ef0104')), 'must start the handshake right after connecting');
   assert.ok(io.writes.some((w) => w.startsWith('ed1118')), 'must finish the three-step handshake');
   assert.equal(io.closed, 0, 'authenticate must not disconnect the held link');
+  // 必须放手：hold 成功会排一个 reauthInterval（默认 120 s）的定时器，不 release 的话
+  // 它把进程钉在事件循环里整整两分钟，node --test 只能挂在超时上（表现为
+  // "Promise resolution is still pending but the event loop has already resolved"）。
+  await link.release();
 });
 
 test('hold keeps the link open after the operation and reuses it', async () => {
