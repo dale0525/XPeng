@@ -367,11 +367,37 @@ export function decideLinkAttempt(input: {
 
 export const MOVING_STATE_TTL_MS = 30_000;
 
+/**
+ * 驾驶位状态的保质期。比车速长：上下车是低频事件，且这个字段只在状态变化时推送。
+ */
+export const SEAT_STATE_TTL_MS = 60_000;
+
+/**
+ * 解锁门控：车在动、或人正坐在驾驶位上，都不自动解锁。
+ *
+ * 后者治的是等红灯误解锁（2026-11-23 实测）：车停下时车速归零（`v=1 → v=0`），
+ * 同时行车自动落锁让车锁变「已锁」，判距器被车锁校准成"人不在附近"；而人在车内
+ * 信号极强（实测 -50），1.5 秒内就满足进入条件 → 停个红灯车自己解锁了。
+ * 「车速归零 + 驾驶位有人」正是等红灯的特征，而下车走开时驾驶位必然回到 0，
+ * 所以用 driver_seat_state 能把这两人车不分的场景区分开。
+ *
+ * 拿不到驾驶位状态（null）或已过期时**不拦**：最坏回到未加这条门控的行为，
+ * 而不能因为缺数据让真正走近的人解不开锁。
+ */
 export function decideUnlockGate(input: {
   moving: boolean | null;
   /** 这条状态是多久以前收到的（ms）。省略表示未提供，按新鲜处理。 */
   ageMs?: number;
+  /** 驾驶位是否有人（driver_seat_state === 1）。null/省略表示不知道。 */
+  driverSeated?: boolean | null;
+  /** 驾驶位状态的年龄（ms）。 */
+  seatAgeMs?: number;
 }): 'allow' | 'block' {
+  // 人在驾驶位上：无论车速如何都不该自动解锁——他要解锁会自己开门/按键。
+  if (input.driverSeated === true) {
+    const seatFresh = typeof input.seatAgeMs !== 'number' || input.seatAgeMs <= SEAT_STATE_TTL_MS;
+    if (seatFresh) return 'block';
+  }
   if (input.moving !== true) return 'allow';
   // 过期保护：MQTT 只在状态变化时推送（实测静止车辆 60 秒零推送）。若车停下后
   // 没有新的 speed=0，缓存会一直停在"在动"，门控就永久挡住解锁——人站在车边
@@ -390,6 +416,8 @@ export function decideUnlockGate(input: {
  * 过期规则与解锁一致：状态超过 TTL 未更新即视为不知道，放行。
  */
 export function decideLockGate(input: { moving: boolean | null; ageMs?: number }): 'allow' | 'block' {
+  // 刻意不传驾驶位状态：坐在车里也可能需要闭锁（例如人在车内等人、手动落锁），
+  // 而"人在驾驶位就不锁车"没有对应的真实需求。
   return decideUnlockGate(input);
 }
 

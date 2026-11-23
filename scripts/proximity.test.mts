@@ -457,3 +457,38 @@ test('seed 确立状态时也清空漏扫窗口，避免起扫/新环境被旧�
   // 且后续不受旧漏扫窗口影响。
   assert.deepEqual(acts, []);
 });
+
+// ── 驾驶位否决：等红灯误解锁（2026-11-23 实测）──
+//
+// 车停下时车速归零、行车自动落锁让车锁变「已锁」，判距器被校准成"人不在附近"；
+// 人在车内信号极强（实测 -50），1.5 秒内就满足进入条件 → 停个红灯车自己解锁。
+// 「车速归零 + 驾驶位有人」正是等红灯的特征，下车走开时驾驶位必然回到 0。
+
+test('坐在驾驶位时即使车速为 0 也不自动解锁（等红灯场景）', () => {
+  // 2026-11-23 12:06 实测：v=1 → v=0、l=1、s=-50，随后误触发 unlock。
+  assert.equal(decideUnlockGate({ moving: false, driverSeated: true }), 'block');
+});
+
+test('驾驶位无人时车速为 0 正常放行（走回车旁场景）', () => {
+  assert.equal(decideUnlockGate({ moving: false, driverSeated: false }), 'allow');
+});
+
+test('拿不到驾驶位状态时放行，不能因缺数据让人解不开锁', () => {
+  assert.equal(decideUnlockGate({ moving: false, driverSeated: null }), 'allow');
+  assert.equal(decideUnlockGate({ moving: false }), 'allow');
+});
+
+test('驾驶位状态过期后不再拦：人下车不落锁时字段可能长期停在 1', () => {
+  assert.equal(decideUnlockGate({ moving: false, driverSeated: true, seatAgeMs: 120_000 }), 'allow');
+  assert.equal(decideUnlockGate({ moving: false, driverSeated: true, seatAgeMs: 10_000 }), 'block');
+});
+
+test('驾驶位有人时车速在动也拦（两条判据都命中）', () => {
+  assert.equal(decideUnlockGate({ moving: true, driverSeated: true }), 'block');
+});
+
+test('闭锁不受驾驶位影响：人在车内也可能需要闭锁', () => {
+  // decideLockGate 刻意不接收驾驶位状态，只按车速判。
+  assert.equal(decideLockGate({ moving: false }), 'allow');
+  assert.equal(decideLockGate({ moving: true }), 'block');
+});

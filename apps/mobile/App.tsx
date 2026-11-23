@@ -195,6 +195,10 @@ function Shell() {
       // 使解闭锁失败后状态不会被卡错（失败时车锁没变，下一轮校准拉回真值）。
       const lockState = s?.instant?.door?.driver_door_lock_st;
       bleLink.setVehicleLocked(typeof lockState === 'number' ? lockState === 1 : null);
+      // 驾驶位是否有人：用来区分「等红灯」与「走回车旁」。两者车速都归零、车都锁着、
+      // 车内信号都很强，唯一差别就是驾驶位有没有人（2026-11-23 等红灯误解锁实测）。
+      const seatState = s?.instant?.seat?.driver_seat_state;
+      bleLink.setVehicleSeated(typeof seatState === 'number' ? seatState === 1 : null);
       // 车辆状态快照：只在详细日志打开时落盘。
       // 已确认 driver_seat_state=1 表示驾驶位有人（2026-11-19 上下车实测），
       // 保留这些字段便于事后判断"当时车是什么状态"。

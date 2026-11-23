@@ -528,6 +528,28 @@ let proximityEnabled = false;
 let proximityVin: string | undefined;
 let proximityMac: string | undefined;
 let proximityBusy = false;
+/**
+ * 动作忙锁的最近一次置位时刻。
+ *
+ * `proximityBusy` 挡住连接态 RSSI 的入口（见 xpeng-ble-link-rssi 监听器），一旦
+ * 漏复位，判距就彻底停摆：2026-11-23 实测 12:06 之后 sample 一条不写、而 probe 读数
+ * 照常刷到 12:44（1511 条），功能静默失效 9 小时。根因是 runProximityActionWithRetry
+ * 里两条早退（!vin / !context）直接 return，绕过了复位。
+ *
+ * 两条早退已补复位；这里再加一道超时兜底——即便将来又漏一处，最多卡 30 秒，
+ * 不会整天停摆。取 30 秒：正常一次动作（建连 1.2~1.7 s + 三次握手 + 回执）远小于它。
+ */
+const PROXIMITY_BUSY_TTL_MS = 30_000;
+let proximityBusyAt = 0;
+
+/** 忙锁是否仍然有效；过期就当没锁，并顺手复位。 */
+function proximityBusyActive(): boolean {
+  if (!proximityBusy) return false;
+  if (Date.now() - proximityBusyAt <= PROXIMITY_BUSY_TTL_MS) return true;
+  proximityBusy = false;
+  void bridge.logProximity('proximity busy lock expired after 30s, reset');
+  return false;
+}
 /** 原生扫描是否真的在跑；与「开关是否打开」是两件事，不能互相代替。 */
 let scanRunning = false;
 /** App 是否在前台；前台持连接、后台只扫描，两者互斥（车端连上就不广播）。 */
@@ -548,6 +570,18 @@ let vehicleMoving: { moving: boolean; at: number } | null = null;
  * 不可靠（失败时状态会停错）。初值 null = 不知道，校准器会维持原值不覆盖。
  */
 let vehicleLocked: { locked: boolean; at: number } | null = null;
+
+/**
+ * 驾驶位是否有人（`instant.seat.driver_seat_state === 1`）。
+ *
+ * 用来区分「等红灯」与「走回车旁」：两者在车速、车锁、信号强度上完全一致
+ * （车速都归零、车都锁着、车内信号都很强），唯一差别就是驾驶位有没有人。
+ * 2026-11-19 上下车实测确认该字段双向可靠：人不在 0、坐上 1、下车后刷新回 0。
+ *
+ * 与车速同样带保质期：它只在状态变化时推送，人下车不落锁不熄火时可能长期停在 1，
+ * 过期即视为不知道，退回不拦（见 decideUnlockGate）。
+ */
+let vehicleSeated: { seated: boolean; at: number } | null = null;
 
 /**
  * 云端锁车通道：蓝牙发不出去时用它兜底。
@@ -635,9 +669,21 @@ async function isSuppressed(): Promise<'wifi' | 'place' | 'unknown' | null> {
  */
 async function runProximityActionWithRetry(action: ProximityAction, attempt = 1): Promise<void> {
   const vin = proximityVin;
-  if (!vin) return;
+  // 这两条早退必须自己复位忙锁：调用方 runProximityAction 已把 proximityBusy 置 true，
+  // 直接 return 会让它永远停在 true，连接态 RSSI 全被丢弃，判距静默停摆
+  // （2026-11-23 实测停了 9 小时）。重试链的上一环也会在 finally 里复位，
+  // 但早退发生在 try 之外，等不到那里。
+  if (!vin) {
+    proximityBusy = false;
+    void bridge.logProximity(`action=${action} abandoned: no target vin`);
+    return;
+  }
   const context = contexts.get(activeAccount(), vin);
-  if (!context) return;
+  if (!context) {
+    proximityBusy = false;
+    void bridge.logProximity(`action=${action} abandoned: no vehicle context`);
+    return;
+  }
   const mac = proximityMac;
   if (scanRunning) {
     scanRunning = false;
@@ -699,8 +745,9 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
   void bridge.logProximity(`action=${action} retry #${attempt} in ${decision.delayMs} ms`);
   await new Promise<void>((resolve) => setTimeout(resolve, decision.delayMs));
   // 等待期间开关可能被关掉，或被新的动作占用。
-  if (!proximityEnabled || proximityBusy) return;
+  if (!proximityEnabled || proximityBusyActive()) return;
   proximityBusy = true;
+  proximityBusyAt = Date.now();
   try {
     await runProximityActionWithRetry(action, attempt + 1);
   } finally {
@@ -709,12 +756,13 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
 }
 
 async function runProximityAction(action: ProximityAction): Promise<void> {
-  if (proximityBusy) return;
+  if (proximityBusyActive()) return;
   const vin = proximityVin;
   if (!vin) return;
   const context = contexts.get(activeAccount(), vin);
   if (!context) return;
   proximityBusy = true;
+  proximityBusyAt = Date.now();
   // release 包下 JS 的 console.warn 不进 logcat，触发链只能靠原生打点观察。
   void bridge.logProximity(`action=${action} start`);
   const mac = proximityMac;
@@ -732,11 +780,22 @@ async function runProximityAction(action: ProximityAction): Promise<void> {
   // 而人根本没走——这时锁车没有意义，还可能打断正在进行的其他车控。
   const moving = vehicleMoving;
   const movingAge = moving ? Date.now() - moving.at : undefined;
+  const seated = vehicleSeated;
+  const seatAge = seated ? Date.now() - seated.at : undefined;
   const gate = action === 'unlock'
-    ? decideUnlockGate({ moving: moving?.moving ?? null, ageMs: movingAge })
+    ? decideUnlockGate({
+        moving: moving?.moving ?? null,
+        ageMs: movingAge,
+        driverSeated: seated?.seated ?? null,
+        seatAgeMs: seatAge,
+      })
     : decideLockGate({ moving: moving?.moving ?? null, ageMs: movingAge });
   if (gate === 'block') {
-    void bridge.logProximity(`action=${action} blocked: vehicle moving`);
+    // 两种否决要分开记：行驶中与「人坐在驾驶位」是不同原因，事后排查不能混在一起。
+    const why = seated?.seated === true && moving?.moving !== true
+      ? 'driver seated'
+      : 'vehicle moving';
+    void bridge.logProximity(`action=${action} blocked: ${why}`);
     proximityBusy = false;
     return;
   }
@@ -767,7 +826,7 @@ proximityEmitter.addListener('xpeng-ble-proximity-rssi', (value) => {
   // 而门槛本身需要额外标定、还会让"该精测时没切"。这是自用项目，接受在
   // 有信号/无信号交界处反复建连——建链 1.2~1.7 s，且 ble-link 自带退避，
   // 不会疯狂重试。真正的耗电大头（人在家里且车停得近）已由抑制检查挡住。
-  if (typeof event.rssi === 'number' && !link.connected && !proximityBusy) {
+  if (typeof event.rssi === 'number' && !link.connected && !proximityBusyActive()) {
     void enterLinkMode();
     return;
   }
@@ -863,7 +922,8 @@ proximityEmitter.addListener('xpeng-ble-link-rssi', (value) => {
   const event = value as unknown as { rssi: number | null };
   if (!proximityEnabled || !proximityMac) return;
   if (calibrating) return;
-  if (proximityBusy) return;
+  // 用带超时的判断：忙锁若漏复位，这里会永久丢样本、判距静默停摆。
+  if (proximityBusyActive()) return;
   // 只在连接态下采纳：链路已断时这条流可能还有残留回调。
   if (!link.connected) return;
   feedProximity(typeof event.rssi === 'number' ? event.rssi : null);
@@ -1253,6 +1313,10 @@ export const bleLink = {
   },
   /** 注入云端锁车兜底（App 层用 carLink.send 实现）。 */
   setCloudLockFallback(fn: (() => Promise<boolean>) | null) { cloudLock = fn; },
+  /** 更新驾驶位是否有人；传 null 表示不知道。 */
+  setVehicleSeated(seated: boolean | null) {
+    vehicleSeated = seated === null ? null : { seated, at: Date.now() };
+  },
   /**
    * 站位对照采样：一个站位一次调用，自动跑完「持连接」与「断开采广播」两遍。
    *
