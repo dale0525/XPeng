@@ -492,3 +492,67 @@ test('闭锁不受驾驶位影响：人在车内也可能需要闭锁', () => {
   assert.equal(decideLockGate({ moving: false }), 'allow');
   assert.equal(decideLockGate({ moving: true }), 'block');
 });
+
+// ── 车锁状态的保质期必须与门控对称（2026-11-24 连解 4 次 / 连锁 7 次）──
+//
+// 门控（车速 30 s / 座椅 60 s）过期即放行，而 calibrate 原先永不过期：
+// 解锁成功后车端推 lock=0，但后台收不到、又没主动读，缓存停在"已锁"，
+// 每轮 calibrate 把判距器压回未解锁 → 4.5 s 后再发一次 unlock。
+// 同一天实测 22 秒内连解 4 次；离车后连续 7 次云端闭锁是同一机制。
+
+test('过期的车锁状态不得推翻动作结果：calibrate 传 null 时判距器维持原值', () => {
+  const tr = new ProximityTracker(cfg);
+  // 判定进程：先由真实状态确立"未解锁"（车锁着）
+  tr.calibrate(true);
+  assert.equal(tr.isUnlocked, false);
+  // 动作成功、本地状态应变为"已解锁"，但没有任何新的锁状态可读
+  tr.seed(-50); // 强信号代表刚解锁
+  assert.equal(tr.isUnlocked, true);
+  // 过期后调用方传 null（不知道）：必须维持"已解锁"，不能退回未解锁
+  tr.calibrate(null);
+  assert.equal(tr.isUnlocked, true, '拿不到状态时应维持原值，否则会重复下发解锁');
+});
+
+test('新鲜的车锁状态仍然有效：锁着就校准为未解锁', () => {
+  const tr = new ProximityTracker(cfg);
+  tr.calibrate(true);
+  assert.equal(tr.isUnlocked, false);
+});
+
+test('解锁成功后按旧缓存反复触发的问题：同一强信号序列只应产生一次解锁', () => {
+  // 模拟"解锁成功但车锁缓存停在已锁"：若每轮都用过期 true 校准，
+  // 就会每 4.5 s 复发一次。用真实行为（动作后缓存失效、传 null）应只有一次。
+  const t = 0;
+  const tr = new ProximityTracker(cfg);
+  const actions: string[] = [];
+  for (let i = 0; i < 12; i += 1) {
+    // 动作成功后的一轮：不校准（null = 不知道）
+    tr.calibrate(null);
+    const a = tr.push(t + i * 1500, -50);
+    if (a) actions.push(a);
+    // 中间若干轮同样不校准
+    for (let k = 0; k < 2; k += 1) {
+      tr.calibrate(null);
+      const b = tr.push(t + i * 1500 + (k + 1) * 500, -50);
+      if (b) actions.push(b);
+    }
+  }
+  assert.deepEqual(actions, ['unlock'], `强信号持续期间只该解锁一次，实际: ${actions.join(',')}`);
+});
+
+// ── 退款扫描时必须放掉常驻链路（2026-11-24 空转 2356 次、判距失明）──
+//
+// 掉线只"退回扫描"而不 release，BleLink 仍 held=true，继续每 10 s 退避重连；
+// 扫描与建连争同一个控制器，重连必然吃 133。实测这个僵尸状态持续 8 小时 40 分，
+// 最后退避重连抢在扫描回调之前建连，导致判距彻底失明（车端一连上就停广播）。
+
+test('判距开启时，退回扫描态必须真正释放链路而不是留着空转重连', () => {
+  // 语义判据：扫描态与常驻链路不能并存——车端在已有连接时不广播，
+  // 扫描拿到的全是 null；而退避重连又会与扫描争控制器（133）。
+  // 因此"要扫描"就意味着"不能 hold"。
+  assert.equal(decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: false }), 'resume');
+});
+
+test('已持链路时不切回扫描：动作后继续用连接态判距', () => {
+  assert.equal(decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: true }), 'stay-stopped');
+});

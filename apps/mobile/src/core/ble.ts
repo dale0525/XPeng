@@ -190,6 +190,14 @@ const link = new BleLink(new NativeBleTransport(), authMaterialFor, {
   onStateChange: (state) => {
     if (state.kind === 'connected') {
       syncKeepAlive();
+      // 任何途径建连成功后都必须停扫描并开连接态探针。
+      //
+      // 原来只有 enterLinkMode（扫描扫到车）会做这两件事，其余路径——前台 holdLink、
+      // 手动车控建连、**以及 BleLink 自己的后台退避重连**——都会留下「连着但无读数」：
+      // 车端一连上就停广播，扫描只能收到 null，而 link.connected 又挡住了 enterLinkMode，
+      // 判距器于是彻底失明。2026-11-24 实测：21:21:57 退避重连抢先建连，之后 23 秒
+      // 用户站在车旁 0 个有效 RSSI，只能手动解锁。
+      void onLinkEstablished(state.mac);
     } else if (state.kind === 'backoff') {
       // 首次尝试就失败说明「从来没连上」，与「连着又掉了」是两回事：人离车几十米时
       // 每次都落在前一种，写「已断开」会让用户以为刚才还连着。
@@ -220,9 +228,22 @@ const link = new BleLink(new NativeBleTransport(), authMaterialFor, {
       disconnectHandled = true;
       // 掉线是"为什么突然不判距了"的第一嫌疑，必须留痕。
       void bridge.logProximity(`link dropped (state=${state.kind}), falling back to scan`);
+      linkFeedMac = null;
       void bridge.stopLinkRssiProbe().catch(() => {});
       if (proximityEnabled && !scanRunning && proximityMac) {
         void startScanUnlessSuppressed().catch(() => {});
+      }
+      // 退回扫描态必须把常驻链路真正放掉。
+      //
+      // 原先只是"退回去扫描"，BleLink 仍 held=true，继续按退避每 10 s 重连一次；
+      // 扫描与建连争同一个控制器，重连还必然吃 133。2026-11-24 实测：12:41 离车后
+      // 这个僵尸状态持续 8 小时 40 分、空转 2356 次建连超时，最后退避重连抢在扫描
+      // 之前连上，判距反而失明（见 onLinkEstablished 的注释）。
+      // 释放是安全的：hold() 会在下一次需要时重新建立。
+      if (proximityEnabled) {
+        disconnectHandled = true;
+        void link.release().catch(() => {});
+        void bridge.logProximity('released held link, staying on scan');
       }
     }
     publishState();
@@ -597,6 +618,40 @@ let vehicleSeated: { seated: boolean; at: number } | null = null;
  */
 let cloudLock: (() => Promise<boolean>) | null = null;
 
+/**
+ * 周期拉一次车辆状态的通道（App 层用 carLink.readStatus 实现）。
+ *
+ * 为什么必须周期拉：车速 / 驾驶位 / 车锁这三个字段**只在状态变化时推送**
+ * （实测静止车辆 60 秒零推送）。而解闭锁的两个否决门控都靠保质期判断新鲜度，
+ * 停在路口等红灯恰恰是「状态不再变化」的典型——于是门控会在 60 秒后自动失效。
+ * 2026-11-24 实测：12:00:09 起连续 21 次 `blocked: driver seated` 拦了 90 秒，
+ * 12:01:44 座椅状态过期，随即在车内自动解锁。不刷新就等于「任何超过 60 秒的红灯
+ * 都会被解锁」，这不是偶发，是设计上的必然。
+ *
+ * 同理，解锁/闭锁成功后本地缓存的车锁状态会停在旧值：下一轮 calibrate 又把它
+ * 校准回「未解锁/已解锁」，于是动作被反复重发（同一天实测连解 4 次、连锁 7 次）。
+ * 周期刷新是这条的根治手段，TTL 只是刷新失败时的兜底。
+ */
+let refreshVehicleState: (() => Promise<void>) | null = null;
+
+/** 上一次成功续期车辆状态的时刻。 */
+let vehicleStateRefreshedAt = 0;
+
+/**
+ * 车辆状态的续期周期。必须明显小于最短的门控保质期（座椅 60 s），
+ * 取 30 s 留出一次读状态的往返（实测 3–12 s）与一次心跳错过的余量。
+ */
+const VEHICLE_STATE_REFRESH_MS = 30_000;
+
+/**
+ * 车锁状态的保质期。
+ *
+ * 比续期周期长一档：正常情况每 30 s 就会被刷新，这里留到 90 s 才判过期，
+ * 容得下两次刷新失败（例如后台网络短暂断掉），又不会让一份几分钟前的锁状态
+ * 一直推翻刚成功的解闭锁动作。过期即视为"不知道"，判距器维持原值。
+ */
+const LOCK_STATE_TTL_MS = 90_000;
+
 /** 车速字符串 -> 是否在动。解析不出数字时返回 null（按"不知道"处理）。 */
 function parseMoving(speed: unknown): boolean | null {
   const n = typeof speed === 'number' ? speed : Number.parseFloat(String(speed ?? ''));
@@ -694,6 +749,14 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
   try {
     await executeV2({ ...context, commandCode: action === 'unlock' ? 1 : 2 });
     void bridge.logProximity(`action=${action} ok${attempt > 1 ? ` (retry ${attempt - 1})` : ''}`);
+    // 动作成功后立刻让缓存里的车锁状态过期，下一轮判距马上补一次真实状态。
+    //
+    // 不这样做，缓存会停在动作前的那一刻：解锁成功后仍记着"已锁"，于是 calibrate
+    // 每轮把判距器压回未解锁，4.5 s 后又满足进入条件、再发一次解锁。2026-11-24 实测
+    // 22 秒内连解 4 次；同一天离车后连续 7 次云端闭锁也是同一机制（缓存停在"未锁"，
+    // 每轮都判成该锁）。单纯给缓存加保质期治不了这个——它在保质期内仍然有效，
+    // 而这 4.5 s 的重复周期远短于任何合理保质期。
+    vehicleStateRefreshedAt = 0;
   } catch (error) {
     failed = true;
     message = error instanceof Error ? error.message : String(error);
@@ -722,6 +785,8 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
       if (ok) {
         void bridge.logProximity('action=lock ok (cloud fallback)');
         void bridge.notifyEvent('已自动锁车', '离开车辆后已通过云端上锁').catch(() => {});
+        // 同上：云端锁成功也要立刻让本地车锁缓存失效，否则会连续重复下发。
+        vehicleStateRefreshedAt = 0;
         return;
       }
       void bridge.logProximity('action=lock cloud fallback failed');
@@ -892,12 +957,49 @@ async function enterLinkMode(): Promise<void> {
  */
 let calibrating = false;
 
+/**
+ * 车辆状态快过期时补拉一次。
+ *
+ * 门控的保质期是拿"最后一次收到状态"的时刻算的，而车停稳后不再推送，
+ * 所以不主动续期就必然过期（见 refreshVehicleState 注入处的注释）。
+ */
+async function refreshVehicleStateIfStale(): Promise<void> {
+  if (!refreshVehicleState) return;
+  if (!proximityEnabled) return;
+  if (Date.now() - vehicleStateRefreshedAt < VEHICLE_STATE_REFRESH_MS) return;
+  // 先记时刻再拉：读状态本身要 3–12 s，期间每 1.5 s 一轮判距都会经过这里，
+  // 不先标记就会并发发出好几次同样的查询。
+  vehicleStateRefreshedAt = Date.now();
+  try {
+    await refreshVehicleState();
+  } catch (error) {
+    void bridge.logProximity(
+      `vehicle state refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 function feedProximity(rssi: number | null): void {
   if (calibrating) return;
+  // 每轮判距前检查状态新鲜度，快过期就补一次真实状态。
+  //
+  // 放在这里而不是定时器里：判距本身就是 1.5 s 一跳的心跳，而且只有判距在跑时
+  // 才需要这份状态。独立定时器会在人不在车旁时也持续唤醒网络，纯属浪费。
+  void refreshVehicleStateIfStale();
   // 每轮先用车辆真实锁状态校准「是否解锁」，再判距。
   // 这样解闭锁失败后状态不会卡死：动作失败时车锁没变，下一轮校准会把状态拉回真值，
   // 于是还能重新触发（2026-11-12 真车实测过闭锁失败后"只解锁、从不闭锁"）。
-  proximityTracker.calibrate(vehicleLocked ? vehicleLocked.locked : null);
+  // 过期的车锁状态不能拿来校准：它与门控的过期语义必须对称。
+  //
+  // 门控（车速 30 s / 座椅 60 s）过期即放行，而这里原先**永不过期**：
+  // 解锁成功后车端会推 driver_door_lock_st=0，但后台收不到、我们又没主动读，
+  // 缓存就一直停在"已锁"，于是每轮 calibrate 把判距器压回未解锁 → 4.5 s 后再发一次
+  // unlock。2026-11-24 实测 22 秒内连解 4 次，直到用户切回前台刷新状态才停；
+  // 同一天离车后连续 7 次云端闭锁也是同一机制（缓存停在"未锁"）。
+  // 现在周期刷新是主手段，这里过期只是刷新失败时的兜底：宁可回到"不知道"、
+  // 让判距器维持原值，也不能用一份过期状态反复推翻刚做成功的动作。
+  const lockFresh = vehicleLocked && Date.now() - vehicleLocked.at <= LOCK_STATE_TTL_MS;
+  proximityTracker.calibrate(lockFresh ? vehicleLocked!.locked : null);
   // 每轮明细只在开关打开时记：这是排查"为什么没触发/为什么触发了"唯一的一手数据。
   //
   // 紧凑单行（约 40 字节）：开关打开时它就是日志的全部内容，一天 57600 轮，
@@ -930,12 +1032,47 @@ proximityEmitter.addListener('xpeng-ble-link-rssi', (value) => {
 });
 
 /**
+ * 探针当前为哪台车在跑；null 表示没在跑。
+ *
+ * 用来让「启动连接态探针」这件事幂等：建连有多个入口（扫描切连接、前台 holdLink、
+ * 手动车控、退避重连），它们可能在极短时间内先后都调到这里。重复 start 会把探针
+ * 重启一次、日志刷两条，而这些路径不需要各自维护自己的生命周期。
+ */
+let linkFeedMac: string | null = null;
+
+/**
+ * 任一路径建连成功后的统一收敛：停扫描、启动连接态探针。
+ *
+ * 为什么必须收在一处：车端在已有 GATT 连接时**停止广播**（2026-11-12 实测），
+ * 所以「连着却还在扫描」拿到的全是 null；而扫描回调又因 `link.connected` 为真
+ * 不会再去走 enterLinkMode。两者叠加就是判距彻底失明——2026-11-24 实测：
+ * BleLink 的退避重连抢在扫描回调之前建连，之后用户站在车旁 23 秒，
+ * 判距器收到 0 个有效 RSSI，最终只能手动解锁。
+ */
+async function onLinkEstablished(mac: string): Promise<void> {
+  const target = (mac ?? '').toUpperCase();
+  if (!proximityEnabled || !proximityMac) return;
+  // 标定期间探针归标定独占（间隔 500 ms 且样本直接进标定器），不能在这里重启它。
+  if (calibrating) return;
+  if (scanRunning) {
+    scanRunning = false;
+    await bridge.stopProximityScan('link established').catch(() => {});
+    void bridge.logProximity('scan stopped: link established');
+  }
+  if (linkFeedMac === target) return;
+  linkFeedMac = target;
+  void bridge.logProximity(`starting link rssi feed for ${target}`);
+  await startLinkRssiFeed(target).catch(() => {});
+}
+
+/**
  * 进入连接态后必须启动 RSSI 读取探针。
  *
  * 连接态没有"广播包"这个被动来源，读数只能主动 `readRemoteRssi` 去要。
  * 不启动探针就永远没有连接态读数，判距会停在切换前那一刻。
  */
 async function startLinkRssiFeed(mac: string): Promise<void> {
+  linkFeedMac = mac.toUpperCase();
   // 扫描态几乎每轮都扫不到车，漏扫窗口里塞满 null（实测一天 26687/26813 轮为空）。
   // 切连接态后若沿用，前 10 轮漏扫率 >0.4，解锁会被一直挡着直到窗口被稀释——
   // 2026-11-20 实测：标定 -93 却要等到 -61（走到门口）才解锁，白等约 10 秒。
@@ -1317,6 +1454,8 @@ export const bleLink = {
   setVehicleSeated(seated: boolean | null) {
     vehicleSeated = seated === null ? null : { seated, at: Date.now() };
   },
+  /** 注入周期拉车辆状态的实现（App 层用 carLink.readStatus）。 */
+  setVehicleStateRefresher(fn: (() => Promise<void>) | null) { refreshVehicleState = fn; },
   /**
    * 站位对照采样：一个站位一次调用，自动跑完「持连接」与「断开采广播」两遍。
    *

@@ -4,7 +4,7 @@
  * 没有引 react-navigation：只有「登录 / 三个平级标签」这一层结构，用 useState
  * 切换即可，省掉一整套导航容器。快捷指令配置存在原生 SharedPreferences 里。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, StatusBar, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { UserProfile, Vehicle, VehicleStatus } from '@xpeng/protocol/src/vehicles';
@@ -83,6 +83,10 @@ function Shell() {
   const [theme, setTheme, scheme] = useThemeMode();
   const [proximityEnabled, setProximityEnabled] = useState(false);
   const [verboseLog, setVerboseLog] = useState(false);
+  // subscribeStatus 的回调建在只依赖 accessToken 的 effect 里，闭包里读 state 会永远
+  // 停在初始值 false（实测 11-24 全天 0 条 vehicle-state 就是这个原因，虽然后来
+  // bleLink.setVerboseLog 生效了、sample 有写，但这条诊断行一直是哑的）。
+  const verboseLogRef = useRef(false);
   const [calibrationVisible, setCalibrationVisible] = useState(false);
   const [suppression, setSuppression] = useState<ProximitySuppression>(DEFAULT_SUPPRESSION);
   const [suppressionVisible, setSuppressionVisible] = useState(false);
@@ -130,9 +134,17 @@ function Shell() {
       const r = await carLink.send(def);
       return r.ok;
     });
+    // 车辆状态续期：车速/驾驶位/车锁只在变化时推送，车停稳后就不再推。
+    // 不主动补拉，解闭锁的两个否决门控会在保质期后自动失效——2026-11-24 等红灯
+    // 90 秒后座椅状态过期、在车内自动解锁 4 次，就是这条缺失的直接后果；
+    // 同一天离车后连续 7 次云端闭锁、22 秒内连解 4 次，也是车锁缓存没有续期。
+    bleLink.setVehicleStateRefresher(async () => {
+      await carLink.readStatus().catch(() => {});
+    });
     // 详细日志开关：重启后要恢复，否则用户以为还开着、实际已经回到只记关键事件。
     native.storageGet(StorageKey.proximityVerboseLog).then((saved) => {
       const on = saved === '1';
+      verboseLogRef.current = on;
       setVerboseLog(on);
       bleLink.setVerboseLog(on);
     }).catch(() => {});
@@ -202,7 +214,7 @@ function Shell() {
       // 车辆状态快照：只在详细日志打开时落盘。
       // 已确认 driver_seat_state=1 表示驾驶位有人（2026-11-19 上下车实测），
       // 保留这些字段便于事后判断"当时车是什么状态"。
-      if (verboseLog) {
+      if (verboseLogRef.current) {
         const seat = s?.instant?.seat;
         const power = s?.instant?.power;
         void bleLink.logUserAction(
