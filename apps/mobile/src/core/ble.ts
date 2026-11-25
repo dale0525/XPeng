@@ -1319,7 +1319,13 @@ async function setForeground(foreground: boolean): Promise<void> {
         return;
       }
       syncKeepAlive();
-      if (holdTarget && !link.connected) await holdLink(holdTarget.mac);
+      // 前台不再无条件重持链路。判距开着时"连还是扫"由两态机决定：没有连接就应
+      // 去扫描，扫到车再由 enterLinkMode 切连接态。在这里抢先 holdLink 会：
+      // ① 与扫描争控制器（必然吃 133 超时）；② 建连失败后 BleLink 进入退避重连，
+      // 而前台又不扫描，两边都推进不了。2026-11-25 实测 13:27 就是这条路把链路
+      // 重新 held 住、随后空转 9.5 小时。
+      // 只有"本来就没开判距"时才需要前台持连接给车控用（见下方非判距分支）。
+      if (!scanRunning && proximityMac) await startScanUnlessSuppressed().catch(() => {});
       return;
     }
     if (scanRunning) {
@@ -1331,11 +1337,23 @@ async function setForeground(foreground: boolean): Promise<void> {
     if (holdTarget) await holdLink(holdTarget.mac);
     return;
   }
-  // 退后台：开着判距时保留已有连接（否则刚建立的连接态会被立刻断掉），
+  // 退后台：开着判距时保留**已建立**的连接（否则刚建立的连接态会被立刻断掉），
   // 只确保抑制复查定时器在跑——连接态同样要受抑制约束。
+  //
+  // 但"链路正在退避重连"（held 且未连上）必须放掉：那是 BleLink 内部的无限重试，
+  // 后台没人会来连，它只会与扫描争控制器、每 13 s 打一条超时。
+  // 2026-11-25 实测：13:27 回前台时 holdLink 重持链路、13:27:37 又退后台，链路始终
+  // 没连上，于是空转 9.5 小时（2537 次 `BLE operation timeout`），直到 22:43 扫描
+  // 抢到连接才结束。已有连接的路径不受影响。
   if (proximityEnabled) {
     await bridge.scheduleSuppressionTimer(SUPPRESSION_RECHECK_MS).catch(() => {});
-    if (!link.connected && !scanRunning) await setProximityEnabled(true);
+    if (!link.connected) {
+      // 后台只该扫描。释放会把 held 清掉、停掉内部重试定时器。
+      await link.release().catch(() => {});
+      linkFeedMac = null;
+      await bridge.stopLinkRssiProbe().catch(() => {});
+      if (!scanRunning) await setProximityEnabled(true);
+    }
     return;
   }
   await link.release().catch(() => {});

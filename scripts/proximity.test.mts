@@ -556,3 +556,26 @@ test('判距开启时，退回扫描态必须真正释放链路而不是留着�
 test('已持链路时不切回扫描：动作后继续用连接态判距', () => {
   assert.equal(decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: true }), 'stay-stopped');
 });
+
+// ── 后台不得让链路停留在「退避重连中」（2026-11-25 空转 9.5 小时）──
+//
+// 13:27 回前台时 holdLink 重持链路、13:27:37 又退后台，链路始终没连上，
+// BleLink 内部按退避无限重试，与扫描争控制器，每 13 s 打一条 BLE operation
+// timeout，持续到 22:43 扫描抢到连接才结束（2537 次）。
+// 判据：后台只该扫描；没有"已建立"的连接就必须释放，不能留 held。
+
+test('后台且链路未连上：必须视为恢复扫描，不能继续持链路', () => {
+  // linkHeld 语义是"链路已建立"。退避重连中并不等于 held 可用。
+  assert.equal(
+    decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: false }),
+    'resume',
+    '未连上的链路不能在后台占着不放',
+  );
+});
+
+test('后台且链路已建立：保留连接态继续判距，不切回扫描', () => {
+  assert.equal(
+    decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: true }),
+    'stay-stopped',
+  );
+});

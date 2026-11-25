@@ -278,6 +278,11 @@ function Shell() {
    * 打开后每轮 RSSI 与状态切换都会写进日志文件（外部私有目录，adb pull 可取）。
    */
   const changeVerboseLog = (enabled: boolean) => {
+    // ref 必须一起改：subscribeStatus 的回调建在只依赖 accessToken 的 effect 里，
+    // 它读的是 ref 而不是 state。漏掉这一行，用户在设置页打开开关后 ref 仍为 false，
+    // `vehicle-state` 诊断行一条都不会写（2026-11-21 到 11-25 全程如此，而同期
+    // `ble: s=` 有 26205 条，证明开关本身是生效的）。
+    verboseLogRef.current = enabled;
     setVerboseLog(enabled);
     bleLink.setVerboseLog(enabled);
     native.storageSet(StorageKey.proximityVerboseLog, enabled ? '1' : '0').catch(() => {});
