@@ -879,7 +879,7 @@ async function runProximityAction(action: ProximityAction): Promise<void> {
 
 const proximityEmitter = new NativeEventEmitter(NativeModules.XpengBle);
 proximityEmitter.addListener('xpeng-ble-proximity-rssi', (value) => {
-  const event = value as unknown as { mac: string; rssi: number | null; round: number };
+  const event = value as unknown as { mac: string; rssi: number | null; round: number; hits?: number };
   // 标定期间不做判距（采样走连接态，见 startCalibration）。
   if (calibrating) return;
   if (!proximityEnabled || !proximityMac) return;
@@ -895,7 +895,7 @@ proximityEmitter.addListener('xpeng-ble-proximity-rssi', (value) => {
     void enterLinkMode();
     return;
   }
-  feedProximity(event.rssi);
+  feedProximity(event.rssi, event.hits);
 });
 
 /** 上一次建连失败的时刻；用于 5 秒退避，避免"扫到就建连"反复撞墙。 */
@@ -979,7 +979,7 @@ async function refreshVehicleStateIfStale(): Promise<void> {
   }
 }
 
-function feedProximity(rssi: number | null): void {
+function feedProximity(rssi: number | null, scanHits?: number): void {
   if (calibrating) return;
   // 每轮判距前检查状态新鲜度，快过期就补一次真实状态。
   //
@@ -1006,10 +1006,15 @@ function feedProximity(rssi: number | null): void {
   // 每多一个字节一天就多 56 KB。字段用单字母 + 冒号，? 表示不知道。
   //   s=信号  u=判距器是否已解锁  m=当前态(1 连接/0 扫描)  l=车锁  v=车速在动
   if (shouldLogSample({ verbose: verboseLog })) {
+    // h=本轮窗口收到的原始广播条数（仅扫描态有；连接态传 undefined 记 ?）：
+    //   h=0 且 s=? -> 系统整轮没把广播递给我们（息屏挂起扫描就是这种形态）；
+    //   h>=1 但 s=? -> 递送了，只是不是这台车。
+    // 屏幕亮/灭由原生单独记一行 `screen ON/OFF`，拿它与 h=0 的时段对照即可定位挂起。
     void bridge.logProximity(
       `s=${rssi ?? '?'} u=${proximityTracker.isUnlocked ? 1 : 0} m=${link.connected ? 1 : 0} ` +
       `l=${vehicleLocked ? (vehicleLocked.locked ? 1 : 0) : '?'} ` +
-      `v=${vehicleMoving ? (vehicleMoving.moving ? 1 : 0) : '?'}`,
+      `v=${vehicleMoving ? (vehicleMoving.moving ? 1 : 0) : '?'} ` +
+      `h=${typeof scanHits === 'number' ? scanHits : '?'}`,
     );
   }
   const action = proximityTracker.push(Date.now(), rssi);

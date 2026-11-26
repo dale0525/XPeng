@@ -4,7 +4,10 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -313,10 +316,13 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     private var proximityRssi = 0
     private var proximityRounds = 0
     private var proximityAllResults = 0
+    /** 上一轮窗口内收到的原始广播数（区分"扫到但轮内结果数为 0"与"整轮没递送"）。 */
+    private var proximityWindowResults = 0
     private val proximityCallback = object : ScanCallback() {
         override fun onScanResult(type: Int, result: ScanResult) { handler.post {
             if (proximityMac == null) return@post
             proximityAllResults += 1
+            proximityWindowResults += 1
             if (!result.device.address.equals(proximityMac, ignoreCase = true)) return@post
             // 同一轮里保留最强的一次：车在移动/遮挡变化时 RSSI 抖动大，取最强比取最后一条稳。
             if (result.rssi > proximityRssi) proximityRssi = result.rssi
@@ -714,10 +720,12 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         if (!ready(p)) return@post
         if (adapter?.bluetoothLeScanner == null) { p.reject("E_UNSUPPORTED", "BLE scanning unavailable"); return@post }
         stopProximityLoop("restart")
+        registerScreenReceiver()
         proximityMac = mac.uppercase()
         proximityRssi = Int.MIN_VALUE
         proximityRounds = 0
         proximityAllResults = 0
+        proximityWindowResults = 0
         scanner2 = adapter?.bluetoothLeScanner
         try {
             scanner2!!.startScan(
@@ -791,6 +799,42 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     } }
 
     /**
+     * 屏幕开关对判距的影响，直接写进日志。
+     *
+     * 2026-11-26 的教训：手机息屏后系统会把长跑扫描挂起（见 scheduleProximityRefresh），
+     * 而日志里只能看到 `s=?`，分不清是"车不在、真没信号"还是"系统没把广播递给我们"。
+     * 靠事后 `dumpsys bluetooth_manager` + `usagestats` 反推太绕，且用户未必随时能连
+     * 电脑。这里直接按系统屏幕广播记一行，把"挂起发生在什么时候""恢复在什么时候"钉在
+     * 同一份日志里。
+     */
+    private var screenReceiver: BroadcastReceiver? = null
+    private fun registerScreenReceiver() {
+        if (screenReceiver != null) return
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val on = when (intent?.action) {
+                    Intent.ACTION_SCREEN_ON -> true
+                    Intent.ACTION_SCREEN_OFF -> false
+                    else -> return
+                }
+                XpengLog.log("ble", "screen ${if (on) "ON" else "OFF"} (proximity: ${if (proximityMac != null) "scanning" else "idle"})")
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        try {
+            ctx.registerReceiver(r, filter)
+            screenReceiver = r
+            XpengLog.log("ble", "screen receiver registered (screen ON/OFF will be logged)")
+        } catch (e: Exception) {
+            // 注册失败不能影响判距本身：它只是给日志加料，挂了也只是少两行 screen。
+            XpengLog.log("ble", "screen receiver register failed: ${e.message}")
+        }
+    }
+
+    /**
      * 定期把判距扫描**整个重启一遍**（stopScan -> startScan）。
      *
      * 为什么必须这么做：2026-11-26 实测，本机（HyperOS）蓝牙栈会用云控的
@@ -818,7 +862,9 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
 
     /**
      * 原地重启扫描：不改变 `proximityMac`、不重置轮次计数，只是向控制器重新下一次
-     * `startScan`。失败就当作一次扫描失败上报，交给 JS 的恢复路径处理。
+     * `startScan`。停旧启新之间留一小段间隔——部分蓝牙栈对"同一回调立刻 stop+start"
+     * 会回 `onScanFailed(SCAN_FAILED_APPLICATION_REGISTRATION_FAILED)`，隔 150 ms 更稳。
+     * 若期间判距被关掉或换了目标，就什么都不做（不能给已停用的功能偷偷起扫描）。
      */
     private fun restartProximityScanForFreshWindow() {
         val mac = proximityMac ?: return
@@ -828,20 +874,23 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         try {
             sc.stopScan(proximityCallback)
         } catch (_: Exception) {}
-        // 换一个 ScanCallback 实例没有意义——停旧启新用同一个回调即可。
-        try {
-            sc.startScan(
-                listOf(android.bluetooth.le.ScanFilter.Builder().setDeviceAddress(mac).build()),
-                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build(),
-                proximityCallback,
-            )
-            XpengLog.log("ble", "scan refreshed (fresh active window) mac=$mac")
-        } catch (e: Exception) {
-            XpengLog.log("ble", "scan refresh failed: ${e.message}")
-        } finally {
-            refreshingProximity = false
-        }
-        scheduleProximityRefresh()
+        handler.postDelayed({
+            try {
+                if (proximityMac == mac && scanner2 === sc) {
+                    sc.startScan(
+                        listOf(android.bluetooth.le.ScanFilter.Builder().setDeviceAddress(mac).build()),
+                        ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build(),
+                        proximityCallback,
+                    )
+                    XpengLog.log("ble", "scan refreshed (fresh active window) mac=$mac")
+                }
+            } catch (e: Exception) {
+                XpengLog.log("ble", "scan refresh failed: ${e.message}")
+            } finally {
+                refreshingProximity = false
+                scheduleProximityRefresh()
+            }
+        }, PROXIMITY_REFRESH_GAP_MS)
     }
 
     private fun scheduleProximityTick() {
@@ -851,7 +900,9 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             // MIN_VALUE 表示本轮一条广播都没有。
             val seen = proximityRssi != Int.MIN_VALUE
             val rssi = if (seen) proximityRssi else null
+            val windowHits = proximityWindowResults
             proximityRssi = Int.MIN_VALUE
+            proximityWindowResults = 0
             proximityRounds += 1
             // 每轮读数不再单独落盘：JS 侧在详细日志打开时会把它与判距器内部状态
             // 合成一行写盘（见 feedProximity），合并后一天只需 5 MB 左右；
@@ -861,6 +912,9 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
                 putString("mac", mac)
                 if (rssi == null) putNull("rssi") else putInt("rssi", rssi)
                 putInt("round", proximityRounds)
+                // 本轮窗口内收到的原始广播条数：>=1 却 rssi=null 说明回调到了但地址不匹配；
+                // 0 说明系统整轮没给我们递送（息屏挂起扫描时正是这种形态）。
+                putInt("hits", windowHits)
             })
             scheduleProximityTick()
         }
@@ -880,6 +934,10 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     }
 
     override fun invalidate() {
+        handler.post {
+            try { screenReceiver?.let { ctx.unregisterReceiver(it) } } catch (_: Exception) {}
+            screenReceiver = null
+        }
         handler.post { endScan("Module invalidated")
             links.values.toList().forEach { it.close("Module invalidated") }
             kaTimers.forEach { handler.removeCallbacks(it.runnable) }; kaTimers.clear()
@@ -916,5 +974,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
          * 扫描挂起，只有新启动的扫描才有活跃窗口（2026-11-26 实测）。
          */
         const val PROXIMITY_REFRESH_MS = 30_000L
+        /** 重启扫描时 stop 与 start 之间的间隔，避开部分栈对即时重启的注册失败。 */
+        const val PROXIMITY_REFRESH_GAP_MS = 150L
     }
 }
