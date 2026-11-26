@@ -1325,7 +1325,14 @@ async function setForeground(foreground: boolean): Promise<void> {
       // 而前台又不扫描，两边都推进不了。2026-11-25 实测 13:27 就是这条路把链路
       // 重新 held 住、随后空转 9.5 小时。
       // 只有"本来就没开判距"时才需要前台持连接给车控用（见下方非判距分支）。
-      if (!scanRunning && proximityMac) await startScanUnlessSuppressed().catch(() => {});
+      //
+      // 这里必须同时排除 link.connected：连接态判距正靠这条链路读数，此时再起扫描
+      // 会与连接争同一个控制器（扫码必吃 133），而且车在连接时不广播，扫描每轮只能
+      // 得到 s=? 白白污染判距窗口。2026-11-26 20:48:54 实测：切前台时链路已连上，
+      // 却因漏判这一点又起了扫描，连接态与扫描态并存整整 35 分钟。
+      if (!scanRunning && !link.connected && proximityMac) {
+        await startScanUnlessSuppressed().catch(() => {});
+      }
       return;
     }
     if (scanRunning) {

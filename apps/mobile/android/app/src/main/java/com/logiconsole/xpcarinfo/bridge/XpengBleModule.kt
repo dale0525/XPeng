@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.*
 import android.bluetooth.le.*
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -321,7 +322,13 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
             if (result.rssi > proximityRssi) proximityRssi = result.rssi
         } }
         // 扫描失败要主动上报：否则服务静默空转，用户会以为功能开着却从不触发。
+        // 但"重启换窗口"那一瞬的失败是预期内的（停旧启新之间的竞态），此时只能记一行，
+        // 否则一次刷新抖动就会把整个判距扫描拆掉，反而更糟。
         override fun onScanFailed(code: Int) { handler.post {
+            if (refreshingProximity) {
+                XpengLog.log("ble", "scan refresh reported failed: code=$code (kept)")
+                return@post
+            }
             XpengLog.log("ble", "scan failed: code=$code")
             proximityMac = null
             proximityTick?.let { handler.removeCallbacks(it) }; proximityTick = null
@@ -331,6 +338,10 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
     }
     private var scanner2: BluetoothLeScanner? = null
     private var proximityTick: Runnable? = null
+    /** 定期重启扫描的计时器（对付系统把长跑扫描挂起，见 scheduleProximityRefresh）。 */
+    private var proximityRefresh: Runnable? = null
+    /** 正在做"重启扫描换活跃窗口"的瞬间：此时 onScanFailed 属预期抖动，不能拆扫描。 */
+    private var refreshingProximity = false
 
     private fun permissions() = if (Build.VERSION.SDK_INT >= 31)
         arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
@@ -727,6 +738,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         XpengLog.log("ble", "scan start: mac=$proximityMac mode=BALANCED")
         p.resolve(null)
         scheduleProximityTick()
+        scheduleProximityRefresh()
       }
     }
 
@@ -778,6 +790,60 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         p.resolve(null)
     } }
 
+    /**
+     * 定期把判距扫描**整个重启一遍**（stopScan -> startScan）。
+     *
+     * 为什么必须这么做：2026-11-26 实测，本机（HyperOS）蓝牙栈会用云控的
+     * `screenState` / `balancedTimeout` / `backgroundTimeout` 把**长时间运行**的
+     * BALANCED 扫描挂起。12:30 起那条扫描跑了一整晚，`dumpsys bluetooth_manager`
+     * 里被标成 `Forced` 超时，29925 s 中有 23502 s 处于 `Suspended`——手机息屏的
+     * 每一秒几乎一一对应。期间 JS 每 1.5 s 都在采样，但系统一条广播都不递送（全是
+     * `s=?`），人走到车旁也不会解锁，直到点亮屏幕把扫描从挂起里放出来。
+     *
+     * 而**新启动**的扫描能拿到一段活跃窗口：同日 11:45 手机已息屏锁屏，11:47:06
+     * 离开地理围栏新起的扫描仍在息屏下 2 秒内扫到车、11:47:18 完成解锁。所以对付
+     * 挂起的办法就是别让它一直跑——每隔 [PROXIMITY_REFRESH_MS] 重启一次，每秒都
+     * 重新拿到活跃期。重启不碰 GATT 链路（判距只在扫描态做），也不会误触发动作：
+     * 判距状态保存在 JS 侧 proximityTracker，重启扫描只清"本轮最强 RSSI"。
+     *
+     * 30 s 的取值：既要明显短于系统挂起前给的活跃窗口（分钟级），又不能太频繁——
+     * 每次 stop/start 本身有开销，且会丢掉亚秒级的在途广播。
+     */
+    private fun scheduleProximityRefresh() {
+        proximityRefresh?.let { handler.removeCallbacks(it) }
+        val tick = Runnable { restartProximityScanForFreshWindow() }
+        proximityRefresh = tick
+        handler.postDelayed(tick, PROXIMITY_REFRESH_MS)
+    }
+
+    /**
+     * 原地重启扫描：不改变 `proximityMac`、不重置轮次计数，只是向控制器重新下一次
+     * `startScan`。失败就当作一次扫描失败上报，交给 JS 的恢复路径处理。
+     */
+    private fun restartProximityScanForFreshWindow() {
+        val mac = proximityMac ?: return
+        val sc = scanner2
+        if (sc == null) { scheduleProximityRefresh(); return }
+        refreshingProximity = true
+        try {
+            sc.stopScan(proximityCallback)
+        } catch (_: Exception) {}
+        // 换一个 ScanCallback 实例没有意义——停旧启新用同一个回调即可。
+        try {
+            sc.startScan(
+                listOf(android.bluetooth.le.ScanFilter.Builder().setDeviceAddress(mac).build()),
+                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build(),
+                proximityCallback,
+            )
+            XpengLog.log("ble", "scan refreshed (fresh active window) mac=$mac")
+        } catch (e: Exception) {
+            XpengLog.log("ble", "scan refresh failed: ${e.message}")
+        } finally {
+            refreshingProximity = false
+        }
+        scheduleProximityRefresh()
+    }
+
     private fun scheduleProximityTick() {
         proximityTick?.let { handler.removeCallbacks(it) }
         val tick = Runnable {
@@ -807,6 +873,7 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
         val wasRunning = proximityMac != null
         proximityMac = null
         proximityTick?.let { handler.removeCallbacks(it) }; proximityTick = null
+        proximityRefresh?.let { handler.removeCallbacks(it) }; proximityRefresh = null
         try { scanner2?.stopScan(proximityCallback) } catch (_: Exception) {}
         scanner2 = null
         if (wasRunning) XpengLog.log("ble", "scan stop: $reason")
@@ -843,5 +910,11 @@ class XpengBleModule(private val ctx: ReactApplicationContext) : ReactContextBas
          * 节奏不同就没法逐点对照。探针只在用户手动开启时运行，不影响日常耗电。
          */
         const val PROBE_INTERVAL_MS = 1500L
+
+        /**
+         * 判距扫描的重启周期。见 scheduleProximityRefresh 的说明：本机蓝牙栈会把长跑
+         * 扫描挂起，只有新启动的扫描才有活跃窗口（2026-11-26 实测）。
+         */
+        const val PROXIMITY_REFRESH_MS = 30_000L
     }
 }
