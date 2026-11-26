@@ -4,7 +4,7 @@ import {
   evaluateProximity, ProximityTracker, decideScanAction, decideScanDuringAction, decideUnlockGate, decideLockGate, unlockedFromLockState, decideLinkAttempt, LINK_RETRY_BACKOFF_MS, shouldLogSample, DEFAULT_PROXIMITY_CONFIG, type ProximityConfig,
 } from '../packages/protocol/src/proximity.ts';
 
-const cfg: ProximityConfig = { nearRssi: -65, farRssi: -80, enterMs: 3000, leaveMs: 8000 };
+const cfg: ProximityConfig = { nearRssi: -65, enterMs: 3000, leaveMs: 8000 };
 
 test('a single strong sample does not unlock before the enter dwell time', () => {
   const t = 0;
@@ -55,15 +55,32 @@ test('does not lock when the car is merely out of scan range for less than leave
   ], cfg), ['unlock']);
 });
 
-test('hysteresis: RSSI between the two thresholds does not flap state', () => {
+// ── 单阈值（2026-11-26 起解闭锁共用一个值，不再有滞回带）──
+//
+// 旧实现解锁用 nearRssi、闭锁用更弱的 farRssi，落在两值之间时"既不进也不出"。
+// 现在只有一个阈值：弱于它就往闭锁方向推进，抖动由停留时间与窗口计数挡住。
+
+test('单阈值：弱于阈值并持续够久即闭锁，不存在"中间地带"不动作', () => {
   const t = 0;
-  // 进入后 RSSI 落在 (-80, -65) 之间，既不算离开也不算重新进入，不产生额外动作。
+  const cfgSingle: ProximityConfig = { nearRssi: -65, enterMs: 3000, leaveMs: 8000 };
+  const acts = evaluateProximity([
+    { t, rssi: -50 },
+    { t: t + 3000, rssi: -50 },        // unlock
+    { t: t + 4000, rssi: -70 },        // 弱于 -65：闭锁方向
+    { t: t + 20000, rssi: -72 },
+  ], cfgSingle);
+  assert.deepEqual(acts, ['unlock', 'lock'], `弱于阈值应闭锁，实际: ${acts.join(',')}`);
+});
+
+test('单阈值：刚好等于阈值算"在附近"一侧，不推进闭锁', () => {
+  const t = 0;
+  const cfgSingle: ProximityConfig = { nearRssi: -65, enterMs: 3000, leaveMs: 8000 };
   assert.deepEqual(evaluateProximity([
     { t, rssi: -50 },
     { t: t + 3000, rssi: -50 },        // unlock
-    { t: t + 4000, rssi: -70 },
-    { t: t + 20000, rssi: -72 },
-  ], cfg), ['unlock']);
+    { t: t + 4000, rssi: -65 },        // 恰好在阈值上
+    { t: t + 20000, rssi: -65 },
+  ], cfgSingle), ['unlock'], '等于阈值不该被当成走远');
 });
 
 test('tracker emits exactly one action per transition across many samples', () => {
@@ -84,7 +101,8 @@ test('tracker emits exactly one action per transition across many samples', () =
 });
 
 test('default config has near stronger than far', () => {
-  assert.ok(DEFAULT_PROXIMITY_CONFIG.nearRssi > DEFAULT_PROXIMITY_CONFIG.farRssi);
+  // 单阈值：解闭锁共用 nearRssi，不再有 near/far 的大小关系可断言。
+  assert.ok(Number.isFinite(DEFAULT_PROXIMITY_CONFIG.nearRssi));
   assert.ok(DEFAULT_PROXIMITY_CONFIG.leaveMs > DEFAULT_PROXIMITY_CONFIG.enterMs);
 });
 

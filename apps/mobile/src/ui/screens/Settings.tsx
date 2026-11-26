@@ -37,7 +37,7 @@ export function SettingsScreen(props: {
   onDownload: () => void;
   proximityEnabled: boolean;
   onProximityChange: (enabled: boolean) => void;
-  thresholds: { nearRssi: number; farRssi: number; calibrated: boolean };
+  thresholds: { nearRssi: number; calibrated: boolean };
   /** 重新标定：站到希望解锁的位置静置，用连接态读数算阈值。 */
   onRecalibrate: () => void;
   /** 详细日志开关：打开后每轮 RSSI 与状态切换都落盘。 */
@@ -204,7 +204,7 @@ export function SettingsScreen(props: {
         </View>
         <View className="flex-row items-center justify-between pt-1">
           <Text className="text-[12px] font-headline font-normal text-on-surface-variant">
-            {`解锁约 ${thresholds.nearRssi} dBm · 闭锁约 ${thresholds.farRssi} dBm`}
+            {`触发阈值约 ${thresholds.nearRssi} dBm（解闭锁共用）`}
           </Text>
           <Pressable
             onPress={() => (bluetoothReady ? onRecalibrate() : onUnsupported('蓝牙未连接'))}

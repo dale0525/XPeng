@@ -26,7 +26,7 @@ type Phase =
 export function ProximityCalibrationSheet(props: {
   visible: boolean;
   /** 当前生效的阈值，用于"手动填写"入口的预填值。 */
-  current: { nearRssi: number; farRssi: number };
+  current: { nearRssi: number };
   onCancel: () => void;
   onConfirmed: (calibration: ProximityCalibration) => void;
 }): React.JSX.Element {
@@ -136,8 +136,8 @@ export function ProximityCalibrationSheet(props: {
                   <Text className="text-[15px] font-headline font-semibold text-on-surface">标定完成</Text>
                 </View>
                 <View className="rounded-2xl bg-inset p-4 gap-1.5">
-                  <Text className="text-[13px] font-body text-on-surface">{`解锁阈值约为 ${phase.calibration.nearRssi} dBm`}</Text>
-                  <Text className="text-[13px] font-body text-on-surface">{`闭锁阈值自动取 ${phase.calibration.farRssi} dBm（解锁值 − 15 dB）`}</Text>
+                  <Text className="text-[13px] font-body text-on-surface">{`触发阈值约为 ${phase.calibration.nearRssi} dBm`}</Text>
+                  <Text className="text-[12px] font-body text-on-surface-variant">解闭锁共用这一个值：比它强就解锁，比它弱就闭锁。</Text>
                   <Text className="text-[12px] font-body text-on-surface-variant">{`共采样 ${phase.calibration.sampleCount} 次`}</Text>
                 </View>
                 <Text className="text-[12px] font-body text-on-surface-variant leading-relaxed">若实际触发距离不满意，可手动改数值或重新标定。</Text>

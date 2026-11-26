@@ -453,7 +453,7 @@ function Shell() {
       />
       <ProximityCalibrationSheet
         visible={calibrationVisible}
-        current={{ nearRssi: thresholds.nearRssi, farRssi: thresholds.farRssi }}
+        current={{ nearRssi: thresholds.nearRssi }}
         onCancel={() => setCalibrationVisible(false)}
         onConfirmed={(calibration) => {
           bleLink.applyCalibration(calibration);

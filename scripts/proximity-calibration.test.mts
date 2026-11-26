@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FAR_HYSTERESIS_DB, MIN_CALIBRATION_SAMPLES, aggregateRssi, buildCalibration, buildCalibrationFromMedian, isValidCalibration, parseCalibration, parseManualThresholds, serializeCalibration, type ProximityCalibration } from '../packages/protocol/src/proximity-calibration.ts';
+import { MIN_CALIBRATION_SAMPLES, aggregateRssi, buildCalibration, buildCalibrationFromMedian, isValidCalibration, parseCalibration, parseManualThresholds, serializeCalibration, type ProximityCalibration } from '../packages/protocol/src/proximity-calibration.ts';
 
 test('android sometimes reports 0 or positive as "no reading"; those are excluded', () => {
   const { mean, count } = aggregateRssi([-80, 0, 12, -90, null, undefined, -85]);
@@ -13,12 +13,13 @@ test('mean of a steady reading set is the calibration target', () => {
   assert.equal(mean, -82);
 });
 
-test('buildCalibration rounds the mean and derives a weaker far threshold', () => {
+test('buildCalibration rounds the mean to a single shared threshold', () => {
   const r = buildCalibration([-81, -84], new Date('2026-11-12T09:00:00Z'));
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.equal(r.calibration.nearRssi, -82);          // (-81 + -84) / 2 = -82.5 → Math.round → -82
-  assert.equal(r.calibration.farRssi, -82 - FAR_HYSTERESIS_DB);
+  // 单阈值：不再派生出闭锁值。
+  assert.equal('farRssi' in r.calibration, false);
   assert.equal(r.calibration.sampleCount, 2);
   assert.equal(r.calibration.calibratedAt, '2026-11-12T09:00:00.000Z');
 });
@@ -37,7 +38,7 @@ test('a single sample is rejected as too few to be trustworthy', () => {
 });
 
 test('roundtrip survives serialize/parse', () => {
-  const cal: ProximityCalibration = { nearRssi: -83, farRssi: -90, sampleCount: 5, calibratedAt: '2026-11-12T09:00:00.000Z' };
+  const cal: ProximityCalibration = { nearRssi: -83, sampleCount: 5, calibratedAt: '2026-11-12T09:00:00.000Z' };
   assert.deepEqual(parseCalibration(serializeCalibration(cal)), cal);
 });
 
@@ -45,10 +46,11 @@ test('garbage or inconsistent stored values are rejected, not silently used', ()
   assert.equal(parseCalibration('not json'), null);
   assert.equal(parseCalibration('null'), null);
   assert.equal(parseCalibration(null), null);
-  // farRssi 必须比 nearRssi 更弱；写反了就是坏数据。
-  assert.equal(isValidCalibration({ nearRssi: -90, farRssi: -80, sampleCount: 3, calibratedAt: 'x' }), false);
+  // 旧版本存下来的双值结构仍然合法（farRssi 现在是多余字段，不影响读取）。
+  assert.equal(isValidCalibration({ nearRssi: -83, farRssi: -90, sampleCount: 5, calibratedAt: 'x' }), true);
   // nearRssi 正值（Android 无读数）不是合法阈值。
-  assert.equal(isValidCalibration({ nearRssi: 0, farRssi: -7, sampleCount: 3, calibratedAt: 'x' }), false);
+  assert.equal(isValidCalibration({ nearRssi: 0, sampleCount: 3, calibratedAt: 'x' }), false);
+  assert.equal(isValidCalibration({ nearRssi: -83, sampleCount: 0, calibratedAt: 'x' }), false);
 });
 
 // ── 2026-11-12 改口径：用"最强值"而不是"平均值"作基准 ──
@@ -69,15 +71,17 @@ test('garbage or inconsistent stored values are rejected, not silently used', ()
 // 偏移量演进：-12（初版）→ -5（按体感调）→ -20（2026-11-15）→ 0（2026-11-19）。
 // 归零的原因：站位语义改成「站到你希望解锁的那个位置」，采样点就是期望触发点，
 // 中位数本身即阈值。若仍减 20，站 3 米采到 -75 会算出 -95，要走到 20 米外才解锁。
+// 2026-11-26 起连常量一起删掉：不做漂移补偿，采到哪个值就用哪个。
 
-test('解锁 = 采样中位数本身，闭锁 = 解锁 - 15（中位 -56 → -56/-71）', () => {
+test('阈值 = 采样中位数本身，不做任何补偿（真实样本中位 -56 → -56）', () => {
   // 用户第二次标定的真实 30 秒样本（-56/-57 为主，中位数 -56）
   const samples = [-56, -56, -56, -57, -57, -58, -56, -57, -56];
   const r = buildCalibrationFromMedian(samples);
   assert.equal(r.ok, true);
   if (r.ok) {
-    assert.equal(r.calibration.nearRssi, -56, '解锁应等于中位数');
-    assert.equal(r.calibration.farRssi, -71, '闭锁应为 解锁-15');
+    assert.equal(r.calibration.nearRssi, -56, '阈值应等于中位数，不偏移');
+    // 解闭锁共用这一个值，不再派生闭锁阈值。
+    assert.equal('farRssi' in r.calibration, false);
   }
 });
 
@@ -85,10 +89,7 @@ test('站位不同得到不同阈值（正是「站到你希望解锁的位置�
   const samples = [-71, -72, -70, -71, -73];
   const r = buildCalibrationFromMedian(samples);
   assert.equal(r.ok, true);
-  if (r.ok) {
-    assert.equal(r.calibration.nearRssi, -71);
-    assert.equal(r.calibration.farRssi, -86);
-  }
+  if (r.ok) assert.equal(r.calibration.nearRssi, -71);
 });
 
 test('中位数标定对异常值免疫', () => {
@@ -103,24 +104,21 @@ test('中位数标定样本不足时拒绝', () => {
   assert.equal(buildCalibrationFromMedian([]).ok, false);
 });
 
-// ── 手动修改阈值（2026-11-19 起只填解锁值，闭锁值自动减 15）──
+// ── 手动修改阈值（只填一个数，解闭锁共用）──
 
-test('手动输入只填解锁值：填 75 得 -75，闭锁自动 -90', () => {
+test('手动输入一个数即阈值：填 75 得 -75', () => {
   const r = parseManualThresholds('75');
   assert.equal(r.ok, true);
   if (r.ok) {
     assert.equal(r.calibration.nearRssi, -75);
-    assert.equal(r.calibration.farRssi, -90);
+    assert.equal('farRssi' in r.calibration, false);
   }
 });
 
 test('手动输入容忍前导负号与空白', () => {
   const r = parseManualThresholds(' -69 ');
   assert.equal(r.ok, true);
-  if (r.ok) {
-    assert.equal(r.calibration.nearRssi, -69);
-    assert.equal(r.calibration.farRssi, -84);
-  }
+  if (r.ok) assert.equal(r.calibration.nearRssi, -69);
 });
 
 test('手动输入拒绝空值与越界', () => {

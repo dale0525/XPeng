@@ -1364,7 +1364,7 @@ async function setForeground(foreground: boolean): Promise<void> {
 function applyCalibration(next: ProximityCalibration | null): void {
   calibration = next;
   const config: ProximityConfig = next
-    ? { ...DEFAULT_PROXIMITY_CONFIG, nearRssi: next.nearRssi, farRssi: next.farRssi }
+    ? { ...DEFAULT_PROXIMITY_CONFIG, nearRssi: next.nearRssi }
     : DEFAULT_PROXIMITY_CONFIG;
   // 重建判距器，避免带着上一组阈值的内部状态（nearby/计时）继续跑。
   proximityTracker = new ProximityTracker(config);
@@ -1421,11 +1421,12 @@ async function startCalibration(durationMs = 15000): Promise<{
 }
 
 /** 当前生效阈值（用于界面显示）。 */
-function currentThresholds(): { nearRssi: number; farRssi: number; calibrated: boolean } {
+/** 当前生效的阈值（单一值，解闭锁共用）。 */
+function currentThresholds(): { nearRssi: number; calibrated: boolean } {
   const c = calibration;
   return c
-    ? { nearRssi: c.nearRssi, farRssi: c.farRssi, calibrated: true }
-    : { nearRssi: DEFAULT_PROXIMITY_CONFIG.nearRssi, farRssi: DEFAULT_PROXIMITY_CONFIG.farRssi, calibrated: false };
+    ? { nearRssi: c.nearRssi, calibrated: true }
+    : { nearRssi: DEFAULT_PROXIMITY_CONFIG.nearRssi, calibrated: false };
 }
 
 export const bleLink = {

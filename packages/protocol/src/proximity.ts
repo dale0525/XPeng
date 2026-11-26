@@ -2,11 +2,13 @@
  * 靠近解闭锁的判距状态机（纯逻辑，不碰蓝牙/网络，便于单测）。
  *
  * 设备侧只负责按周期回传车端 RSSI（dBm，越接近 0 越近）；本模块把连续样本喂进来，
- * 用「阈值 + 停留时间」决定一次动作：
- * - 未在附近 → 近到 `nearRssi` 以上且持续 `enterMs` → 触发 unlock；
- * - 在附近 → 弱于 `farRssi` 以下且持续 `leaveMs` → 触发 lock。
+ * 用「单一阈值 + 停留时间」决定一次动作：
+ * - 未解锁 → 近到 `nearRssi` 以上且持续 `enterMs` → 触发 unlock；
+ * - 已解锁 → 弱于同一个 `nearRssi` 以下且持续 `leaveMs` → 触发 lock。
  *
- * 两个不同阈值（滞回）避免在临界点抖动；离开的 `leaveMs` 故意比进入长，用来挡住
+ * 两侧共用一个阈值（2026-11-26 起，此前是解锁/闭锁两个值加滞回带）：用户的期望只有
+ * 一个——「站在这个位置就该解锁」；闭锁是它的反面，不需要再单独标定一个数。抖动由
+ * 停留时间与窗口计数挡住，不靠滞回带。离开的 `leaveMs` 故意比进入长，用来挡住
  * 「只是路过车尾一下」就误闭锁。用户明确选择不查车锁状态、无条件解/闭锁，所以这里
  * 只在「状态真的翻转」时才产生一次动作，避免同一侧连续采样反复解/锁。
  */
@@ -21,10 +23,13 @@ export type ProximityAction = 'unlock' | 'lock';
 const SAMPLE_WINDOW = 10;
 
 export interface ProximityConfig {
-  /** 进入「附近」的 RSSI 上阈值（dBm，例如 -65）。 */
+  /**
+   * 唯一的判距阈值（dBm）。
+   *
+   * 比它强 = 在附近（解锁方向），比它弱 = 在远处（闭锁方向）。两侧共用同一个值：
+   * 用户只表达「站到这里就该解锁」，闭锁是它的反面，不需要第二个数。
+   */
   nearRssi: number;
-  /** 离开「附近」的 RSSI 下阈值（dBm，例如 -80），必须比 nearRssi 更弱。 */
-  farRssi: number;
   /** 进入需要持续满足的时长（ms）。 */
   enterMs: number;
   /** 离开需要持续满足的时长（ms），通常比 enterMs 长以挡路过。 */
@@ -65,11 +70,10 @@ export const DEFAULT_PROXIMITY_CONFIG: ProximityConfig = {
   // 60-80% → -78.3）。30 米段漏扫只有 28.9%，而门边高达 48.9%——远端只有强包能到达，
   // 弱包全丢，读数被幸存者偏差抬高。真正机制是**广播采样的选择偏差**，不是多径。
   // 这也是「持连接读 RSSI」优于广播的实证依据：连接态 100/100 采样零缺失，无此偏差。
-  //   -70 进 / -92 锁 是唯一一组"门边解一次、走远锁一次、全程不反复切换"的参数。
-  // 原 -88/-95 的实测表现：二楼（-84）就误解锁；而走远到 50 米均值才 -86，
-  // 永远碰不到 -95，所以闭锁几乎从不触发。
-  nearRssi: -70,
-  farRssi: -92,
+  // 单一阈值取 -75：这是 2026-11-15 用 23127 轮真车数据回放的折中值——比 -70 更严
+  // （否则二楼 -84 那种场景也在"近"的一侧），比 -88 更松（否则门边就判成远）。
+  // 实际值以用户就地标定为准，这里只是没标定时的占位。
+  nearRssi: -75,
   // 用户 2026-11-12 选定：检测延迟压到 4.5 s。窗口 1.5 s × (3-1) + 1.5 s 停留 = 4.5 s。
   // 停留时间必须与窗口一起缩，否则单靠窗口只把 13 s 降到 10.5 s。
   enterMs: 1500,
@@ -260,7 +264,9 @@ export class ProximityTracker {
       return 'unlock';
     }
 
-    if (rssi > this.config.farRssi) { this.farTimes = []; return undefined; }
+    // 与解锁侧共用同一个阈值。边界必须两侧一致：解锁侧用 `rssi < near` 判"不近"，
+    // 所以这里要严格弱于才算"远"，否则恰好等于阈值时两侧会给出相反结论。
+    if (rssi >= this.config.nearRssi) { this.farTimes = []; return undefined; }
     this.farTimes.push(t);
     if (this.farTimes.length > SAMPLE_WINDOW) this.farTimes.shift();
     if (this.farTimes.length < this.config.leaveSamples) return undefined;

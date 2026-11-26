@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateProximity, type ProximityConfig } from '../packages/protocol/src/proximity.ts';
 
-const cfg: ProximityConfig = { nearRssi: -88, farRssi: -95, enterMs: 3000, leaveMs: 8000, enterSamples: 3, leaveSamples: 3 };
+const cfg: ProximityConfig = { nearRssi: -88, enterMs: 3000, leaveMs: 8000, enterSamples: 3, leaveSamples: 3 };
 const rssi = [-96, -82, -96, -82, null, null, -96, -96, -82, -82, null, null, -96, -82, -96, -82, -82, null, null, -96, -82, -96, -95, -82];
 const samples = rssi.map((r, i) => ({ t: i * 5000, rssi: r }));
 
@@ -23,7 +23,7 @@ test('alternating -82/-96 must not unlock: 单轮最强 RSSI 在两个值间跳�
 // 决策延迟 = (样本数-1) × 窗口 + 停留时间。窗口是唯一可压的项：
 // 5 s × 2 + 3 s = 13 s（实测约 15 s）；1.5 s × 2 + 1.5 s = 4.5 s。
 // 硬约束不变：真机静态序列里连续够强最长只有 2 轮，所以必须仍是 3 轮连跑。
-const fast: ProximityConfig = { nearRssi: -88, farRssi: -95, enterMs: 1500, leaveMs: 8000, enterSamples: 3, leaveSamples: 3 };
+const fast: ProximityConfig = { nearRssi: -88, enterMs: 1500, leaveMs: 8000, enterSamples: 3, leaveSamples: 3 };
 
 test('4.5 s 档：同样的真机抖动序列仍不误解锁', () => {
   const acts = evaluateProximity(samples.map(s => ({ ...s, t: samples.indexOf(s) * 1500 })), fast);
@@ -50,7 +50,7 @@ test('4.5 s 档：真正靠近在 4.5 s 内触发，且连续 3 轮仍误判不�
 // 2 次动作（门边解锁、走远闭锁），无反复切换。
 // 关键前提：**扫不到不推进任何计时**。若把"扫不到"当"远离"，同一份数据会触发
 // 27 次解锁/上锁来回切——门边未扫到比例高达 55~72%，人站着不动也会被判走远。
-const walkCfg: ProximityConfig = { nearRssi: -70, farRssi: -92, enterMs: 1500, leaveMs: 8000, enterSamples: 3, leaveSamples: 3 };
+const walkCfg: ProximityConfig = { nearRssi: -70, enterMs: 1500, leaveMs: 8000, enterSamples: 3, leaveSamples: 3 };
 
 test('走位实测序列在 -70/-92 下只产生 2 次动作，不反复切换', () => {
   // 2026-11-12 17:03–17:20 真实样本全集（656 轮，每轮 1.5 s），null = 该轮没扫到。
