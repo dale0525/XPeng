@@ -486,3 +486,40 @@ export function decideScanDuringAction(input: {
   if (input.linkHeld) return 'stay-stopped';
   return input.foreground ? 'stay-stopped' : 'resume';
 }
+
+/**
+ * 动作成功后的车锁状态沉降窗（ms）。
+ *
+ * 2026-11-27 22:17 实测：蓝牙解锁在 54.491 成功，但云端 MQTT 车锁状态推送滞后
+ * 2.4 s（56.894 才推 lock=0），期间 54.022 到达了一条解锁前排队的旧 lock=1。
+ * 下一轮直接拿它校准，会把刚置为已解锁的判距器立刻压回未解锁，3 秒后连解第二次。
+ *
+ * 沉降窗内，与刚成功动作相反的车锁读数按"不知道"处理；一旦收到与动作一致的真值
+ * 就立刻结束沉降；超过 6 s 仍相反则恢复信任车端状态，避免车门实际未动作时卡死。
+ */
+export const LOCK_SETTLE_MS = 6_000;
+
+export function resolveCalibrationLock(input: {
+  vehicleLocked: { locked: boolean; at: number } | null;
+  lastAction: { expectedLocked: boolean; at: number } | null;
+  nowMs: number;
+  lockTtlMs: number;
+  settleMs?: number;
+}): { locked: boolean | null; settled: boolean } {
+  const settleMs = input.settleMs ?? LOCK_SETTLE_MS;
+  const fresh = input.vehicleLocked !== null && input.nowMs - input.vehicleLocked.at <= input.lockTtlMs;
+  const raw = fresh ? input.vehicleLocked!.locked : null;
+  if (input.lastAction === null) {
+    return { locked: raw, settled: false };
+  }
+  if (input.nowMs - input.lastAction.at > settleMs) {
+    return { locked: raw, settled: true };
+  }
+  if (raw === null) {
+    return { locked: null, settled: false };
+  }
+  if (raw === input.lastAction.expectedLocked) {
+    return { locked: raw, settled: true };
+  }
+  return { locked: null, settled: false };
+}

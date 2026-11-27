@@ -7,7 +7,7 @@ import { buildV2Command, validateV2Command } from '@xpeng/protocol/src/ble-v2-co
 import { decideRetry } from '@xpeng/protocol/src/proximity-retry';
 import { BleV2ContextService, isP5BleV2Vehicle } from '@xpeng/protocol/src/ble-v2-context';
 import type { Vehicle } from '@xpeng/protocol/src/vehicles';
-import { ProximityTracker, decideScanAction, decideScanDuringAction, decideUnlockGate, decideLockGate, decideLinkAttempt, shouldLogSample, DEFAULT_PROXIMITY_CONFIG, type ProximityAction, type ProximityConfig } from '@xpeng/protocol/src/proximity';
+import { ProximityTracker, decideScanAction, decideScanDuringAction, decideUnlockGate, decideLockGate, decideLinkAttempt, resolveCalibrationLock, shouldLogSample, DEFAULT_PROXIMITY_CONFIG, type ProximityAction, type ProximityConfig } from '@xpeng/protocol/src/proximity';
 import { parseCalibration, serializeCalibration, buildCalibrationFromMedian, type ProximityCalibration } from '@xpeng/protocol/src/proximity-calibration';
 import {
   DEFAULT_SUPPRESSION, decideLinkUnderSuppression, suppressReason, suppressionPlan, type GeoPoint, type ProximitySuppression,
@@ -591,6 +591,14 @@ let vehicleMoving: { moving: boolean; at: number } | null = null;
  * 不可靠（失败时状态会停错）。初值 null = 不知道，校准器会维持原值不覆盖。
  */
 let vehicleLocked: { locked: boolean; at: number } | null = null;
+/** 最近一次刚成功的自动解闭锁动作期望的锁状态，用于在云端推送滞后窗口内忽略旧推送。 */
+let lastActionLock: { expectedLocked: boolean; at: number } | null = null;
+
+function markActionLockSettling(action: ProximityAction): void {
+  vehicleLocked = null;
+  lastActionLock = { expectedLocked: action === 'lock', at: Date.now() };
+  vehicleStateRefreshedAt = 0;
+}
 
 /**
  * 驾驶位是否有人（`instant.seat.driver_seat_state === 1`）。
@@ -749,14 +757,12 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
   try {
     await executeV2({ ...context, commandCode: action === 'unlock' ? 1 : 2 });
     void bridge.logProximity(`action=${action} ok${attempt > 1 ? ` (retry ${attempt - 1})` : ''}`);
-    // 动作成功后立刻让缓存里的车锁状态过期，下一轮判距马上补一次真实状态。
+    // 动作成功后立刻清空旧车锁缓存并开启短沉降窗，同时让续期时间戳过期以便补拉真值。
     //
-    // 不这样做，缓存会停在动作前的那一刻：解锁成功后仍记着"已锁"，于是 calibrate
-    // 每轮把判距器压回未解锁，4.5 s 后又满足进入条件、再发一次解锁。2026-11-24 实测
-    // 22 秒内连解 4 次；同一天离车后连续 7 次云端闭锁也是同一机制（缓存停在"未锁"，
-    // 每轮都判成该锁）。单纯给缓存加保质期治不了这个——它在保质期内仍然有效，
-    // 而这 4.5 s 的重复周期远短于任何合理保质期。
-    vehicleStateRefreshedAt = 0;
+    // 只清 vehicleStateRefreshedAt 不够：2026-11-27 22:17 实测蓝牙解锁在 54.491 成功，
+    // 但 54.022 刚进来的旧 lock=1 仍留在缓存里、云端 lock=0 要滞后 2.4 s 才到，
+    // 导致下一轮 calibrate 立刻把判距器翻回未解锁，3 秒后连解第二次。
+    markActionLockSettling(action);
   } catch (error) {
     failed = true;
     message = error instanceof Error ? error.message : String(error);
@@ -785,8 +791,8 @@ async function runProximityActionWithRetry(action: ProximityAction, attempt = 1)
       if (ok) {
         void bridge.logProximity('action=lock ok (cloud fallback)');
         void bridge.notifyEvent('已自动锁车', '离开车辆后已通过云端上锁').catch(() => {});
-        // 同上：云端锁成功也要立刻让本地车锁缓存失效，否则会连续重复下发。
-        vehicleStateRefreshedAt = 0;
+        // 同上：云端锁成功也要立刻清缓存并进入沉降窗，否则会连续重复下发。
+        markActionLockSettling('lock');
         return;
       }
       void bridge.logProximity('action=lock cloud fallback failed');
@@ -998,8 +1004,14 @@ function feedProximity(rssi: number | null, scanHits?: number): void {
   // 同一天离车后连续 7 次云端闭锁也是同一机制（缓存停在"未锁"）。
   // 现在周期刷新是主手段，这里过期只是刷新失败时的兜底：宁可回到"不知道"、
   // 让判距器维持原值，也不能用一份过期状态反复推翻刚做成功的动作。
-  const lockFresh = vehicleLocked && Date.now() - vehicleLocked.at <= LOCK_STATE_TTL_MS;
-  proximityTracker.calibrate(lockFresh ? vehicleLocked!.locked : null);
+  const { locked: effectiveLocked, settled } = resolveCalibrationLock({
+    vehicleLocked,
+    lastAction: lastActionLock,
+    nowMs: Date.now(),
+    lockTtlMs: LOCK_STATE_TTL_MS,
+  });
+  if (settled) lastActionLock = null;
+  proximityTracker.calibrate(effectiveLocked);
   // 每轮明细只在开关打开时记：这是排查"为什么没触发/为什么触发了"唯一的一手数据。
   //
   // 紧凑单行（约 40 字节）：开关打开时它就是日志的全部内容，一天 57600 轮，

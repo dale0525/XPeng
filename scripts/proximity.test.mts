@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  evaluateProximity, ProximityTracker, decideScanAction, decideScanDuringAction, decideUnlockGate, decideLockGate, unlockedFromLockState, decideLinkAttempt, LINK_RETRY_BACKOFF_MS, shouldLogSample, DEFAULT_PROXIMITY_CONFIG, type ProximityConfig,
+  evaluateProximity, ProximityTracker, decideScanAction, decideScanDuringAction, decideUnlockGate, decideLockGate, unlockedFromLockState, decideLinkAttempt, LINK_RETRY_BACKOFF_MS, LOCK_SETTLE_MS, resolveCalibrationLock, shouldLogSample, DEFAULT_PROXIMITY_CONFIG, type ProximityConfig,
 } from '../packages/protocol/src/proximity.ts';
 
 const cfg: ProximityConfig = { nearRssi: -65, enterMs: 3000, leaveMs: 8000 };
@@ -595,5 +595,69 @@ test('后台且链路已建立：保留连接态继续判距，不切回扫描',
   assert.equal(
     decideScanDuringAction({ enabled: true, foreground: false, hasMac: true, linkHeld: true }),
     'stay-stopped',
+  );
+});
+
+// ── 动作成功后的车锁状态沉降窗（2026-11-27 22:17 连续解锁两次回归）──
+//
+// 蓝牙解锁在 54.491 成功，但云端 MQTT 车锁状态推送滞后 2.4 s（56.894 才推 lock=0），
+// 期间 54.022 到达了旧 lock=1。沉降窗内与刚成功动作相反的推送不得把判距器翻回旧态。
+
+test('resolveCalibrationLock 在沉降窗内忽略与刚成功解锁相反的旧 lock=1 推送', () => {
+  const actionAt = 10_000;
+  // 动作后 1 s 收到滞后的旧 lock=1：忽略（返回 null，不结束沉降）
+  assert.deepEqual(
+    resolveCalibrationLock({
+      vehicleLocked: { locked: true, at: actionAt + 500 },
+      lastAction: { expectedLocked: false, at: actionAt },
+      nowMs: actionAt + 1_000,
+      lockTtlMs: 90_000,
+    }),
+    { locked: null, settled: false },
+  );
+  // 2.4 s 后云端真值 lock=0 到达：与预期一致，立刻确认并结束沉降
+  assert.deepEqual(
+    resolveCalibrationLock({
+      vehicleLocked: { locked: false, at: actionAt + 2_400 },
+      lastAction: { expectedLocked: false, at: actionAt },
+      nowMs: actionAt + 2_500,
+      lockTtlMs: 90_000,
+    }),
+    { locked: false, settled: true },
+  );
+});
+
+test('resolveCalibrationLock 沉降窗到期后恢复信任车端状态（防车门真没解开时卡死）', () => {
+  const actionAt = 10_000;
+  assert.deepEqual(
+    resolveCalibrationLock({
+      vehicleLocked: { locked: true, at: actionAt + LOCK_SETTLE_MS + 100 },
+      lastAction: { expectedLocked: false, at: actionAt },
+      nowMs: actionAt + LOCK_SETTLE_MS + 100,
+      lockTtlMs: 90_000,
+    }),
+    { locked: true, settled: true },
+  );
+});
+
+test('resolveCalibrationLock 闭锁侧对称：忽略滞后的旧 lock=0，收到 lock=1 立即沉降', () => {
+  const actionAt = 20_000;
+  assert.deepEqual(
+    resolveCalibrationLock({
+      vehicleLocked: { locked: false, at: actionAt + 800 },
+      lastAction: { expectedLocked: true, at: actionAt },
+      nowMs: actionAt + 1_200,
+      lockTtlMs: 90_000,
+    }),
+    { locked: null, settled: false },
+  );
+  assert.deepEqual(
+    resolveCalibrationLock({
+      vehicleLocked: { locked: true, at: actionAt + 1_500 },
+      lastAction: { expectedLocked: true, at: actionAt },
+      nowMs: actionAt + 1_600,
+      lockTtlMs: 90_000,
+    }),
+    { locked: true, settled: true },
   );
 });
