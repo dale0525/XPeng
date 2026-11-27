@@ -71,6 +71,18 @@ export function onMqttDisconnect(cb: (e: { id: string; reason: string }) => void
   return () => sub.remove();
 }
 
+export interface NetworkChangeEvent {
+  available: boolean;
+  switched: boolean;
+}
+
+export function onNetworkChange(cb: (e: NetworkChangeEvent) => void): () => void {
+  const sub = emitter.addListener('xpeng-network-change', (e) =>
+    cb(e as unknown as NetworkChangeEvent),
+  );
+  return () => sub.remove();
+}
+
 /** 会话与偏好都存这里；键名集中在这几个常量里，避免拼错。 */
 export const StorageKey = {
   session: 'session.v1',

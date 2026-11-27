@@ -14,7 +14,12 @@ import {
 import { COMMANDS, READ_STATUS, type CommandDef } from '@xpeng/protocol/src/commands';
 import type { MqttAccount, VehicleStatus } from '@xpeng/protocol/src/vehicles';
 import { acceptPush, IPUSH_WINDOW_MS } from '@xpeng/protocol/src/status-freshness';
-import { onMqttDisconnect, onMqttMessage, native, xpLog } from './native';
+import {
+  decideNetworkChangeAction,
+  NETWORK_SWITCH_DEBOUNCE_MS,
+  nextMqttReconnectDelay,
+} from '@xpeng/protocol/src/mqtt-reconnect';
+import { onMqttDisconnect, onMqttMessage, onNetworkChange, native, xpLog } from './native';
 import { sessionStore } from './session';
 
 const CONNECTION_ID = 'car';
@@ -48,6 +53,17 @@ class CarLink {
   private ignorePushesUntil = 0;
   /** 已采纳过的推送 `msg_id`。旧报文会被重放第二次，同一个 msg_id 不该再回写。 */
   private readonly seenPushIds = new Set<string>();
+  /** 自动重连定时器与到期时刻（ms）；用于防止断线退避把更早的切网重连推迟。 */
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDueAt = 0;
+  /** 连续断线重连次数（0 起始）；连上或切网时清零。 */
+  private reconnectAttempt = 0;
+  /** 系统当前是否有可用默认网络；无网时暂停退避，等 onAvailable 立刻拉起。 */
+  private networkAvailable = true;
+  /** `connecting` 途中发生了切网/恢复，等本次建连落地后立刻在新网络上补连。 */
+  private pendingNetworkReconnect = false;
+  /** 原生默认网络变化监听的退订句柄；仅在显式 disconnect 时撤掉。 */
+  private netUnsub: (() => void) | null = null;
 
   get linkState(): LinkState {
     return this.state;
@@ -84,18 +100,92 @@ class CarLink {
     for (const fn of this.listeners) fn(s, reason);
   }
 
+  private clearReconnectTimer() {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.reconnectDueAt = 0;
+    }
+  }
+
+  private ensureNetworkListener() {
+    if (this.netUnsub) return;
+    this.netUnsub = onNetworkChange((e) => {
+      this.networkAvailable = e.available;
+      const decision = decideNetworkChangeAction({
+        hasSession: Boolean(this.vin) && sessionStore.current.kind === 'active',
+        state: this.state,
+        available: e.available,
+        switched: e.switched,
+      });
+      xpLog(
+        'mqtt',
+        `network change available=${e.available} switched=${e.switched} state=${this.state} -> ${decision}`,
+      );
+      if (decision === 'pause') {
+        this.clearReconnectTimer();
+        return;
+      }
+      if (decision === 'defer-after-connect') {
+        this.pendingNetworkReconnect = true;
+        return;
+      }
+      if (decision === 'reconnect-now') {
+        this.reconnectAttempt = 0;
+        this.scheduleReconnect(NETWORK_SWITCH_DEBOUNCE_MS, 'network-change');
+      }
+    });
+  }
+
+  private scheduleReconnect(delayMs: number, trigger: string) {
+    if (!this.vin || sessionStore.current.kind !== 'active') return;
+    const dueAt = Date.now() + delayMs;
+    // 已有更早的重连在排队（例如切网 500 ms 防抖）时，不要被较长的断线退避往后推。
+    if (this.reconnectTimer !== null && this.reconnectDueAt <= dueAt) return;
+    this.clearReconnectTimer();
+    this.reconnectDueAt = dueAt;
+    xpLog('mqtt', `schedule reconnect in ${delayMs}ms (${trigger})`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.reconnectDueAt = 0;
+      if (!this.vin || sessionStore.current.kind !== 'active') return;
+      if (this.state === 'connecting') return;
+      void this.connect(this.vin, Number(this.uid));
+    }, delayMs);
+  }
+
+  private scheduleBackoffReconnect(trigger: string) {
+    if (!this.networkAvailable) {
+      xpLog('mqtt', `skip backoff reconnect (${trigger}): network unavailable`);
+      return;
+    }
+    if (!this.vin || sessionStore.current.kind !== 'active') return;
+    const delayMs = nextMqttReconnectDelay(this.reconnectAttempt);
+    this.reconnectAttempt += 1;
+    this.scheduleReconnect(delayMs, `${trigger}#${this.reconnectAttempt}`);
+  }
+
+  private async closeSocket(): Promise<void> {
+    for (const u of this.unsubs) u();
+    this.unsubs = [];
+    await native.mqttDisconnect(CONNECTION_ID).catch(() => {});
+  }
+
   /** 取凭据 → 连 broker → 订阅。凭据每次签发都会作废旧凭据，所以每次连接都重取。 */
   async connect(vin: string, uid: number): Promise<void> {
     if (this.state === 'connecting') return;
-    // 续期成功后 App 会带着新 accessToken 重跑连接：AT 失效时服务端会连带作废旧
-    // MQTT 凭据（§5.2），必须先断干净再重取，否则 online 状态下会一直用废凭据。
-    if (this.state === 'online') {
-      xpLog('mqtt', 'reconnect after token refresh: disconnect first');
-      await this.disconnect();
-    }
-    this.setState('connecting');
+    this.clearReconnectTimer();
+    this.pendingNetworkReconnect = false;
     this.vin = vin;
     this.uid = String(uid);
+    this.ensureNetworkListener();
+    // 续期成功或切网重连时 App 会从 online 态重跑连接：必须先断干净旧 socket 再重取，
+    // 否则旧凭据/旧接口的读取循环还会留着。注意这里不清空 vin 与网络监听。
+    if (this.state === 'online') {
+      xpLog('mqtt', 'reconnect: disconnect previous socket first');
+      await this.closeSocket();
+    }
+    this.setState('connecting');
     // 每次重连都会重新注册两个原生监听；不先撤掉旧的，回前台重连几次后同一条
     // 下行会被处理多遍（状态合并重复、pending 被同一 msg_ref 命中两次）。
     for (const u of this.unsubs) u();
@@ -120,6 +210,7 @@ class CarLink {
           if (e.id !== CONNECTION_ID) return;
           this.setState('offline', e.reason);
           this.failAllPending('连接断开');
+          this.scheduleBackoffReconnect('disconnect');
         }),
       );
 
@@ -135,42 +226,64 @@ class CarLink {
       if (rc !== 0) {
         xpLog('mqtt', `connect refused rc=${rc}`, 'w');
         this.setState('offline', `broker 拒绝连接（返回码 ${rc}）`);
+        this.finishConnectWithRetry('refused');
         return;
       }
       xpLog('mqtt', `connect ok host=${host} topics=${Object.keys(topics).length}`);
+      this.reconnectAttempt = 0;
       this.setState('online');
+      if (this.pendingNetworkReconnect) {
+        this.pendingNetworkReconnect = false;
+        this.scheduleReconnect(NETWORK_SWITCH_DEBOUNCE_MS, 'deferred-network-switch');
+        return;
+      }
       await this.readStatus().catch(() => {
         // 首次读状态失败不阻断连接；用户可手动刷新
       });
     } catch (e) {
       this.setState('offline', e instanceof Error ? e.message : String(e));
+      this.finishConnectWithRetry('connect-error');
     }
   }
 
+  private finishConnectWithRetry(reason: string) {
+    if (this.pendingNetworkReconnect) {
+      this.pendingNetworkReconnect = false;
+      this.reconnectAttempt = 0;
+      this.scheduleReconnect(NETWORK_SWITCH_DEBOUNCE_MS, 'deferred-network-switch');
+      return;
+    }
+    this.scheduleBackoffReconnect(reason);
+  }
+
   async disconnect(): Promise<void> {
-    for (const u of this.unsubs) u();
-    this.unsubs = [];
-    await native.mqttDisconnect(CONNECTION_ID).catch(() => {});
+    this.clearReconnectTimer();
+    this.pendingNetworkReconnect = false;
+    this.reconnectAttempt = 0;
+    this.vin = '';
+    this.netUnsub?.();
+    this.netUnsub = null;
+    await this.closeSocket();
     this.setState('idle');
   }
 
   /**
-   * 回到前台时补状态。
+   * 回到前台或急需发云端指令时补状态。
    *
-   * 两件事都必须做：系统会在 App 进后台后掐断这条 TLS 长连接（实测断开原因是
-   * socket 层 `software caused connection abort`），后台期间没有任何重连时机；
-   * 即使连接侥幸没断，界面上的车况也是进后台前的旧值——实测「显示已上锁、车其实
-   * 没锁」正是这样来的，用户据此判断车已锁好。所以断线就补连（连接里带一次读状态），
-   * 没断就补读一次状态。
+   * 即使已有断线退避与切网监听，回前台仍保留立刻补连与补读状态：
+   * 1. 若当前正在长退避（例如 30 s），回前台立刻清退避重连，不必让用户等；
+   * 2. 即使连接没断，界面上的车况也可能是进后台前的旧值，补读一次确保界面最新。
    */
   async resume(): Promise<void> {
-    if (!this.vin) return;
+    if (!this.vin || sessionStore.current.kind !== 'active') return;
     if (this.state === 'online') {
       await this.readStatus().catch(() => {});
       return;
     }
     if (this.state === 'connecting') return;
-    xpLog('mqtt', `resume after foreground, previous=${this.state}`);
+    this.clearReconnectTimer();
+    this.reconnectAttempt = 0;
+    xpLog('mqtt', `resume, previous=${this.state}`);
     await this.connect(this.vin, Number(this.uid));
   }
 

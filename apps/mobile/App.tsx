@@ -131,6 +131,10 @@ function Shell() {
     bleLink.setCloudLockFallback(async () => {
       const def = COMMANDS.find((c) => c.id === 'door.lock');
       if (!def) return false;
+      // 云端闭锁发生在离车急需锁车的时刻：若 MQTT 正处于退避或离线，先立刻补连一次。
+      if (carLink.linkState !== 'online') {
+        await carLink.resume().catch(() => {});
+      }
       const r = await carLink.send(def);
       return r.ok;
     });
@@ -164,7 +168,10 @@ function Shell() {
   }, [unsupported]);
 
   useEffect(() => {
-    if (session.kind !== 'active') return;
+    if (session.kind !== 'active') {
+      void carLink.disconnect();
+      return;
+    }
     let alive = true;
     (async () => {
       try {

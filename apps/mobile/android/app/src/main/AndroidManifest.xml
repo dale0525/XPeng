@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 监听 WiFi / 移动数据切换，自动重连 MQTT（普通权限、安装即授予） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 应用内更新：下载完 APK 后要拉起系统安装器 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />

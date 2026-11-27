@@ -1,5 +1,9 @@
 package com.logiconsole.xpcarinfo.bridge
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -7,7 +11,6 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
-import android.util.Log
 import com.logiconsole.xpcarinfo.net.MqttClient
 import com.logiconsole.xpcarinfo.net.XpengHttp
 import java.util.concurrent.ConcurrentHashMap
@@ -24,8 +27,80 @@ class XpengNetModule(private val ctx: ReactApplicationContext) :
 
     private val io = Executors.newCachedThreadPool()
     private val clients = ConcurrentHashMap<String, MqttClient>()
+    private val networkLock = Any()
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var currentNetworkHandle: Long? = null
 
     override fun getName() = "XpengNet"
+
+    override fun initialize() {
+        super.initialize()
+        XpengLog.init(ctx)
+        registerNetworkCallback()
+    }
+
+    override fun invalidate() {
+        unregisterNetworkCallback()
+        clients.values.toList().forEach { runCatching { it.disconnect() } }
+        clients.clear()
+        super.invalidate()
+    }
+
+    /**
+     * 监听系统默认网络变化（WiFi ↔ 移动数据切换、断网与恢复）。
+     *
+     * 仅靠 `AppState` 切前台重连不够：人在前台切网时 `AppState` 不会变，旧 socket
+     * 报 IOException 后会一直卡在离线横幅；后台切网同样不会自愈。用
+     * `registerDefaultNetworkCallback` 把系统切网直接透传给 JS，触发立刻重连。
+     */
+    private fun registerNetworkCallback() {
+        val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val handle = network.networkHandle
+                val switched: Boolean
+                synchronized(networkLock) {
+                    val prev = currentNetworkHandle
+                    if (prev == handle) return
+                    currentNetworkHandle = handle
+                    switched = prev != null
+                }
+                XpengLog.log("net", "network available handle=$handle switched=$switched")
+                emitNetworkChange(available = true, switched = switched)
+            }
+
+            override fun onLost(network: Network) {
+                val handle = network.networkHandle
+                synchronized(networkLock) {
+                    if (currentNetworkHandle != handle) return
+                    currentNetworkHandle = null
+                }
+                XpengLog.log("net", "network lost handle=$handle")
+                emitNetworkChange(available = false, switched = false)
+            }
+        }
+        try {
+            synchronized(networkLock) {
+                currentNetworkHandle = cm.activeNetwork?.networkHandle
+            }
+            cm.registerDefaultNetworkCallback(callback)
+            connectivityManager = cm
+            networkCallback = callback
+        } catch (e: Throwable) {
+            Log.w("XpengNet", "registerDefaultNetworkCallback 失败: ${e.message}")
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val cm = connectivityManager
+        val cb = networkCallback
+        connectivityManager = null
+        networkCallback = null
+        if (cm != null && cb != null) {
+            runCatching { cm.unregisterNetworkCallback(cb) }
+        }
+    }
 
     /** `NativeEventEmitter` 要求模块提供这两个方法，否则构造 emitter 时报警告（开发版会弹出黄色 LogBox 条）。 */
     @ReactMethod
@@ -102,9 +177,11 @@ class XpengNetModule(private val ctx: ReactApplicationContext) :
                 clients[id] = client
                 val rc = client.connect()
                 if (rc == 0) client.subscribe(topics)
+                XpengLog.log("mqtt", "connect id=$id host=$host rc=$rc")
                 promise.resolve(rc)
             } catch (e: Throwable) {
                 android.util.Log.e("XpengNet", "mqttConnect 失败", e)
+                XpengLog.log("mqtt", "connect failed id=$id err=${e.message ?: e.javaClass.simpleName}")
                 promise.reject("E_MQTT", e.message ?: e.javaClass.simpleName, e)
             }
         }
@@ -226,9 +303,18 @@ class XpengNetModule(private val ctx: ReactApplicationContext) :
     }
 
     private fun emitDisconnect(id: String, reason: String) {
+        XpengLog.log("mqtt", "disconnect id=$id reason=$reason")
         val map: WritableMap = Arguments.createMap()
         map.putString("id", id)
         map.putString("reason", reason)
         ctx.emitDeviceEvent("xpeng-mqtt-disconnect", map)
+    }
+
+    private fun emitNetworkChange(available: Boolean, switched: Boolean) {
+        if (!ctx.hasActiveReactInstance()) return
+        val map: WritableMap = Arguments.createMap()
+        map.putBoolean("available", available)
+        map.putBoolean("switched", switched)
+        ctx.emitDeviceEvent("xpeng-network-change", map)
     }
 }
